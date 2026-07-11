@@ -2216,11 +2216,22 @@ def ocr_extract():
             "candidates": candidates,
         }
 
+        # Bug 3: Compute low-confidence warning flag
+        # Trigger when median match_confidence across all rows is below 0.50
+        if candidates:
+            sorted_confs = sorted(c["match_confidence"] for c in candidates)
+            n = len(sorted_confs)
+            median_conf = sorted_confs[n // 2] if n % 2 else (sorted_confs[n // 2 - 1] + sorted_confs[n // 2]) / 2
+            low_confidence_warning = median_conf < 0.50
+        else:
+            low_confidence_warning = False
+
         return jsonify({
             "status": "preview",
             "candidates": candidates,
             "subject_options": subject_options,
             "overall_confidence": confidence,
+            "low_confidence_warning": low_confidence_warning,
         })
         
     except Exception as e:

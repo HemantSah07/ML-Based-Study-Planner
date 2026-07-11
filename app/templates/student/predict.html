@@ -358,7 +358,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     return `<option value="${opt.id}" ${selected}>${opt.name}</option>`;
                 }).join('');
 
-                results.innerHTML = `
+                // Bug 3: Low-confidence subject mismatch warning banner
+                const lowConfWarn = data.low_confidence_warning === true
+                    ? `<div class="alert alert-warning d-flex align-items-start gap-2 mb-3 py-3 px-3" role="alert" style="border-left:4px solid #f59e0b;">
+                        <i class="fas fa-exclamation-triangle text-warning mt-1" style="font-size:1.1rem;flex-shrink:0;"></i>
+                        <div>
+                            <strong class="d-block mb-1">Low Subject Match Confidence</strong>
+                            Most OCR-extracted subject names could <strong>not be reliably matched</strong> to your profile subjects (median confidence &lt; 50%).
+                            This typically means the marksheet subjects don't match your registered subjects, or the OCR scan quality is poor.
+                            <strong>Please verify and correct each subject selection manually before saving.</strong>
+                        </div>
+                      </div>`
+                    : '';
+
+                results.innerHTML = lowConfWarn + `
                     <div class="table-responsive">
                         <table class="table align-middle">
                             <thead>

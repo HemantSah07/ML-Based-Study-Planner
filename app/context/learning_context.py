@@ -606,7 +606,7 @@ class StudentLearningContext:
                         topics.append({
                             "id": t.id,
                             "name": t.name,
-                            "chapter_name": ch.name,
+                            "chapter_name": ch.name if ch.name.startswith('Unit') else f"Unit {ch.chapter_number}: {ch.name}",
                             "subject_name": subj_name,
                             "subject_id": ch.subject_id,
                         })
