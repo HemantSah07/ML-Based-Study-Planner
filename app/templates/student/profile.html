@@ -159,9 +159,16 @@
                 <h6 class="fw-bold text-white mb-3"><i class="fas fa-chart-bar text-primary me-2"></i> Academic Info</h6>
                 <div class="row g-3 mb-4">
                     <div class="col-md-6">
-                        <label class="form-label text-muted small" id="gradeLabel">Previous Grade %</label>
-                        <input type="number" name="cumulative_gpa" id="gradeInput" class="form-control" value="{{ profile.cumulative_gpa }}" step="0.01" min="0" max="100" required>
-                        <div class="form-text text-muted small" id="gradeHint">Enter your most recent overall grade percentage.</div>
+                        <label class="form-label text-muted small" id="gradeLabel">Previous GPA <span class="text-danger">*</span> <span class="text-muted">(0 – 4 scale)</span></label>
+                        <input type="number" name="cumulative_gpa" id="gradeInput" class="form-control" value="{{ profile.cumulative_gpa }}" step="0.01" min="0" max="4" required>
+                        <div class="form-text text-muted small" id="gradeHint">
+                            Enter your GPA (0.00 – 4.00). &nbsp;<span id="gpaPercent" class="text-primary fw-semibold">{% if profile.cumulative_gpa %}≈ {{ "%.1f"|format(profile.cumulative_gpa * 25) }}%{% endif %}</span>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label text-muted small">Attendance % <span class="text-danger">*</span></label>
+                        <input type="number" name="attendance_pct" class="form-control" value="{{ profile.attendance_pct or 85 }}" step="1" min="0" max="100" required>
+                        <div class="form-text text-muted small">Your actual class attendance percentage (0–100).</div>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label text-muted small">Commute Buffer (minutes)</label>
@@ -514,5 +521,18 @@ document.addEventListener("DOMContentLoaded", function() {
         }
     }
 });
+// ── Live GPA → % conversion hint ─────────────────────────────────────────────
+const gradeInputEl  = document.getElementById('gradeInput');
+const gpaPercentEl  = document.getElementById('gpaPercent');
+if (gradeInputEl && gpaPercentEl) {
+    gradeInputEl.addEventListener('input', function() {
+        const v = parseFloat(this.value);
+        if (!isNaN(v) && v >= 0 && v <= 4) {
+            gpaPercentEl.textContent = '≈ ' + (v * 25).toFixed(1) + '%';
+        } else {
+            gpaPercentEl.textContent = '';
+        }
+    });
+}
 </script>
 {% endblock %}

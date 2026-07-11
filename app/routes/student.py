@@ -1915,12 +1915,15 @@ def predict():
                 flash("Select at least one profile subject.", "warning")
                 return render_predict()
 
-            profile_grade = float(
+            # Convert GPA (0–4 scale) to percentage (0–100) for ML model
+            raw_gpa = float(
                 profile.cumulative_gpa
                 if profile and profile.cumulative_gpa is not None
                 else (profile.prior_academic_score if profile and profile.prior_academic_score else 0.0)
             )
-            attendance = 90.0
+            # Values ≤ 4.0 are on GPA scale; values > 4 are already percentages (legacy data)
+            profile_grade = raw_gpa * 25 if raw_gpa <= 4.0 else raw_gpa
+            attendance = float(profile.attendance_pct if profile and profile.attendance_pct is not None else 85.0)
             target_weekly_hours = float(profile.target_weekly_hours if profile and profile.target_weekly_hours else 14.0)
             per_subject_weekly_hours = max(1.0, target_weekly_hours / max(1, len(student_subjects)))
             model = load_ml_model("random_forest")
@@ -3078,6 +3081,7 @@ def profile():
             "semester":          raw_semester,
             "cumulative_gpa":    request.form.get("cumulative_gpa", 0.0),
             "commute_buffer_minutes": request.form.get("commute_buffer_minutes", 0),
+            "attendance_pct":    float(request.form.get("attendance_pct") or 85.0),
             "explanation_level": request.form.get("explanation_level", "Intermediate"),
             "study_goal":        request.form.get("study_goal", "Improve Grades"),
             "preferred_language":request.form.get("preferred_language", "English"),

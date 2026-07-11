@@ -1016,7 +1016,7 @@ class StudentLearningContext:
             "program", "semester", "timezone", "explanation_level",
             "study_goal", "preferred_language", "profile_pic",
         ]
-        float_fields = ["cumulative_gpa"]
+        float_fields = ["cumulative_gpa", "attendance_pct"]
         int_fields = ["commute_buffer_minutes"]
 
         for field in str_fields:

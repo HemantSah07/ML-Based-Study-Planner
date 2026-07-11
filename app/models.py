@@ -51,6 +51,7 @@ class StudentProfile(db.Model):
     profile_pic = db.Column(db.String(200))
     target_weekly_hours = db.Column(db.Float, default=20.0)
     commute_buffer_minutes = db.Column(db.Integer, default=0)
+    attendance_pct = db.Column(db.Float, default=85.0)  # Student's actual attendance percentage (0–100)
 
 class StudentSubject(db.Model):
     __tablename__ = "student_subjects"

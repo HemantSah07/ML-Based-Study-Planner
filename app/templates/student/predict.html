@@ -137,19 +137,24 @@
                 <div class="col-md-3">
                     <div class="p-3 rounded border border-secondary h-100">
                         <div class="text-muted small">Attendance %</div>
-                        <div class="fw-bold subject-risk-name">Auto from profile/logs</div>
+                        <div class="fw-bold subject-risk-name">
+                            {% if profile and profile.attendance_pct is not none %}
+                                {{ profile.attendance_pct|round(0)|int }}%
+                            {% else %}
+                                <span class="text-warning">Not set</span>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
                 <div class="col-md-3">
                     <div class="p-3 rounded border border-secondary h-100">
-                        <div class="text-muted small">Profile Grade %</div>
+                        <div class="text-muted small">Profile GPA</div>
                         <div class="fw-bold subject-risk-name">
                             {% if profile and profile.cumulative_gpa is not none %}
-                                {{ profile.cumulative_gpa }}%
-                            {% elif profile and profile.prior_academic_score %}
-                                {{ "%.1f"|format(profile.prior_academic_score) }}%
+                                {{ "%.2f"|format(profile.cumulative_gpa) }} GPA
+                                <span class="text-muted small">(≈{{ "%.1f"|format(profile.cumulative_gpa * 25 if profile.cumulative_gpa <= 4.0 else profile.cumulative_gpa) }}%)</span>
                             {% else %}
-                                Not set
+                                <span class="text-warning">Not set</span>
                             {% endif %}
                         </div>
                     </div>
