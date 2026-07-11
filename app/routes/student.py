@@ -730,6 +730,8 @@ def dashboard():
     available_study_hours = round(get_available_study_hours_total(current_user.id), 1)
 
     return render_template("student/dashboard.html",
+                           user=current_user,
+                           profile=ctx.profile,
                            today_idx=today_idx,
                            logged_hours=logged_hours,
                            log_analysis=log_analysis,
@@ -737,7 +739,14 @@ def dashboard():
                            accomplishments=accomplishments[:4],
                            recommended_topics=recommended_topics,
                            commitment_summary=commitment_summary,
-                           available_study_hours=available_study_hours)
+                           available_study_hours=available_study_hours,
+                           chart_labels=chart_labels,
+                           chart_data=chart_data,
+                           total_scheduled=total_scheduled,
+                           risk_data=[high_risk, medium_risk, low_risk],
+                           today_slots=today_slots,
+                           recommended_review_bookmarks=recommended_review_bookmarks,
+                           recent_study_history=recent_study_history)
 
 @student_bp.route("/evaluation", methods=["GET", "POST"])
 @login_required
