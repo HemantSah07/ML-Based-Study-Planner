@@ -6,7 +6,8 @@ from app.models import (Prediction, StudyLog, Goal, Subject, AssessmentQuestion,
                         Chapter, Topic, Subtopic, LearningMaterial, Flashcard, QuizScore, 
                         StudentNote, LearningProgress, AvailabilitySlot, AIStudyMaterial,
                         SubjectPerformanceHistory, StudentSubject,
-                        ReviewedChapter, ChapterQuizScore, BookmarkedChapter, ChapterNote, PastQuestion)
+                        ReviewedChapter, ChapterQuizScore, BookmarkedChapter, ChapterNote, PastQuestion,
+                        StudentSeenQuestion, TopicSeenQuestion, ChapterQuizResult)
 from app import db
 from datetime import date, datetime, time, timedelta
 import joblib
@@ -1445,6 +1446,22 @@ def generate_assessment_questions_for_subject(subject_id):
                 ch_map[t.name.lower()] = (ch.id, t.id)
                 ch_map[ch.name.lower()] = (ch.id, t.id)
                 
+    # 1 & 2: Fetch previously answered questions to avoid repetition
+    seen_qs_text = []
+    if current_user and current_user.is_authenticated:
+        seen_q_ids = [sq.question_id for sq in StudentSeenQuestion.query.filter_by(student_id=current_user.id).all()]
+        if seen_q_ids:
+            seen_qs = AssessmentQuestion.query.filter(
+                AssessmentQuestion.id.in_(seen_q_ids),
+                AssessmentQuestion.subject_id == subject_id
+            ).all()
+            seen_qs_text = [q.question_text for q in seen_qs]
+            
+    exclusion_text = ""
+    if seen_qs_text:
+        # Just send a subset if it's too large to save tokens
+        exclusion_text = "\nDo not repeat any of these questions:\n" + "\n".join(f"- {q}" for q in seen_qs_text[-50:])
+
     prompt = (
         f"Generate exactly 15 high-quality, distinct multiple-choice questions covering the core syllabus topics of the subject '{subject.name}' "
         f"for a student in '{subject.level_of_study}' under the '{subject.program or 'General'}' program.\n"
@@ -1454,30 +1471,40 @@ def generate_assessment_questions_for_subject(subject_id):
         "1. Generate exactly 5 'easy', 5 'medium', and 5 'hard' questions.\n"
         "2. Each question must have 4 options (A, B, C, D) and one correct answer.\n"
         "3. Provide distinct, subject-relevant, non-repetitive questions. Do NOT repeat classic boilerplate questions.\n"
-        "4. Map each question to a chapter number and topic name from the list above if possible.\n\n"
-        "Output the result strictly in valid JSON format matching the schema:\n"
-        "[\n"
-        "  {\n"
-        '    "q": "Question text?",\n'
-        '    "a": "Option A text",\n'
-        '    "b": "Option B text",\n'
-        '    "c": "Option C text",\n'
-        '    "d": "Option D text",\n'
-        '    "ans": "A",\n'
-        '    "diff": "easy",\n'
-        '    "type": "conceptual",\n'
-        '    "ch_num": 1,\n'
-        '    "topic_name": "Fundamentals"\n'
-        "  },\n"
-        "  ...\n"
-        "]\n"
-        "Do not write any markdown code blocks or explanations outside the JSON array. Output raw JSON only."
+        "4. Map each question to a chapter number and topic name from the list above if possible.\n"
+        f"{exclusion_text}"
     )
     
-    system_instruction = "You are a professional educational assessment designer. Generate exactly 15 MCQs in a valid JSON array format, no preamble."
+    system_instruction = "You are an expert examiner for the National Examination Board (NEB) of Nepal."
+    
+    response_schema = {
+        "type": "ARRAY",
+        "items": {
+            "type": "OBJECT",
+            "properties": {
+                "q": {"type": "STRING", "description": "Question text"},
+                "a": {"type": "STRING"},
+                "b": {"type": "STRING"},
+                "c": {"type": "STRING"},
+                "d": {"type": "STRING"},
+                "ans": {"type": "STRING", "description": "Correct option: A, B, C, or D"},
+                "diff": {"type": "STRING", "description": "easy, medium, or hard"},
+                "type": {"type": "STRING"},
+                "ch_num": {"type": "INTEGER"},
+                "topic_name": {"type": "STRING"},
+                "explanation": {"type": "STRING", "description": "Explanation of the correct answer"}
+            },
+            "required": ["q", "a", "b", "c", "d", "ans", "diff", "explanation"]
+        }
+    }
     
     try:
-        response_text = ai_service.generate_content(prompt, system_instruction=system_instruction)
+        response_text = ai_service.generate_content(
+            prompt, 
+            system_instruction=system_instruction,
+            response_mime_type="application/json",
+            response_schema=response_schema
+        )
         questions_data = parse_json_safely(response_text)
     except Exception as e:
         print(f"Error calling AI / parsing JSON: {e}")
@@ -3660,45 +3687,138 @@ def topic_notes(topic_id):
 @student_bp.route("/study/api/topic/<int:topic_id>/generate-quiz", methods=["GET"])
 @login_required
 def generate_chapter_quiz(topic_id):
+    import random
     topic = Topic.query.get_or_404(topic_id)
     material = LearningMaterial.query.filter_by(topic_id=topic.id).first()
     content_context = material.detailed_explanation if material else topic.name
-    
-    prompt = (
-        f"Generate a short 5-question multiple choice quiz testing understanding of the topic '{topic.name}' "
-        f"for a student at '{topic.chapter.subject.level_of_study}' level.\n"
-        f"Use the following textbook content as context:\n{content_context}\n\n"
-        "Output the result strictly in valid JSON format matching the schema:\n"
-        "[\n"
-        "  {\n"
-        '    "q": "1. Question text?",\n'
-        '    "a": "Option A text",\n'
-        '    "b": "Option B text",\n'
-        '    "c": "Option C text",\n'
-        '    "d": "Option D text",\n'
-        '    "ans": "A",\n'
-        '    "exp": "Detailed explanation of why A is correct."\n'
-        "  },\n"
-        "  ...\n"
-        "]\n"
-        "Generate exactly 5 questions. Do not include markdown blocks or HTML wrapping, just the raw JSON array."
-    )
-    
-    system_instruction = "You are a professional quiz generator. Output exactly 5 multiple choice questions in a valid JSON array format, no preamble."
-    
+
+    # ── GAP 1: Fetch ALL historically seen question texts for this student+topic ──
+    seen_records = TopicSeenQuestion.query.filter_by(
+        student_id=current_user.id, topic_id=topic_id
+    ).order_by(TopicSeenQuestion.seen_at.desc()).all()
+    seen_texts = [r.question_text for r in seen_records]
+
+    exclusion_block = ""
+    if seen_texts:
+        # Cap at 80 to keep prompt size manageable
+        exclusion_sample = seen_texts[:80]
+        exclusion_block = (
+            "\n\nDo not repeat any of these previously asked questions:\n"
+            + "\n".join(f"- {q}" for q in exclusion_sample)
+        )
+
+    system_instruction = "You are an expert examiner for the National Examination Board (NEB) of Nepal."
+
+    response_schema = {
+        "type": "ARRAY",
+        "items": {
+            "type": "OBJECT",
+            "properties": {
+                "q":   {"type": "STRING", "description": "Question text"},
+                "a":   {"type": "STRING"},
+                "b":   {"type": "STRING"},
+                "c":   {"type": "STRING"},
+                "d":   {"type": "STRING"},
+                "ans": {"type": "STRING", "description": "Correct option: A, B, C, or D"},
+                "exp": {"type": "STRING", "description": "Explanation of why the answer is correct"}
+            },
+            "required": ["q", "a", "b", "c", "d", "ans", "exp"]
+        }
+    }
+
+    def build_prompt(num_questions=5):
+        return (
+            f"Generate exactly {num_questions} unique, distinct multiple-choice questions "
+            f"testing deep understanding of the topic '{topic.name}' "
+            f"for a student at '{topic.chapter.subject.level_of_study}' level.\n"
+            f"Use the following textbook content as context:\n{content_context[:3000]}\n"
+            "Each question must have 4 options (A, B, C, D) and one correct answer with a clear explanation."
+            f"{exclusion_block}"
+        )
+
+    quiz_data = None
+    api_error = None
+
+    # ── Attempt 1: Full prompt with structured output ──────────────────────────
     try:
-        response_text = ai_service.generate_content(prompt, system_instruction=system_instruction)
+        response_text = ai_service.generate_content(
+            build_prompt(5),
+            system_instruction=system_instruction,
+            response_mime_type="application/json",
+            response_schema=response_schema
+        )
         quiz_data = parse_json_safely(response_text)
-        return jsonify({"status": "success", "quiz": quiz_data})
+        if not isinstance(quiz_data, list) or len(quiz_data) < 1:
+            raise ValueError("Empty or invalid response from AI")
     except Exception as e:
-        fallback_quiz = [
-            {"q": f"Which concept is central to {topic.name}?", "a": "First Option", "b": "Core Concept", "c": "Third Option", "d": "None of these", "ans": "B", "exp": "The topic explanation highlights core concepts as key."},
-            {"q": f"True or False: {topic.name} is key to the overall curriculum.", "a": "True", "b": "False", "c": "Not determinable", "d": "Partially True", "ans": "A", "exp": "The curriculum specifies this topic is fundamental."},
-            {"q": "How does this topic relate to practical application?", "a": "Only theoretical", "b": "It drives Nepalese context NEB problems", "c": "It is purely abstract", "d": "No relation", "ans": "B", "exp": "Applications apply to context problems."},
-            {"q": "What is the primary learning objective of this chapter?", "a": "To memorise formulas", "b": "To master the basic fundamentals", "c": "To skip exam preparation", "d": "To write empty codes", "ans": "B", "exp": "Learning objectives focus on mastering fundamentals."},
-            {"q": "Under standard difficulty levels, what is the best strategy?", "a": "Daily practice & active recall", "b": "Cramming the night before", "c": "Ignoring class logs", "d": "Leaving sheets empty", "ans": "A", "exp": "Daily active recall and revision is the recommended study habit."}
+        api_error = str(e)
+        logger.warning(f"[chapter_quiz] Primary AI attempt failed for topic {topic_id}: {e}")
+
+    # ── Attempt 2: Retry with shorter, simpler prompt (no exclusion list) ─────
+    if quiz_data is None:
+        try:
+            simple_prompt = (
+                f"Generate exactly 5 multiple-choice questions on the topic '{topic.name}'. "
+                "Each must have options A, B, C, D and one correct answer with explanation."
+            )
+            response_text = ai_service.generate_content(
+                simple_prompt,
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+                response_schema=response_schema
+            )
+            quiz_data = parse_json_safely(response_text)
+            if not isinstance(quiz_data, list) or len(quiz_data) < 1:
+                raise ValueError("Empty response on retry")
+            logger.info(f"[chapter_quiz] Retry succeeded for topic {topic_id}")
+        except Exception as e2:
+            api_error = str(e2)
+            logger.warning(f"[chapter_quiz] Retry AI attempt also failed for topic {topic_id}: {e2}")
+
+    # ── GAP 2: Rotating fallback pool (4 sets, randomly selected) ─────────────
+    if quiz_data is None:
+        topic_name = topic.name
+        FALLBACK_POOLS = [
+            [
+                {"q": f"What is the primary objective of studying '{topic_name}'?", "a": "Memorisation only", "b": "Conceptual understanding and application", "c": "Test preparation alone", "d": "None of the above", "ans": "B", "exp": "Education focuses on deep conceptual understanding so students can apply knowledge."},
+                {"q": f"Which approach best helps mastery of '{topic_name}'?", "a": "Daily revision with active recall", "b": "Passive reading only", "c": "Skipping difficult sections", "d": "Memorising answers without understanding", "ans": "A", "exp": "Active recall and spaced repetition are proven learning strategies."},
+                {"q": f"How does '{topic_name}' relate to other topics in the curriculum?", "a": "It is completely isolated", "b": "It builds foundational skills used across the subject", "c": "It is optional content", "d": "It has no practical relevance", "ans": "B", "exp": "Topics in a curriculum are interconnected; foundational topics support advanced learning."},
+                {"q": "Which study technique is most effective for retaining new concepts?", "a": "Cramming one day before exams", "b": "Distributed practice over several days", "c": "Reading once and not revisiting", "d": "Avoiding practice problems", "ans": "B", "exp": "Research shows spaced/distributed practice leads to better long-term retention."},
+                {"q": "What role does self-testing play in learning?", "a": "It wastes study time", "b": "It only helps with multiple-choice exams", "c": "It strengthens memory retrieval pathways", "d": "It is less effective than re-reading", "ans": "C", "exp": "Self-testing (retrieval practice) is one of the most effective learning strategies known to science."},
+            ],
+            [
+                {"q": f"Why is conceptual clarity important when learning '{topic_name}'?", "a": "It allows rote memorisation to work faster", "b": "It enables problem-solving across varied question types", "c": "It is less important than memorising examples", "d": "It only matters in theoretical subjects", "ans": "B", "exp": "Conceptual clarity allows transfer of knowledge to new problems."},
+                {"q": "What does 'active learning' mean in a study context?", "a": "Attending all classes without taking notes", "b": "Engaging with material through practice, questions and discussion", "c": "Listening passively to lectures", "d": "Highlighting textbook content only", "ans": "B", "exp": "Active learning involves engaging with the content, not passive consumption."},
+                {"q": "Which is a sign of strong subject mastery?", "a": "Reciting definitions without error", "b": "Explaining concepts in your own words and solving novel problems", "c": "Scoring high on first attempts only", "d": "Avoiding topics you find difficult", "ans": "B", "exp": "True mastery means being able to explain and apply concepts flexibly."},
+                {"q": "How should a student approach topics they find difficult?", "a": "Skip them and focus on easier content", "b": "Ask for help and practise more frequently", "c": "Read them quickly and move on", "d": "Only revisit them the night before exams", "ans": "B", "exp": "Consistent practice and seeking help when stuck are key strategies for improving weak areas."},
+                {"q": "What is the benefit of reviewing past mistakes in quizzes?", "a": "It is discouraging and should be avoided", "b": "It confirms what you already know", "c": "It identifies specific knowledge gaps and corrects misconceptions", "d": "It only helps if you scored very poorly", "ans": "C", "exp": "Analysing errors directs future study effort to the areas that need it most."},
+            ],
+            [
+                {"q": f"What makes a question on '{topic_name}' 'hard' difficulty?", "a": "It uses longer sentences", "b": "It requires integrating multiple concepts and deeper analysis", "c": "It has more answer options", "d": "Hard questions are the same as easy, just worded differently", "ans": "B", "exp": "Higher-order questions require synthesis of ideas, not just recall."},
+                {"q": "How does feedback after a quiz improve learning?", "a": "It is only useful for the teacher", "b": "It provides no learning benefit", "c": "It helps the student identify and correct misunderstandings immediately", "d": "It only matters if the student fails", "ans": "C", "exp": "Immediate corrective feedback accelerates learning by catching errors early."},
+                {"q": "What is the purpose of explanation fields in quiz answers?", "a": "To add extra text to the response", "b": "To help students understand why an answer is correct or incorrect", "c": "To make questions look more complex", "d": "To fill space", "ans": "B", "exp": "Explanations reinforce correct understanding and help learners avoid repeating mistakes."},
+                {"q": "Which practice best prepares a student for NEB exams?", "a": "Completing only objective-type questions", "b": "Practising diverse question types including long-answer and application", "c": "Focusing only on model questions from one year", "d": "Memorising mark schemes without understanding", "ans": "B", "exp": "NEB exams include diverse question formats, so varied practice is essential."},
+                {"q": "Why should a student track their quiz history?", "a": "For competitive comparison with classmates", "b": "To monitor improvement over time and target weak areas", "c": "It has no practical value", "d": "Only teachers benefit from tracking results", "ans": "B", "exp": "Tracking performance helps personalise study plans and measure genuine improvement."},
+            ],
+            [
+                {"q": f"When you encounter an unfamiliar problem related to '{topic_name}', what should you do first?", "a": "Guess and move on", "b": "Identify which concept or formula applies, then work methodically", "c": "Look up the exact answer without trying", "d": "Skip it entirely", "ans": "B", "exp": "Methodical problem-solving begins with identifying the relevant principle."},
+                {"q": "What does spaced repetition help with?", "a": "Learning multiple subjects simultaneously without breaks", "b": "Moving information from short-term to long-term memory", "c": "Avoiding the need to study difficult topics", "d": "Completing homework faster", "ans": "B", "exp": "Spaced repetition leverages the spacing effect to improve long-term retention."},
+                {"q": "Why is interleaving different topics during study sessions effective?", "a": "It is not effective; blocked practice is always better", "b": "It forces the brain to distinguish between concepts, improving discrimination", "c": "It reduces the total study time needed", "d": "It only works for mathematics", "ans": "B", "exp": "Interleaving increases difficulty in a productive way, leading to better long-term learning."},
+                {"q": "What is the role of prior knowledge when learning a new topic?", "a": "Prior knowledge is irrelevant to new learning", "b": "It can interfere with new concepts and should be ignored", "c": "It provides a framework to connect and organise new information", "d": "Only prior knowledge gained from textbooks counts", "ans": "C", "exp": "Prior knowledge provides cognitive scaffolding, making new information easier to integrate."},
+                {"q": "What does it mean to study 'deeply' rather than 'broadly'?", "a": "Covering the maximum number of topics in minimum time", "b": "Focusing on understanding relationships, causes and implications within fewer topics", "c": "Reading every page of every textbook", "d": "Only studying topics likely to appear in exams", "ans": "B", "exp": "Deep study prioritises comprehension and long-term understanding over surface-level coverage."},
+            ],
         ]
-        return jsonify({"status": "success", "quiz": fallback_quiz, "message": f"Fallback loaded due to: {str(e)}"})
+        quiz_data = random.choice(FALLBACK_POOLS)
+        logger.warning(f"[chapter_quiz] Using rotating fallback pool for topic {topic_id}")
+        return jsonify({
+            "status": "success",
+            "quiz": quiz_data,
+            "degraded": True,
+            "message": "Limited connectivity — showing a standard practice quiz. Personalisation will resume when the AI service is back."
+        })
+
+    return jsonify({"status": "success", "quiz": quiz_data, "degraded": False})
+
 
 
 @student_bp.route("/study/api/topic/<int:topic_id>/submit-quiz", methods=["POST"])
@@ -3709,11 +3829,54 @@ def submit_chapter_quiz(topic_id):
     total = request.form.get("total", type=int, default=5)
     if score is None:
         return jsonify({"status": "error", "message": "Missing score."}), 400
-        
+
+    # ── Persist overall score row (same as before) ─────────────────────────────
     quiz_score = ChapterQuizScore(
         student_id=current_user.id, topic_id=topic.id, score=score, total_questions=total
     )
     db.session.add(quiz_score)
+    db.session.flush()  # Get quiz_score.id before commit
+
+    # ── GAP 1 + Per-question tracking: parse individual results from client ─────
+    # The client sends JSON: questions=[{q, ans, selected, correct: bool}]
+    try:
+        questions_json = request.form.get("questions", "[]")
+        questions_data = json.loads(questions_json)
+    except Exception:
+        questions_data = []
+
+    if questions_data:
+        for item in questions_data:
+            q_text = item.get("q", "")
+            if not q_text:
+                continue
+
+            # Per-question result row
+            result_row = ChapterQuizResult(
+                quiz_score_id=quiz_score.id,
+                student_id=current_user.id,
+                topic_id=topic.id,
+                question_text=q_text,
+                selected_answer=item.get("selected", None),
+                correct_answer=item.get("ans", ""),
+                was_correct=bool(item.get("correct", False))
+            )
+            db.session.add(result_row)
+
+            # Permanent seen-question record so future quizzes exclude it
+            already_seen = TopicSeenQuestion.query.filter_by(
+                student_id=current_user.id,
+                topic_id=topic.id,
+                question_text=q_text
+            ).first()
+            if not already_seen:
+                seen_row = TopicSeenQuestion(
+                    student_id=current_user.id,
+                    topic_id=topic.id,
+                    question_text=q_text
+                )
+                db.session.add(seen_row)
+
     db.session.commit()
     return jsonify({"status": "success", "score": score, "total": total})
 

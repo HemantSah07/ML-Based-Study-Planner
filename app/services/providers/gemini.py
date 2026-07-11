@@ -24,14 +24,17 @@ class GeminiProvider(BaseAIProvider):
         initial_delay = kwargs.get("initial_delay", 1.0)
         model_name = kwargs.get("model", self.default_model)
         
-        # Extract system instruction if your orchestrator passes it down
+        # Extract config params from kwargs
         system_instruction = kwargs.get("system_instruction", None)
-        config = None
-        if system_instruction:
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=kwargs.get("temperature", 0.3)
-            )
+        response_mime_type = kwargs.get("response_mime_type", None)
+        response_schema = kwargs.get("response_schema", None)
+        
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=kwargs.get("temperature", 0.3),
+            response_mime_type=response_mime_type,
+            response_schema=response_schema
+        )
 
         delay = initial_delay
         for attempt in range(max_retries + 1):

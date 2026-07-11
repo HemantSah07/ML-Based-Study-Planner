@@ -260,6 +260,9 @@
                     <div class="spinner-border text-primary mb-3" role="status"></div>
                     <p class="text-muted small">Generating 5 personalized assessment questions using AI...</p>
                 </div>
+                <div id="quiz-degraded-banner" class="alert alert-warning d-none mb-3 small">
+                    <i class="fas fa-wifi me-1"></i>
+                </div>
                 <div id="chapter-quiz-content" class="d-none">
                     <!-- Questions will be injected here -->
                 </div>
@@ -949,6 +952,18 @@
             
             if (data.status === "success" && data.quiz && data.quiz.length > 0) {
                 currentChapterQuizQuestions = data.quiz;
+
+                // Show degraded banner if AI was unavailable
+                const degradedBanner = document.getElementById("quiz-degraded-banner");
+                if (degradedBanner) {
+                    if (data.degraded) {
+                        degradedBanner.classList.remove("d-none");
+                        degradedBanner.textContent = data.message || "Limited connectivity — showing a standard practice quiz.";
+                    } else {
+                        degradedBanner.classList.add("d-none");
+                    }
+                }
+
                 let html = "";
                 data.quiz.forEach((q, idx) => {
                     html += `
@@ -985,25 +1000,34 @@
     function submitChapterQuiz() {
         let correctCount = 0;
         const total = currentChapterQuizQuestions.length;
+        const questionResults = [];
         
         currentChapterQuizQuestions.forEach((q, idx) => {
             const selected = document.querySelector(`input[name="chapter_q_${idx}"]:checked`);
             const ans = selected ? selected.value : "";
-            
+            const isCorrect = (ans === q.ans);
+
             const expBox = document.getElementById(`cq-exp-${idx}`);
             if (expBox) {
                 expBox.classList.remove("d-none");
                 expBox.innerHTML = `<strong>Correct Answer: ${q.ans}</strong>. ${q.exp}`;
             }
             
-            if (ans === q.ans) {
-                correctCount++;
-            }
+            if (isCorrect) correctCount++;
+
+            // Collect per-question result for server persistence
+            questionResults.push({
+                q: q.q,
+                ans: q.ans,
+                selected: ans,
+                correct: isCorrect
+            });
         });
         
         const formData = new FormData();
         formData.append("score", correctCount);
         formData.append("total", total);
+        formData.append("questions", JSON.stringify(questionResults));
         
         fetch(`/student/study/api/topic/${currentQuizTopicId}/submit-quiz`, {
             method: "POST",
@@ -1014,7 +1038,7 @@
             if (data.status === "success") {
                 const submitBtn = document.getElementById("btn-submit-chapter-quiz");
                 submitBtn.disabled = true;
-                alert(`Quiz submitted successfully! Score: ${correctCount} / ${total}`);
+                alert(`Quiz submitted! Score: ${correctCount} / ${total}`);
             }
         });
     }

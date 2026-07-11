@@ -443,6 +443,40 @@ class ChapterQuizScore(db.Model):
 
     # Relationships
     topic = db.relationship('Topic')
+    results = db.relationship('ChapterQuizResult', back_populates='quiz_score', cascade='all, delete-orphan')
+
+
+class TopicSeenQuestion(db.Model):
+    """Permanently stores question texts the student has seen for a topic.
+    Used across sessions to prevent cross-attempt question repetition."""
+    __tablename__ = "topic_seen_questions"
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    topic_id = db.Column(db.Integer, db.ForeignKey('topics.id'), nullable=False)
+    question_text = db.Column(db.Text, nullable=False)
+    seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationships
+    topic = db.relationship('Topic')
+
+
+class ChapterQuizResult(db.Model):
+    """Per-question result row, linked to a ChapterQuizScore attempt.
+    Enables weak-topic analysis at the question level, not just overall score."""
+    __tablename__ = "chapter_quiz_results"
+    id = db.Column(db.Integer, primary_key=True)
+    quiz_score_id = db.Column(db.Integer, db.ForeignKey('chapter_quiz_scores.id'), nullable=False)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    topic_id = db.Column(db.Integer, db.ForeignKey('topics.id'), nullable=False)
+    question_text = db.Column(db.Text, nullable=False)
+    selected_answer = db.Column(db.String(1), nullable=True)   # A / B / C / D
+    correct_answer = db.Column(db.String(1), nullable=False)
+    was_correct = db.Column(db.Boolean, nullable=False, default=False)
+    answered_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationships
+    quiz_score = db.relationship('ChapterQuizScore', back_populates='results')
+    topic = db.relationship('Topic')
 
 
 class BookmarkedChapter(db.Model):
