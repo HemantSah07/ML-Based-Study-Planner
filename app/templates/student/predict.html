@@ -1,0 +1,436 @@
+{% extends 'base.html' %}
+{% block title %}ML Predictor{% endblock %}
+
+{% block content %}
+<div class="hero-banner mb-4">
+    <div class="position-relative" style="z-index: 1;">
+        <h1 class="page-title mb-2"><i class="fas fa-robot me-2 text-gradient"></i> ML Predictor Center</h1>
+        <p class="page-subtitle mb-0">Run Random Forest subject risk predictions from Assessment or uploaded marksheet scores.</p>
+    </div>
+</div>
+
+{% if not profile or not profile.study_level %}
+<div class="alert alert-warning text-center mb-4">
+    <i class="fas fa-exclamation-triangle me-2"></i>
+    Set your class level in <a href="{{ url_for('student.profile') }}" class="alert-link">Profile</a> before predicting risk.
+</div>
+{% endif %}
+
+<div class="eval-tabs-custom mb-4">
+    <button class="eval-tab-btn {% if not is_ocr %}active{% endif %}" id="predict-tab-btn" type="button" onclick="switchPredictTab('predict')">
+        <i class="fas fa-brain me-2"></i> Predict Risk
+    </button>
+    <button class="eval-tab-btn {% if is_ocr %}active{% endif %}" id="upload-tab-btn" type="button" onclick="switchPredictTab('upload')">
+        <i class="fas fa-file-upload me-2"></i> Upload Marksheet
+    </button>
+</div>
+
+{% if batch_results or skipped_subjects %}
+<div class="card card-light p-4 mb-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h5 class="text-gradient fw-bold mb-1"><i class="fas fa-table me-2"></i> Batch Prediction Results</h5>
+            <p class="text-muted small mb-0">Each successful subject was saved as its own database prediction row.</p>
+        </div>
+        <span class="planner-stat-pill"><i class="fas fa-tree text-gradient"></i> {{ model_used or 'Random Forest Classifier' }}</span>
+    </div>
+
+    {% if batch_results %}
+    <div class="table-responsive">
+        <table class="table align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Subject</th>
+                    <th>Risk Level</th>
+                    <th>Risk Percentage</th>
+                    <th>Performance Score Used</th>
+                    <th>Source</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in batch_results %}
+                <tr>
+                    <td class="fw-semibold">{{ result.subject }}</td>
+                    <td>
+                        <span class="badge {% if result.risk_level == 'Low' %}bg-success{% elif result.risk_level == 'Medium' %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                            {{ result.risk_level }}
+                        </span>
+                    </td>
+                    <td class="text-gradient fw-bold">{{ "%.1f"|format(result.risk_pct) }}%</td>
+                    <td>{{ "%.1f"|format(result.performance_score) }}%</td>
+                    <td class="text-muted small">{{ result.performance_source }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if skipped_subjects %}
+    <div class="alert alert-warning mt-3 mb-0">
+        {% for skipped in skipped_subjects %}
+        <div><i class="fas fa-info-circle me-1"></i>{{ skipped.reason }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<div id="predict-tab-content" class="{% if is_ocr %}d-none{% endif %}">
+    <div class="card card-light p-4 mb-4">
+        <h5 class="mb-1 text-gradient"><i class="fas fa-brain me-2"></i> Subject Risk Prediction</h5>
+        <p class="text-muted small mb-4">Select one or more active profile subjects. Subjects without Assessment or marksheet scores are skipped automatically.</p>
+
+        <form method="POST" action="{{ url_for('student.predict') }}" id="predict-form">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <h6 class="fw-bold mb-0"><i class="fas fa-book-open me-2 text-primary"></i> Profile Subjects</h6>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="select-all-subjects" {% if not eligible_subject_count %}disabled{% endif %}>
+                    <label class="form-check-label small text-muted" for="select-all-subjects">Select All Subjects</label>
+                </div>
+            </div>
+
+            <div class="row g-3 mb-4">
+                {% for item in subject_snapshots %}
+                {% set sub = item.subject %}
+                <div class="col-md-6 col-xl-4">
+                    <label class="subject-pick-card d-block h-100 p-3 rounded border border-secondary {% if not item.has_real_score %}opacity-75{% endif %}" for="subject{{ sub.id }}">
+                        <div class="d-flex gap-2 align-items-start">
+                            <input class="form-check-input mt-1 subject-checkbox" type="checkbox" name="subject_ids[]" value="{{ sub.id }}" id="subject{{ sub.id }}" {% if sub.id in selected_subject_ids and item.has_real_score %}checked{% endif %} {% if not item.has_real_score %}disabled{% endif %}>
+                            <div class="flex-grow-1">
+                                <div class="fw-bold subject-risk-name">{{ sub.name }}</div>
+                                <div class="d-flex flex-wrap gap-2 mt-2">
+                                    {% if item.has_real_score %}
+                                    <span class="badge bg-success">{{ "%.1f"|format(item.score) }}%</span>
+                                    <span class="badge {% if item.has_real_score %}bg-low{% else %}bg-medium{% endif %}">
+                                        {{ item.source_label }}
+                                    </span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">No score</span>
+                                    {% endif %}
+                                </div>
+                                {% if not item.has_real_score %}
+                                <div class="small mt-2" style="color: #991b1b;">
+                                    No assessment completed. Take {{ sub.name }} assessment first.
+                                </div>
+                                <a class="btn btn-outline-primary btn-sm mt-2" href="{{ url_for('student.assessment_start', subject_id=sub.id) }}">
+                                    Start {{ sub.name }} Assessment
+                                </a>
+                                {% endif %}
+                                <div class="text-muted mt-2" style="font-size: 0.75rem;">
+                                    Attendance, exam timing, study recency, and study hours are auto-pulled per subject.
+                                </div>
+                            </div>
+                        </div>
+                    </label>
+                </div>
+                {% else %}
+                <div class="col-12">
+                    <div class="alert alert-warning mb-0">
+                        No active subjects found. <a href="{{ url_for('student.manage_subjects') }}" class="alert-link">Add subjects</a> first.
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <div class="p-3 rounded border border-secondary h-100">
+                        <div class="text-muted small">Attendance %</div>
+                        <div class="fw-bold subject-risk-name">Auto from profile/logs</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="p-3 rounded border border-secondary h-100">
+                        <div class="text-muted small">Profile Grade %</div>
+                        <div class="fw-bold subject-risk-name">
+                            {% if profile and profile.cumulative_gpa is not none %}
+                                {{ profile.cumulative_gpa }}%
+                            {% elif profile and profile.prior_academic_score %}
+                                {{ "%.1f"|format(profile.prior_academic_score) }}%
+                            {% else %}
+                                Not set
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="p-3 rounded border border-secondary h-100">
+                        <div class="text-muted small">Study h/week</div>
+                        <div class="fw-bold subject-risk-name">Auto split</div>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="p-3 rounded border border-secondary h-100">
+                        <div class="text-muted small">Days to exam</div>
+                        <div class="fw-bold subject-risk-name">Exam table or 30</div>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="p-3 rounded border border-secondary h-100">
+                        <div class="text-muted small">Days since study</div>
+                        <div class="fw-bold subject-risk-name">Study log</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert mb-3 py-2 px-3" style="background: rgba(102,126,234,0.1); border: 1px solid rgba(102,126,234,0.3);">
+                <i class="fas fa-info-circle me-2 text-primary"></i>
+                <small class="text-muted">Only subjects with real Assessment or marksheet scores are run. Missing-score subjects appear as skipped notes.</small>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 py-3 fw-bold" id="predict-submit" {% if not eligible_subject_count %}disabled{% endif %}>
+                <i class="fas fa-robot me-2"></i> Run ML Risk Predictions
+            </button>
+        </form>
+    </div>
+</div>
+
+<div id="upload-tab-content" class="{% if not is_ocr %}d-none{% endif %}">
+    <div class="row g-4">
+        <div class="col-lg-5">
+            <div class="card card-light p-4">
+                <h5 class="mb-1 text-gradient"><i class="fas fa-file-import me-2"></i> Marksheet Upload</h5>
+                <p class="text-muted small mb-4">Upload a PDF or image marksheet. Extracted marks are saved as Assessment performance data for matching profile subjects.</p>
+
+                <div class="upload-dropzone-custom mb-3" id="dropzone">
+                    <i class="fas fa-cloud-upload-alt fa-3x mb-3 text-primary"></i>
+                    <h6>Drop marksheet file here</h6>
+                    <p class="text-muted small mb-2">PDF, JPG, JPEG, PNG</p>
+                    <div id="selected-file-name" class="fw-bold text-primary mt-2"></div>
+                    <input type="file" id="marksheet-file" accept=".pdf,.jpg,.jpeg,.png">
+                </div>
+
+                <button type="button" class="btn btn-primary w-100 py-3" id="extract-btn">
+                    <i class="fas fa-magic me-2"></i> Upload & Extract Marks
+                </button>
+
+                <div id="ocr-loading" class="text-center mt-3 d-none">
+                    <div class="spinner-border text-primary mb-2" role="status"></div>
+                    <div class="progress mb-2" style="height: 10px;">
+                        <div id="ocr-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="width: 0%;"></div>
+                    </div>
+                    <small id="ocr-progress-text" class="text-muted d-block mb-2">0% uploaded</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-7">
+            <div class="card card-light p-4 h-100">
+                <h5 class="mb-1 text-gradient"><i class="fas fa-check-double me-2"></i> Extracted Performance</h5>
+                <p class="text-muted small mb-3">After upload, return to Predict Risk and run all eligible subjects together.</p>
+                <div id="ocr-results" class="d-none"></div>
+                <div id="ocr-empty-state" class="text-center text-muted py-5">
+                    <i class="fas fa-file-signature fa-3x mb-3 opacity-30 text-primary"></i>
+                    <h6>No Marksheet Processed</h6>
+                    <p class="small mb-0">Upload a marksheet to save extracted subject scores.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchPredictTab(tab) {
+    const predictBtn = document.getElementById('predict-tab-btn');
+    const uploadBtn = document.getElementById('upload-tab-btn');
+    const predictPanel = document.getElementById('predict-tab-content');
+    const uploadPanel = document.getElementById('upload-tab-content');
+
+    predictBtn.classList.toggle('active', tab === 'predict');
+    uploadBtn.classList.toggle('active', tab === 'upload');
+    predictPanel.classList.toggle('d-none', tab !== 'predict');
+    uploadPanel.classList.toggle('d-none', tab !== 'upload');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const selectAll = document.getElementById('select-all-subjects');
+    const checkboxes = Array.from(document.querySelectorAll('.subject-checkbox'));
+    const fileInput = document.getElementById('marksheet-file');
+    const fileName = document.getElementById('selected-file-name');
+    const dropzone = document.getElementById('dropzone');
+    const extractBtn = document.getElementById('extract-btn');
+
+    function syncSelectAll() {
+        const enabled = checkboxes.filter(cb => !cb.disabled);
+        if (!selectAll || enabled.length === 0) return;
+        selectAll.checked = enabled.every(cb => cb.checked);
+        selectAll.indeterminate = !selectAll.checked && enabled.some(cb => cb.checked);
+    }
+
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            checkboxes.forEach(cb => {
+                if (!cb.disabled) cb.checked = selectAll.checked;
+            });
+            syncSelectAll();
+        });
+        checkboxes.forEach(cb => cb.addEventListener('change', syncSelectAll));
+        syncSelectAll();
+    }
+
+    if (fileInput) {
+        fileInput.addEventListener('change', function() {
+            fileName.textContent = fileInput.files.length ? 'Selected: ' + fileInput.files[0].name : '';
+        });
+    }
+
+    if (dropzone) {
+        dropzone.addEventListener('click', () => fileInput.click());
+        dropzone.addEventListener('dragover', event => {
+            event.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+        dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+        dropzone.addEventListener('drop', event => {
+            event.preventDefault();
+            dropzone.classList.remove('dragover');
+            if (event.dataTransfer.files.length) {
+                fileInput.files = event.dataTransfer.files;
+                fileName.textContent = 'Selected: ' + event.dataTransfer.files[0].name;
+            }
+        });
+    }
+
+    if (extractBtn) {
+        extractBtn.addEventListener('click', function() {
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Please select a marksheet file first.');
+                return;
+            }
+
+            const loading = document.getElementById('ocr-loading');
+            const progressBar = document.getElementById('ocr-progress-bar');
+            const progressText = document.getElementById('ocr-progress-text');
+            const results = document.getElementById('ocr-results');
+            const empty = document.getElementById('ocr-empty-state');
+            const formData = new FormData();
+            formData.append('marksheet', file);
+
+            loading.classList.remove('d-none');
+            extractBtn.disabled = true;
+            progressBar.style.width = '0%';
+            progressText.textContent = '0% uploaded';
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', "{{ url_for('student.ocr_extract') }}", true);
+            xhr.upload.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    const pct = Math.round((event.loaded / event.total) * 100);
+                    progressBar.style.width = pct + '%';
+                    progressText.textContent = pct + '% uploaded';
+                }
+            };
+            xhr.onload = function() {
+                loading.classList.add('d-none');
+                extractBtn.disabled = false;
+                let data = {};
+                try {
+                    data = JSON.parse(xhr.responseText || '{}');
+                } catch (error) {
+                    data = { error: 'Could not read server response.' };
+                }
+
+                if (xhr.status !== 200 || data.error) {
+                    alert(data.error || 'Upload failed.');
+                    return;
+                }
+
+                const candidates = data.candidates || [];
+                const options = data.subject_options || [];
+                if (!candidates.length) {
+                    results.innerHTML = '<div class="alert alert-warning mb-0">No subject-wise marks table rows were detected. Try a clearer scan focused on the marks table.</div>';
+                    results.classList.remove('d-none');
+                    empty.classList.add('d-none');
+                    return;
+                }
+
+                const optionHtml = (selectedId) => options.map(opt => {
+                    const selected = Number(opt.id) === Number(selectedId) ? 'selected' : '';
+                    return `<option value="${opt.id}" ${selected}>${opt.name}</option>`;
+                }).join('');
+
+                results.innerHTML = `
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Subject Name (matched)</th>
+                                    <th>Extracted Mark</th>
+                                    <th>Confidence</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${candidates.map(c => `
+                                    <tr data-index="${c.index}">
+                                        <td>
+                                            <select class="form-select form-select-sm ocr-subject-select" required>
+                                                <option value="">Select subject</option>
+                                                ${optionHtml(c.matched_subject_id)}
+                                            </select>
+                                            <div class="small text-muted mt-1">OCR read: ${c.original_subject}</div>
+                                        </td>
+                                        <td>
+                                            <input type="number" class="form-control form-control-sm ocr-percentage" min="0" max="100" step="0.1" value="${Number(c.percentage).toFixed(1)}">
+                                            <input type="hidden" class="ocr-value" value="${c.extracted_value}">
+                                            <input type="hidden" class="ocr-full-marks" value="${c.full_marks}">
+                                        </td>
+                                        <td>
+                                            <span class="badge ${c.match_confidence >= 0.8 ? 'bg-success' : 'bg-warning text-dark'}">${Math.round((c.match_confidence || 0) * 100)}% match</span>
+                                            <div class="small text-muted mt-1">${Math.round((c.row_confidence || 0) * 100)}% row</div>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <button type="button" class="btn btn-primary w-100 py-3" id="save-verified-ocr">
+                        <i class="fas fa-check me-2"></i> Save Verified Marks
+                    </button>
+                `;
+                results.classList.remove('d-none');
+                empty.classList.add('d-none');
+                document.getElementById('save-verified-ocr').addEventListener('click', function() {
+                    const rows = Array.from(results.querySelectorAll('tbody tr')).map(row => ({
+                        index: row.dataset.index,
+                        subject_id: row.querySelector('.ocr-subject-select').value,
+                        percentage: row.querySelector('.ocr-percentage').value,
+                        value: row.querySelector('.ocr-value').value,
+                        full_marks: row.querySelector('.ocr-full-marks').value,
+                    })).filter(row => row.subject_id);
+
+                    if (!rows.length) {
+                        alert('Please match at least one extracted row to a profile subject.');
+                        return;
+                    }
+
+                    fetch("{{ url_for('student.ocr_confirm') }}", {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rows })
+                    })
+                    .then(response => response.json())
+                    .then(saveData => {
+                        if (saveData.status !== 'success') {
+                            alert(saveData.message || 'Could not save verified marks.');
+                            return;
+                        }
+                        results.innerHTML = saveData.saved.map(item => `<div class="doc-card"><div><div class="fw-bold">${item.subject}</div><div class="small text-muted">Verified marksheet score saved</div></div><span class="badge bg-low">${Number(item.percentage).toFixed(1)}%</span></div>`).join('');
+                    })
+                    .catch(() => alert('Connection error while saving verified marks.'));
+                });
+            };
+            xhr.onerror = function() {
+                loading.classList.add('d-none');
+                extractBtn.disabled = false;
+                alert('Connection error while uploading the marksheet.');
+            };
+            xhr.send(formData);
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,1032 @@
+{% extends 'base.html' %}
+{% block title %}Study Room: {{ subject.name }}{% endblock %}
+
+{% block content %}
+<style>
+    .study-sidebar {
+        border-right: 1px solid rgba(255, 255, 255, 0.05);
+        max-height: calc(100vh - 120px);
+        overflow-y: auto;
+    }
+    .topic-link {
+        display: block;
+        padding: 10px 15px;
+        border-radius: 8px;
+        color: #94a3b8;
+        text-decoration: none;
+        transition: all 0.2s ease;
+        font-size: 14px;
+        margin-bottom: 4px;
+    }
+    .topic-link:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: white;
+    }
+    .topic-link.active {
+        background: var(--neon-blue) !important;
+        color: white !important;
+        font-weight: 600;
+    }
+    .study-content-panel {
+        max-height: calc(100vh - 120px);
+        overflow-y: auto;
+        padding-left: 20px;
+    }
+    .flashcard-box {
+        perspective: 1000px;
+        width: 100%;
+        max-width: 500px;
+        height: 250px;
+        cursor: pointer;
+        margin: 0 auto;
+    }
+    .flashcard-inner {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        text-align: center;
+        transition: transform 0.6s;
+        transform-style: preserve-3d;
+    }
+    .flashcard-box.flipped .flashcard-inner {
+        transform: rotateY(180deg);
+    }
+    .flashcard-front, .flashcard-back {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        -webkit-backface-visibility: hidden;
+        backface-visibility: hidden;
+        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 30px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+    .flashcard-front {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
+        color: white;
+    }
+    .flashcard-back {
+        background: linear-gradient(135deg, rgba(76, 29, 149, 0.9), rgba(15, 23, 42, 0.9));
+        color: white;
+        transform: rotateY(180deg);
+    }
+    .study-tab-btn {
+        padding: 8px 20px;
+        font-weight: 600;
+        font-size: 14px;
+        border-radius: 6px;
+        border: 1px solid rgba(255,255,255,0.05);
+        background: rgba(255,255,255,0.02);
+        color: #94a3b8;
+        transition: all 0.2s ease;
+    }
+    .study-tab-btn:hover {
+        background: rgba(255,255,255,0.05);
+        color: white;
+    }
+    .study-tab-btn.active {
+        background: var(--neon-purple);
+        color: white;
+        border-color: transparent;
+        box-shadow: 0 4px 10px rgba(168, 85, 247, 0.2);
+    }
+</style>
+
+<div class="row stagger-1">
+    <div class="col-12 mb-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <a href="{{ url_for('student.schedule') }}" class="text-decoration-none text-muted small"><i class="fas fa-chevron-left me-1"></i> Back to Planner</a>
+                <h2 class="fw-bold text-gradient mt-1 mb-0">{{ subject.name }} <span class="fs-6 text-muted fw-normal">({{ subject.code }})</span></h2>
+            </div>
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge bg-purple">{{ subject.level_of_study }}</span>
+                {% if subject.program %}
+                <span class="badge bg-secondary text-dark">{{ subject.program }}</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row stagger-2">
+    <!-- Sidebar navigation for Chapters & Topics -->
+    <div class="col-md-4 col-lg-3 study-sidebar py-3">
+        <h6 class="text-white fw-bold mb-3"><i class="fas fa-book-open me-2 text-primary"></i> Curriculum Index</h6>
+        {% for ch in chapters %}
+        <div class="mb-4">
+            <div class="fw-bold text-white small mb-2 text-uppercase" style="letter-spacing: 0.5px;">Chapter {{ ch.chapter_number }}: {{ ch.name }}</div>
+            <div class="d-flex flex-column gap-1">
+                {% for topic in ch.topics %}
+                <div class="d-flex align-items-center justify-content-between">
+                    <a href="javascript:void(0)" class="topic-link flex-grow-1" id="topic-link-{{ topic.id }}" onclick="loadTopic({{ topic.id }})">
+                        <i class="far fa-file-alt me-2"></i> {{ topic.name }}
+                        {% if topic.materials %}
+                        <span class="text-muted small ms-1" style="font-size: 0.7rem;">(~{{ topic.materials[0].estimated_reading_time }}m read)</span>
+                        {% endif %}
+                    </a>
+                    <div class="form-check me-2">
+                        <input class="form-check-input" type="checkbox" id="chk-topic-{{ topic.id }}" 
+                               {% if topic.id in completed_topic_ids %}checked{% endif %} 
+                               onclick="toggleTopicCompletion({{ topic.id }}, this)">
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <p class="text-muted small">No chapters or topics added yet for this subject.</p>
+        {% endfor %}
+    </div>
+
+    <!-- Main Study content area -->
+    <div class="col-md-8 col-lg-9 study-content-panel py-3">
+        <!-- Interactive Tabs -->
+        <div class="d-flex flex-wrap gap-2 mb-4" id="study-tabs">
+            <button class="study-tab-btn active" onclick="switchStudyTab('learn')"><i class="fas fa-graduation-cap me-2"></i> Read & Learn</button>
+            <button class="study-tab-btn" onclick="switchStudyTab('practice')"><i class="fas fa-pencil-alt me-2"></i> Practice Exercises</button>
+            <button class="study-tab-btn" onclick="switchStudyTab('quiz')"><i class="fas fa-clipboard-check me-2"></i> MCQ Quiz</button>
+            <button class="study-tab-btn" onclick="switchStudyTab('flashcards')"><i class="fas fa-clone me-2"></i> Flashcards</button>
+            <button class="study-tab-btn" onclick="switchStudyTab('notes')"><i class="fas fa-sticky-note me-2"></i> My Notes</button>
+        </div>
+
+        <!-- TAB Content: Learn -->
+        <div id="tab-learn" class="tab-content-item">
+            <div class="card card-light p-4">
+                <div id="material-textbook">
+                    <div class="text-center py-5 text-muted">
+                        <i class="fas fa-arrow-left fa-3x mb-3 text-primary opacity-30 animate-pulse"></i>
+                        <h5>Select a Topic from the Sidebar</h5>
+                        <p class="small mb-0">Click any topic in the curriculum index to load textbook study content, quizzes, and flashcards.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB Content: Practice -->
+        <div id="tab-practice" class="tab-content-item d-none">
+            <div class="card card-light p-4">
+                <h4 class="fw-bold mb-3 text-gradient"><i class="fas fa-dumbbell me-2"></i> Practice exercises</h4>
+                <p class="text-muted small mb-4">Challenge your understanding by writing down answers for these conceptual, mathematical, and coding problems.</p>
+                <div id="material-practice-content">
+                    <p class="text-muted">Select a topic from the sidebar to view practice questions.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB Content: Quiz -->
+        <div id="tab-quiz" class="tab-content-item d-none">
+            <div class="card card-light p-4">
+                <h4 class="fw-bold mb-3 text-gradient"><i class="fas fa-check-circle me-2"></i> Chapter Practice Quiz</h4>
+                <p class="text-muted small mb-4">Answer the multiple-choice questions below. You will receive immediate grading and a step-by-step logic explanation for every question!</p>
+                <div id="quiz-alert-container"></div>
+                <form id="topic-quiz-form" onsubmit="submitQuiz(event)">
+                    <div id="material-quiz-content">
+                        <p class="text-muted">Select a topic from the sidebar to start a quiz.</p>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- TAB Content: Flashcards -->
+        <div id="tab-flashcards" class="tab-content-item d-none">
+            <div class="card card-light p-4 text-center">
+                <h4 class="fw-bold mb-3 text-gradient"><i class="fas fa-bolt me-2"></i> Interactive Flashcards</h4>
+                <p class="text-muted small mb-4">Click the card to flip it and reveal the answer. Use flashcards for active recall.</p>
+                
+                <div class="flashcard-box" id="flashcard" onclick="this.classList.toggle('flipped')">
+                    <div class="flashcard-inner">
+                        <div class="flashcard-front">
+                            <h6 class="text-primary small mb-3">QUESTION</h6>
+                            <h5 id="flashcard-q" class="fw-bold">What is set cardinality?</h5>
+                            <small class="text-muted mt-4">Click Card to Flip</small>
+                        </div>
+                        <div class="flashcard-back">
+                            <h6 class="text-warning small mb-3">EXPLANATION / ANSWER</h6>
+                            <h5 id="flashcard-a" class="fw-bold">The number of elements contained in the set.</h5>
+                            <small class="text-muted mt-4">Click Card to Flip</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-center gap-3 mt-4">
+                    <button class="btn btn-outline-primary" onclick="prevFlashcard()"><i class="fas fa-chevron-left"></i> Previous</button>
+                    <button class="btn btn-outline-primary" onclick="nextFlashcard()">Next <i class="fas fa-chevron-right"></i></button>
+                </div>
+                <div class="small text-muted mt-2" id="flashcard-count">Card 1 / 1</div>
+            </div>
+        </div>
+
+        <!-- TAB Content: Notes -->
+        <div id="tab-notes" class="tab-content-item d-none">
+            <div class="card card-light p-4">
+                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                    <div>
+                        <h4 class="fw-bold mb-1 text-gradient"><i class="fas fa-sticky-note me-2"></i> Subject Notes</h4>
+                        <p class="text-muted small mb-0">Record definitions, equations, loops, or thoughts. Your notes auto-save on typing.</p>
+                    </div>
+                    <span class="badge bg-success py-2 px-3 d-none" id="save-indicator"><i class="fas fa-save me-1"></i> Saved!</span>
+                </div>
+                <textarea id="notes-content" class="form-control" rows="15" placeholder="Write down formulas, code templates, or revision plans here..." style="font-family: 'Consolas', 'Courier New', monospace; font-size: 15px; color: #e2e8f0; background: #0f172a; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">{{ notes_content }}</textarea>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- PDF Generation Loading Overlay -->
+<div id="pdf-loading-overlay" class="position-fixed top-0 start-0 w-100 h-100 d-none d-flex align-items-center justify-content-center" style="background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); z-index: 1050;">
+    <div class="text-center p-5 rounded-4 border border-secondary bg-dark-card" style="max-width: 400px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+        <div class="spinner-grow text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+        <h5 class="fw-bold text-white mb-2">Preparing Chapter PDF</h5>
+        <p class="text-muted small mb-0">Preparing chapter, this may take a moment</p>
+    </div>
+</div>
+
+<!-- AI Chapter Quiz Modal -->
+<div class="modal fade" id="chapterQuizModal" tabindex="-1" aria-labelledby="chapterQuizModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content bg-dark-card border-secondary text-white">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title fw-bold text-gradient" id="chapterQuizModalLabel"><i class="fas fa-brain me-2"></i>AI Chapter Quiz</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="chapter-quiz-loading" class="text-center py-5">
+                    <div class="spinner-border text-primary mb-3" role="status"></div>
+                    <p class="text-muted small">Generating 5 personalized assessment questions using AI...</p>
+                </div>
+                <div id="chapter-quiz-content" class="d-none">
+                    <!-- Questions will be injected here -->
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="btn-submit-chapter-quiz" onclick="submitChapterQuiz()">Submit Quiz</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let activeTopicId = null;
+    let flashcardsData = [];
+    let currentFlashcardIdx = 0;
+
+    // Load initial data from backend if flashcards exist globally
+    {% if flashcards %}
+        flashcardsData = [
+            {% for f in flashcards %}
+                { front: "{{ f.front|escape }}", back: "{{ f.back|escape }}" },
+            {% endfor %}
+        ];
+    {% endif %}
+
+    // Switch study room tabs
+    function switchStudyTab(tab) {
+        document.querySelectorAll(".study-tab-btn").forEach(btn => btn.classList.remove("active"));
+        document.querySelectorAll(".tab-content-item").forEach(item => item.classList.add("d-none"));
+        
+        event.currentTarget.classList.add("active");
+        document.getElementById("tab-" + tab).classList.remove("d-none");
+    }
+
+    // AJAX load topic content
+    function loadTopic(topicId) {
+        activeTopicId = topicId;
+        
+        document.querySelectorAll(".topic-link").forEach(link => link.classList.remove("active"));
+        document.getElementById("topic-link-" + topicId).classList.add("active");
+        
+        const textbook = document.getElementById("material-textbook");
+        textbook.innerHTML = `
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="text-muted small mt-2">Retrieving educational textbook content...</p>
+            </div>
+        `;
+        
+        fetch(`/student/study/api/topic/${topicId}`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                renderTopicContent(data);
+            } else if (data.status === "not_found") {
+                // Auto-seed: generate AI lesson immediately without user click
+                generateAILesson(topicId);
+            } else {
+                textbook.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
+            }
+        })
+        .catch(err => {
+            textbook.innerHTML = `<div class="alert alert-danger">Error loading topic: ${err}</div>`;
+        });
+    }
+
+    function generateAILesson(topicId) {
+        const textbook = document.getElementById("material-textbook");
+        textbook.innerHTML = `
+            <div class="text-center py-5">
+                <div class="spinner-grow mb-3" style="width:3rem;height:3rem;color:#a78bfa;" role="status"></div>
+                <h5 class="fw-bold text-gradient mb-2" id="ai-loading-text">Analyzing syllabus curriculum guidelines...</h5>
+                <p class="text-muted small mt-2">SmartStudy AI is composing your lesson — textbook notes, worked examples, MCQs &amp; flashcards.</p>
+                <div class="progress mt-3 mx-auto" style="max-width:320px;height:6px;background:rgba(255,255,255,0.08);">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%;background:linear-gradient(135deg,#667eea,#764ba2);"></div>
+                </div>
+            </div>
+        `;
+        
+        const messages = [
+            "Analyzing syllabus curriculum guidelines...",
+            "Composing detailed textbook explanations...",
+            "Solving step-by-step worked practice exercises...",
+            "Drafting mock multiple-choice quiz questions...",
+            "Generating interactive active recall flashcards...",
+            "Saving lesson plan and seeding curriculum structures..."
+        ];
+        let msgIdx = 0;
+        const msgTimer = setInterval(() => {
+            msgIdx = (msgIdx + 1) % messages.length;
+            const loadingText = document.getElementById("ai-loading-text");
+            if (loadingText) loadingText.innerText = messages[msgIdx];
+        }, 2500);
+
+        fetch(`/student/study/api/topic/${topicId}/generate-ai`, {
+            method: "POST"
+        })
+        .then(res => res.json())
+        .then(data => {
+            clearInterval(msgTimer);
+            if (data.status === "success") {
+                renderTopicContent(data);
+            } else {
+                // Show retry button on failure
+                textbook.innerHTML = `
+                    <div class="text-center py-5">
+                        <i class="fas fa-exclamation-circle fa-3x text-warning mb-3"></i>
+                        <h5 class="text-white">AI generation failed</h5>
+                        <p class="text-muted small">${data.message || 'Please check your API key in .env'}</p>
+                        <button class="btn btn-outline-primary" onclick="generateAILesson(${topicId})">
+                            <i class="fas fa-redo me-1"></i> Retry
+                        </button>
+                    </div>`;
+            }
+        })
+        .catch(err => {
+            clearInterval(msgTimer);
+            textbook.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="fas fa-wifi fa-3x text-danger mb-3"></i>
+                    <h5 class="text-white">Connection error</h5>
+                    <p class="text-muted small">${err}</p>
+                    <button class="btn btn-outline-primary" onclick="generateAILesson(${topicId})">
+                        <i class="fas fa-redo me-1"></i> Retry
+                    </button>
+                </div>`;
+        });
+    }
+
+    function renderTopicContent(data, topicId) {
+        const textbook = document.getElementById("material-textbook");
+        const m = data.material;
+        let diagram_html = "";
+        if (m.diagrams) {
+            diagram_html = `
+                <div class="p-3 my-3 border rounded-3 bg-dark text-white font-monospace" style="white-space: pre; border-color: rgba(255,255,255,0.05) !important;">
+                    <i class="fas fa-project-diagram text-primary me-2 mb-2"></i>Diagram / Architecture Layout:\n${m.diagrams}
+                </div>
+            `;
+        }
+        
+        textbook.innerHTML = `
+            <h3 class="fw-bold mb-1 text-gradient">${m.title}</h3>
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-secondary text-dark">${m.difficulty_level.toUpperCase()} DIFFICULTY</span>
+                    <span class="badge bg-low"><i class="far fa-clock me-1"></i> ${m.estimated_reading_time} mins read</span>
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm ${data.bookmarked ? 'btn-warning text-white' : 'btn-outline-warning'}" id="btn-bookmark-${topicId}" onclick="toggleBookmark(${topicId})">
+                        <i class="${data.bookmarked ? 'fas' : 'far'} fa-star me-1"></i> ${data.bookmarked ? 'Bookmarked' : 'Bookmark'}
+                    </button>
+                    <button class="btn btn-sm ${data.progress_status === 'completed' ? 'btn-success' : 'btn-outline-success'}" id="btn-read-${topicId}" onclick="toggleReadStatus(${topicId})">
+                        <i class="fas fa-check-circle me-1"></i> ${data.progress_status === 'completed' ? 'Read' : 'Mark as Read'}
+                    </button>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 mb-4 flex-wrap">
+                <button class="btn btn-sm btn-outline-primary" onclick="downloadPDF(${topicId})">
+                    <i class="fas fa-file-pdf me-1"></i> Download PDF
+                </button>
+                <button class="btn btn-sm btn-outline-info" id="btn-tts" onclick="speakTopicText(${topicId})">
+                    <i class="fas fa-volume-up me-1"></i> Listen
+                </button>
+                <button class="btn btn-sm btn-outline-purple" onclick="startChapterQuiz(${topicId})">
+                    <i class="fas fa-brain me-1"></i> Take AI Chapter Quiz
+                </button>
+            </div>
+
+            <div class="textbook-section my-4">
+                <h5 class="text-gradient fw-bold"><i class="fas fa-bullseye me-2"></i> Learning Objectives</h5>
+                <div>${m.learning_objectives || "No objectives defined."}</div>
+            </div>
+            
+            <hr class="opacity-10">
+
+            <div class="textbook-section my-4">
+                <h5 class="text-gradient fw-bold"><i class="fas fa-file-alt me-2"></i> Introduction</h5>
+                <div>${m.introduction || "No introduction."}</div>
+            </div>
+
+            <div class="textbook-section my-4">
+                <h5 class="text-gradient fw-bold"><i class="fas fa-book-open me-2"></i> Detailed Explanation</h5>
+                <div>${m.detailed_explanation || "No explanation."}</div>
+            </div>
+
+            <div class="row my-4 g-3">
+                <div class="col-md-6">
+                    <div class="p-3 rounded-3 h-100" style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255,255,255,0.05);">
+                        <h6 class="text-gradient fw-bold"><i class="fas fa-info-circle me-1"></i> Key Definitions</h6>
+                        <div>${m.important_definitions || "No definitions."}</div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="p-3 rounded-3 h-100" style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255,255,255,0.05);">
+                        <h6 class="text-gradient fw-bold"><i class="fas fa-brain me-1"></i> Core Concepts</h6>
+                        <div>${m.concepts || "No core concepts."}</div>
+                    </div>
+                </div>
+            </div>
+
+            ${diagram_html}
+
+            <div class="textbook-section my-4">
+                <h5 class="text-gradient fw-bold"><i class="fas fa-clipboard-list me-2"></i> Worked Examples</h5>
+                <div>${m.worked_examples || "No worked examples."}</div>
+            </div>
+
+            <div class="row my-4 g-3">
+                <div class="col-md-6">
+                    <div class="p-3 rounded-3 h-100" style="background: rgba(52, 211, 153, 0.05); border: 1px solid rgba(52, 211, 153, 0.1);">
+                        <h6 class="text-success fw-bold"><i class="fas fa-network-wired me-1"></i> Real-Life Application</h6>
+                        <div>${m.real_life_applications || "No real-life applications."}</div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="p-3 rounded-3 h-100" style="background: rgba(248, 113, 113, 0.05); border: 1px solid rgba(248, 113, 113, 0.1);">
+                        <h6 class="text-danger fw-bold"><i class="fas fa-exclamation-circle me-1"></i> Common Mistakes to Avoid</h6>
+                        <div>${m.common_mistakes || "No common mistakes recorded."}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="textbook-section my-4">
+                <h5 class="text-gradient fw-bold"><i class="fas fa-star me-2"></i> Key Summary & Revision Guide</h5>
+                <div>${m.summary || "No summary."}</div>
+            </div>
+
+            <!-- Chapter Notes Textarea -->
+            <div class="mt-5 p-3 rounded-3 text-start" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);">
+                <h5 class="text-gradient fw-bold mb-2"><i class="fas fa-sticky-note me-2"></i> Chapter Notes</h5>
+                <p class="text-muted small">Write down your key takeaways or formulas for this chapter. Automatically saved on blur.</p>
+                <textarea class="form-control bg-dark text-white border-secondary mb-2" id="chapter-notes-textarea" rows="4" placeholder="Write your notes here..." onblur="saveChapterNotes(${topicId})">${data.notes_content || ''}</textarea>
+                <div class="d-flex justify-content-end">
+                    <button class="btn btn-sm btn-primary" onclick="saveChapterNotes(${topicId})"><i class="fas fa-save me-1"></i> Save Notes</button>
+                </div>
+            </div>
+
+            <!-- Related Past Questions -->
+            <div class="mt-4 p-3 rounded-3 text-start" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);">
+                <h5 class="text-gradient fw-bold mb-2"><i class="fas fa-history me-2"></i> Related NEB Past Questions</h5>
+                <ul class="list-group list-group-flush bg-transparent" id="past-questions-list">
+                    ${data.past_questions && data.past_questions.length > 0 ? 
+                        data.past_questions.map(q => `
+                            <li class="list-group-item bg-transparent text-white border-secondary d-flex justify-content-between align-items-center">
+                                <span>${q.question_text}</span>
+                                <span class="badge bg-secondary text-dark">${q.exam_year || 'Any Year'}</span>
+                            </li>
+                        `).join("") : 
+                        `<li class="list-group-item bg-transparent text-muted border-0">No past questions registered for this topic yet.</li>`
+                    }
+                </ul>
+            </div>
+        `;
+
+        // Populate Practice Tab
+        const pContainer = document.getElementById("material-practice-content");
+        let short_qs = [];
+        let long_qs = [];
+        let critical_qs = [];
+        try {
+            short_qs = JSON.parse(m.short_questions_json || "[]");
+            long_qs = JSON.parse(m.long_questions_json || "[]");
+            critical_qs = JSON.parse(m.critical_thinking_questions_json || "[]");
+        } catch(e) {}
+        
+        let practice_html = "";
+        if (short_qs.length > 0) {
+            practice_html += `
+                <h5 class="fw-bold mt-4 mb-2" style="color: var(--blue);"><i class="fas fa-question-circle me-2"></i> Short Answer Questions</h5>
+                <ul class="list-group list-group-flush bg-transparent">
+                    ${short_qs.map(q => `<li class="list-group-item bg-transparent text-white border-secondary">${q}</li>`).join("")}
+                </ul>
+            `;
+        }
+        if (long_qs.length > 0) {
+            practice_html += `
+                <h5 class="fw-bold mt-4 mb-2" style="color: var(--purple);"><i class="fas fa-file-alt me-2"></i> Long Analytical Questions</h5>
+                <ul class="list-group list-group-flush bg-transparent">
+                    ${long_qs.map(q => `<li class="list-group-item bg-transparent text-white border-secondary">${q}</li>`).join("")}
+                </ul>
+            `;
+        }
+        if (critical_qs.length > 0) {
+            practice_html += `
+                <h5 class="fw-bold mt-4 mb-2" style="color: var(--amber);"><i class="fas fa-lightbulb me-2"></i> Critical Thinking Challenges</h5>
+                <ul class="list-group list-group-flush bg-transparent">
+                    ${critical_qs.map(q => `<li class="list-group-item bg-transparent text-white border-secondary">${q}</li>`).join("")}
+                </ul>
+            `;
+        }
+        pContainer.innerHTML = practice_html || "<p class='text-muted'>No practice exercises defined for this topic.</p>";
+
+        // Populate Quiz Tab
+        const qContainer = document.getElementById("material-quiz-content");
+        let mcqs = [];
+        try {
+            mcqs = JSON.parse(m.mcqs_json || "[]");
+        } catch(e) {}
+        document.getElementById("quiz-alert-container").innerHTML = ""; // clear alerts
+        
+        if (mcqs.length > 0) {
+            let quiz_html = "";
+            mcqs.forEach((q, q_idx) => {
+                quiz_html += `
+                    <div class="mb-4 p-3 rounded-3" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);">
+                        <h6 class="fw-bold text-white mb-3">Q${q_idx+1}: ${q.q}</h6>
+                        <div class="d-flex flex-column gap-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="answers_${q_idx}" value="A" id="q_${q_idx}_a" required>
+                                <label class="form-check-label text-muted" for="q_${q_idx}_a"><strong>A.</strong> ${q.a}</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="answers_${q_idx}" value="B" id="q_${q_idx}_b">
+                                <label class="form-check-label text-muted" for="q_${q_idx}_b"><strong>B.</strong> ${q.b}</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="answers_${q_idx}" value="C" id="q_${q_idx}_c">
+                                <label class="form-check-label text-muted" for="q_${q_idx}_c"><strong>C.</strong> ${q.c}</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="answers_${q_idx}" value="D" id="q_${q_idx}_d">
+                                <label class="form-check-label text-muted" for="q_${q_idx}_d"><strong>D.</strong> ${q.d}</label>
+                            </div>
+                        </div>
+                        <div class="explanation-box d-none mt-3 p-2 rounded bg-info bg-opacity-10 text-white small" id="exp_${q_idx}"></div>
+                    </div>
+                `;
+            });
+            quiz_html += `<button type="submit" class="btn btn-primary w-100 py-3 mt-2" id="submit-quiz-btn"><i class="fas fa-check-circle me-1"></i> Submit Quiz</button>`;
+            qContainer.innerHTML = quiz_html;
+        } else {
+            qContainer.innerHTML = "<p class='text-muted'>No quiz questions defined for this topic.</p>";
+        }
+
+        // Render local topic flashcards if any
+        if (data.flashcards && data.flashcards.length > 0) {
+            flashcardsData = data.flashcards;
+            currentFlashcardIdx = 0;
+            renderFlashcard();
+        }
+    }
+
+    // Toggle completion checkbox
+    function toggleTopicCompletion(topicId, checkbox) {
+        const formData = new FormData();
+        formData.append("topic_id", topicId);
+        formData.append("completed", checkbox.checked);
+        
+        fetch("/student/study/toggle-topic", {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                console.log(`Topic completion toggled: ${data.completed}`);
+            }
+        })
+        .catch(err => console.error("Error toggling completion:", err));
+    }
+
+    // Submit Quiz & Grade
+    function submitQuiz(event) {
+        event.preventDefault();
+        
+        const submitBtn = document.getElementById("submit-quiz-btn");
+        if(submitBtn) submitBtn.disabled = true;
+        
+        const answers = [];
+        const checkedOptions = document.querySelectorAll('#topic-quiz-form input[type="radio"]:checked');
+        checkedOptions.forEach(opt => {
+            answers.push(opt.value);
+        });
+        
+        const formData = new FormData();
+        formData.append("topic_id", activeTopicId);
+        answers.forEach(ans => {
+            formData.append("answers[]", ans);
+        });
+        
+        fetch("/student/study/submit-quiz", {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                // Render grades
+                const alertContainer = document.getElementById("quiz-alert-container");
+                alertContainer.innerHTML = `
+                    <div class="alert alert-success">
+                        <h5>Quiz Completed!</h5>
+                        <p class="mb-0">Your Score: <strong>${data.correct_count} / ${data.total} (${data.score_pct}%)</strong></p>
+                    </div>
+                `;
+                
+                // Show explanations and highlight answers
+                data.results.forEach((r, idx) => {
+                    const expDiv = document.getElementById(`exp_${idx}`);
+                    if(expDiv) {
+                        expDiv.classList.remove("d-none");
+                        expDiv.innerHTML = `
+                            <strong>Correct Answer: ${r.correct_ans}</strong><br>
+                            ${r.explanation}
+                        `;
+                    }
+                });
+            } else {
+                alert("Error grading quiz: " + data.message);
+                if(submitBtn) submitBtn.disabled = false;
+            }
+        })
+        .catch(err => {
+            console.error("Quiz submission error:", err);
+            if(submitBtn) submitBtn.disabled = false;
+        });
+    }
+
+    // Flashcard Render
+    function renderFlashcard() {
+        const cardQ = document.getElementById("flashcard-q");
+        const cardA = document.getElementById("flashcard-a");
+        const cardBox = document.getElementById("flashcard");
+        const countDisplay = document.getElementById("flashcard-count");
+        
+        cardBox.classList.remove("flipped"); // ensure reset flip
+        
+        if (flashcardsData.length > 0) {
+            const f = flashcardsData[currentFlashcardIdx];
+            cardQ.innerText = f.front;
+            cardA.innerText = f.back;
+            countDisplay.innerText = `Card ${currentFlashcardIdx + 1} / ${flashcardsData.length}`;
+        } else {
+            cardQ.innerText = "No flashcards available.";
+            cardA.innerText = "No explanation.";
+            countDisplay.innerText = "Card 0 / 0";
+        }
+    }
+    
+    function nextFlashcard() {
+        if(flashcardsData.length === 0) return;
+        currentFlashcardIdx = (currentFlashcardIdx + 1) % flashcardsData.length;
+        renderFlashcard();
+    }
+    
+    function prevFlashcard() {
+        if(flashcardsData.length === 0) return;
+        currentFlashcardIdx = (currentFlashcardIdx - 1 + flashcardsData.length) % flashcardsData.length;
+        renderFlashcard();
+    }
+
+    // Auto-save Notes Logic
+    const notesTextarea = document.getElementById("notes-content");
+    const saveIndicator = document.getElementById("save-indicator");
+    let typingTimer;
+    
+    if (notesTextarea) {
+        notesTextarea.addEventListener("input", function() {
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(saveNotes, 1500); // save after 1.5 seconds of silence
+        });
+    }
+    
+    function saveNotes() {
+        const content = notesTextarea.value;
+        const formData = new FormData();
+        formData.append("subject_id", "{{ subject.id }}");
+        formData.append("notes_content", content);
+        
+        fetch("/student/study/save-notes", {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                saveIndicator.classList.remove("d-none");
+                setTimeout(() => { saveIndicator.classList.add("d-none"); }, 2000);
+            }
+        })
+        .catch(err => console.error("Error saving notes:", err));
+    }
+
+    // Keyboard navigation for flashcards
+    document.addEventListener("keydown", function(e) {
+        const flashcardTab = document.getElementById("tab-flashcards");
+        if (flashcardTab && !flashcardTab.classList.contains("d-none")) {
+            if (e.key === "ArrowRight" || e.key === "n") nextFlashcard();
+            if (e.key === "ArrowLeft"  || e.key === "p") prevFlashcard();
+            if (e.key === " " || e.key === "f") {
+                e.preventDefault();
+                document.getElementById("flashcard")?.classList.toggle("flipped");
+            }
+        }
+    });
+
+    // ── NEW STUDY MATERIAL FUNCTIONS ─────────────────────────────────────────
+
+    // Bookmarking
+    function toggleBookmark(topicId) {
+        fetch(`/student/study/api/topic/${topicId}/bookmark`, { method: "POST" })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                const btn = document.getElementById(`btn-bookmark-${topicId}`);
+                if (btn) {
+                    if (data.bookmarked) {
+                        btn.className = "btn btn-sm btn-warning text-white";
+                        btn.innerHTML = `<i class="fas fa-star me-1"></i> Bookmarked`;
+                    } else {
+                        btn.className = "btn btn-sm btn-outline-warning";
+                        btn.innerHTML = `<i class="far fa-star me-1"></i> Bookmark`;
+                    }
+                }
+            }
+        });
+    }
+
+    // Toggle Read Status (button click)
+    function toggleReadStatus(topicId) {
+        const btn = document.getElementById(`btn-read-${topicId}`);
+        const isCompleted = btn.classList.contains("btn-success");
+        const newStatus = isCompleted ? "in progress" : "completed";
+        
+        const formData = new FormData();
+        formData.append("status", newStatus);
+        
+        fetch(`/student/study/api/topic/${topicId}/mark-read`, {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                const chk = document.getElementById(`chk-topic-${topicId}`);
+                if (chk) {
+                    chk.checked = (newStatus === "completed");
+                }
+                if (newStatus === "completed") {
+                    btn.className = "btn btn-sm btn-success";
+                    btn.innerHTML = `<i class="fas fa-check-circle me-1"></i> Read`;
+                } else {
+                    btn.className = "btn btn-sm btn-outline-success";
+                    btn.innerHTML = `<i class="fas fa-check-circle me-1"></i> Mark as Read`;
+                }
+            }
+        });
+    }
+
+    // Override the toggleTopicCompletion to sync with ReviewedChapter
+    const originalToggleTopicCompletion = toggleTopicCompletion;
+    toggleTopicCompletion = function(topicId, checkbox) {
+        const status = checkbox.checked ? "completed" : "not started";
+        const formData = new FormData();
+        formData.append("status", status);
+        
+        fetch(`/student/study/api/topic/${topicId}/mark-read`, {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                if (activeTopicId === topicId) {
+                    const btn = document.getElementById(`btn-read-${topicId}`);
+                    if (btn) {
+                        if (status === "completed") {
+                            btn.className = "btn btn-sm btn-success";
+                            btn.innerHTML = `<i class="fas fa-check-circle me-1"></i> Read`;
+                        } else {
+                            btn.className = "btn btn-sm btn-outline-success";
+                            btn.innerHTML = `<i class="fas fa-check-circle me-1"></i> Mark as Read`;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    // PDF Download & Loading State
+    function downloadPDF(topicId) {
+        const overlay = document.getElementById("pdf-loading-overlay");
+        overlay.classList.remove("d-none");
+        
+        fetch(`/student/study/api/topic/${topicId}/pdf`)
+        .then(response => {
+            if (!response.ok) throw new Error("Could not fetch PDF");
+            return response.blob();
+        })
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.style.display = "none";
+            a.href = url;
+            a.download = `chapter_${topicId}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            overlay.classList.add("d-none");
+        })
+        .catch(err => {
+            overlay.classList.add("d-none");
+            alert("Error downloading PDF: " + err.message);
+        });
+    }
+
+    // Text-To-Speech
+    let ttsUtterance = null;
+    function speakTopicText(topicId) {
+        const btn = document.getElementById("btn-tts");
+        if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.cancel();
+            btn.className = "btn btn-sm btn-outline-info";
+            btn.innerHTML = `<i class="fas fa-volume-up me-1"></i> Listen`;
+            return;
+        }
+        
+        fetch(`/student/study/api/topic/${topicId}/tts`, { method: "POST" });
+        
+        const explanationDiv = document.getElementById("material-textbook");
+        if (!explanationDiv) return;
+        
+        const textToSpeak = explanationDiv.innerText;
+        ttsUtterance = new SpeechSynthesisUtterance(textToSpeak);
+        ttsUtterance.rate = 1.0;
+        
+        ttsUtterance.onend = function() {
+            btn.className = "btn btn-sm btn-outline-info";
+            btn.innerHTML = `<i class="fas fa-volume-up me-1"></i> Listen`;
+        };
+        
+        btn.className = "btn btn-sm btn-danger";
+        btn.innerHTML = `<i class="fas fa-stop me-1"></i> Stop Listening`;
+        
+        window.speechSynthesis.speak(ttsUtterance);
+    }
+
+    // Save Chapter Notes
+    function saveChapterNotes(topicId) {
+        const textarea = document.getElementById("chapter-notes-textarea");
+        if (!textarea) return;
+        
+        const formData = new FormData();
+        formData.append("content", textarea.value);
+        
+        fetch(`/student/study/api/topic/${topicId}/notes`, {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                console.log("Notes autosaved.");
+            }
+        });
+    }
+
+    // Chapter Quiz
+    let currentChapterQuizQuestions = [];
+    let currentQuizTopicId = null;
+    
+    function startChapterQuiz(topicId) {
+        currentQuizTopicId = topicId;
+        const loading = document.getElementById("chapter-quiz-loading");
+        const content = document.getElementById("chapter-quiz-content");
+        const submitBtn = document.getElementById("btn-submit-chapter-quiz");
+        
+        loading.classList.remove("d-none");
+        content.classList.add("d-none");
+        submitBtn.disabled = true;
+        
+        const quizModalEl = document.getElementById('chapterQuizModal');
+        const modal = new bootstrap.Modal(quizModalEl);
+        modal.show();
+        
+        fetch(`/student/study/api/topic/${topicId}/generate-quiz`)
+        .then(res => res.json())
+        .then(data => {
+            loading.classList.add("d-none");
+            content.classList.remove("d-none");
+            submitBtn.disabled = false;
+            
+            if (data.status === "success" && data.quiz && data.quiz.length > 0) {
+                currentChapterQuizQuestions = data.quiz;
+                let html = "";
+                data.quiz.forEach((q, idx) => {
+                    html += `
+                        <div class="mb-4 text-start text-white">
+                            <h6 class="fw-bold mb-2">Q${idx+1}: ${q.q}</h6>
+                            <div class="form-check mb-1">
+                                <input class="form-check-input text-white" type="radio" name="chapter_q_${idx}" value="A" id="cq_${idx}_a">
+                                <label class="form-check-label text-muted" for="cq_${idx}_a"><strong>A.</strong> ${q.a}</label>
+                            </div>
+                            <div class="form-check mb-1">
+                                <input class="form-check-input text-white" type="radio" name="chapter_q_${idx}" value="B" id="cq_${idx}_b">
+                                <label class="form-check-label text-muted" for="cq_${idx}_b"><strong>B.</strong> ${q.b}</label>
+                            </div>
+                            <div class="form-check mb-1">
+                                <input class="form-check-input text-white" type="radio" name="chapter_q_${idx}" value="C" id="cq_${idx}_c">
+                                <label class="form-check-label text-muted" for="cq_${idx}_c"><strong>C.</strong> ${q.c}</label>
+                            </div>
+                            <div class="form-check mb-1">
+                                <input class="form-check-input text-white" type="radio" name="chapter_q_${idx}" value="D" id="cq_${idx}_d">
+                                <label class="form-check-label text-muted" for="cq_${idx}_d"><strong>D.</strong> ${q.d}</label>
+                            </div>
+                            <div class="cq-exp-box d-none mt-2 p-2 rounded bg-info bg-opacity-10 text-white small" id="cq-exp-${idx}"></div>
+                        </div>
+                    `;
+                });
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = `<p class="text-danger">Failed to generate quiz questions.</p>`;
+                submitBtn.disabled = true;
+            }
+        });
+    }
+
+    function submitChapterQuiz() {
+        let correctCount = 0;
+        const total = currentChapterQuizQuestions.length;
+        
+        currentChapterQuizQuestions.forEach((q, idx) => {
+            const selected = document.querySelector(`input[name="chapter_q_${idx}"]:checked`);
+            const ans = selected ? selected.value : "";
+            
+            const expBox = document.getElementById(`cq-exp-${idx}`);
+            if (expBox) {
+                expBox.classList.remove("d-none");
+                expBox.innerHTML = `<strong>Correct Answer: ${q.ans}</strong>. ${q.exp}`;
+            }
+            
+            if (ans === q.ans) {
+                correctCount++;
+            }
+        });
+        
+        const formData = new FormData();
+        formData.append("score", correctCount);
+        formData.append("total", total);
+        
+        fetch(`/student/study/api/topic/${currentQuizTopicId}/submit-quiz`, {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                const submitBtn = document.getElementById("btn-submit-chapter-quiz");
+                submitBtn.disabled = true;
+                alert(`Quiz submitted successfully! Score: ${correctCount} / ${total}`);
+            }
+        });
+    }
+
+    // Page Load: auto-load first topic
+    document.addEventListener("DOMContentLoaded", function() {
+        const firstTopic = document.querySelector(".topic-link");
+        if (firstTopic) {
+            const topicId = firstTopic.id.replace("topic-link-", "");
+            loadTopic(parseInt(topicId));
+        }
+        renderFlashcard();
+    });
+</script>
+{% endblock %}

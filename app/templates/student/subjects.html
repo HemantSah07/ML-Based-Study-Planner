@@ -1,0 +1,155 @@
+{% extends 'base.html' %}
+{% block title %}Subject Selection{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <!-- Header Banner -->
+        <div class="hero-banner text-center mb-4 stagger-1">
+            <i class="fas fa-book text-gradient mb-3" style="font-size: 2.5rem;"></i>
+            <h1 class="page-title mb-2">Configure Your Curriculum Subjects</h1>
+            <p class="page-subtitle mx-auto mb-0">
+                Select your active subjects for the planner and ML risk evaluations.
+            </p>
+        </div>
+
+        {% if not profile.study_level %}
+        <div class="alert alert-warning text-center mb-4 stagger-2">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            Set your class level in <a href="{{ url_for('student.profile') }}" class="alert-link">Profile</a> to see your subjects.
+        </div>
+        {% else %}
+        <div class="card card-flat p-4 stagger-2">
+            <!-- Search & Control Panel -->
+            <div class="row g-3 mb-4 align-items-center">
+                <div class="col-md-6">
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark border-secondary text-muted"><i class="fas fa-search"></i></span>
+                        <input type="text" id="subjectSearch" class="form-control border-secondary text-white" placeholder="Search subjects by name or code...">
+                    </div>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <button type="button" class="btn btn-outline-primary btn-sm me-2" onclick="selectAll(true)">
+                        <i class="fas fa-check-double me-1"></i> Select All
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectAll(false)">
+                        <i class="fas fa-times me-1"></i> Deselect All
+                    </button>
+                </div>
+            </div>
+
+            <!-- Recently Used Subjects -->
+            {% if recently_used %}
+            <div class="mb-4">
+                <h6 class="text-gradient fw-bold mb-2"><i class="fas fa-history me-1"></i> Recently Used Subjects</h6>
+                <div class="d-flex flex-wrap gap-2">
+                    {% for r in recently_used %}
+                    <span class="badge bg-secondary cursor-pointer py-2 px-3 rounded-pill text-white" onclick="toggleSubjectSelection({{ r.id }})">
+                        <i class="fas fa-plus-circle me-1"></i> {{ r.name }} ({{ r.code }})
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Form -->
+            <form method="POST" action="{{ url_for('student.manage_subjects') }}" id="subjectForm">
+                <div class="row g-4">
+                    <!-- Selected Subjects Column -->
+                    <div class="col-md-6">
+                        <div class="border border-secondary rounded p-3 h-100 bg-dark-card">
+                            <h5 class="fw-bold text-white mb-3"><i class="fas fa-check-circle text-success me-2"></i> Selected Subjects</h5>
+                            <div class="subjects-list" id="selectedSubjectsList" style="max-height: 400px; overflow-y: auto;">
+                                {% if selected_subjects %}
+                                    {% for s in selected_subjects %}
+                                    <div class="subject-item-card mb-2 p-2 rounded border border-secondary bg-dark d-flex align-items-center" data-id="{{ s.id }}" data-search="{{ s.name.lower() }} {{ s.code.lower() }}">
+                                        <input class="form-check-input ms-2 me-3 subject-cb" type="checkbox" name="subjects" value="{{ s.id }}" id="sub_sel_{{ s.id }}" checked>
+                                        <label class="form-check-label text-light w-100 cursor-pointer" for="sub_sel_{{ s.id }}">
+                                            <div class="fw-bold small">{{ s.name }}</div>
+                                            <div class="text-muted small" style="font-size: 0.72rem;">{{ s.code }} · Credit Hours: {{ s.credit_hours }}</div>
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="text-muted text-center py-4 small" id="noSelectedMsg">No subjects currently selected.</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Available Subjects Column -->
+                    <div class="col-md-6">
+                        <div class="border border-secondary rounded p-3 h-100 bg-dark-card">
+                            <h5 class="fw-bold text-white mb-3"><i class="fas fa-plus-circle text-primary me-2"></i> Available Subjects</h5>
+                            <div class="subjects-list" id="availableSubjectsList" style="max-height: 400px; overflow-y: auto;">
+                                {% if available_subjects %}
+                                    {% for s in available_subjects %}
+                                    <div class="subject-item-card mb-2 p-2 rounded border border-secondary bg-dark d-flex align-items-center" data-id="{{ s.id }}" data-search="{{ s.name.lower() }} {{ s.code.lower() }}">
+                                        <input class="form-check-input ms-2 me-3 subject-cb" type="checkbox" name="subjects" value="{{ s.id }}" id="sub_avail_{{ s.id }}">
+                                        <label class="form-check-label text-light w-100 cursor-pointer" for="sub_avail_{{ s.id }}">
+                                            <div class="fw-bold small">{{ s.name }}</div>
+                                            <div class="text-muted small" style="font-size: 0.72rem;">{{ s.code }} · Credit Hours: {{ s.credit_hours }}</div>
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="text-muted text-center py-4 small">No other subjects available for your curriculum settings.</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4">
+                    <button type="submit" class="btn btn-primary btn-glow w-100 py-3 fw-bold">
+                        <i class="fas fa-save me-2"></i> Save Subject Selections
+                    </button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const searchInput = document.getElementById("subjectSearch");
+    
+    // Live Search Filter
+    searchInput.addEventListener("input", function() {
+        const query = this.value.toLowerCase().trim();
+        const cards = document.querySelectorAll(".subject-item-card");
+        
+        cards.forEach(card => {
+            const searchText = card.getAttribute("data-search");
+            if (searchText.includes(query)) {
+                card.style.setProperty("display", "flex", "important");
+            } else {
+                card.style.setProperty("display", "none", "important");
+            }
+        });
+    });
+});
+
+function selectAll(check) {
+    const checkboxes = document.querySelectorAll(".subject-cb");
+    checkboxes.forEach(cb => {
+        cb.checked = check;
+    });
+}
+
+function toggleSubjectSelection(id) {
+    // Search both lists for checkbox
+    const cb_sel = document.getElementById("sub_sel_" + id);
+    const cb_avail = document.getElementById("sub_avail_" + id);
+    
+    if (cb_sel) {
+        cb_sel.checked = !cb_sel.checked;
+    } else if (cb_avail) {
+        cb_avail.checked = !cb_avail.checked;
+    }
+}
+</script>
+{% endblock %}

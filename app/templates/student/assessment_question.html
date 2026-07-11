@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% block title %}Question {{ q_num }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-9">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="text-muted small fw-bold">{{ subject.name }}</span>
+            <span class="text-muted small">Question {{ q_num }} of {{ total_q }}</span>
+        </div>
+        <div class="assessment-progress mb-4">
+            <div class="assessment-progress-bar" style="width: {{ (q_num / total_q) * 100 }}%"></div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <span class="badge {% if question.difficulty == 'beginner' %}bg-low{% elif question.difficulty == 'intermediate' %}bg-medium{% else %}bg-high{% endif %} px-3 py-2">
+                {{ question.difficulty|title }}
+            </span>
+            <span class="badge bg-secondary timer-badge" id="timer"><i class="far fa-clock me-1"></i> 60s</span>
+        </div>
+
+        <div class="card card-flat p-4 p-md-5 mb-4 text-center">
+            <h3 class="fw-bold lh-base mb-0">{{ question.question_text }}</h3>
+        </div>
+
+        <form id="qForm" method="POST" action="{{ url_for('student.assessment_answer') }}">
+            <input type="hidden" name="question_id" value="{{ question.id }}">
+            <input type="hidden" name="subject_id" value="{{ subject.id }}">
+            <input type="hidden" name="q_num" value="{{ q_num }}">
+            <input type="hidden" name="time_taken" id="time_taken" value="0">
+
+            <div class="row g-3">
+                {% for opt in [('A', question.option_a), ('B', question.option_b), ('C', question.option_c), ('D', question.option_d)] %}
+                <div class="col-md-6">
+                    <div class="card h-100 option-card" id="card{{ opt[0] }}" onclick="selectOption('{{ opt[0] }}')">
+                        <div class="card-body p-4 d-flex align-items-center gap-3">
+                            <input class="form-check-input d-none" type="radio" name="answer" value="{{ opt[0] }}" id="opt{{ opt[0] }}">
+                            <div class="option-letter">{{ opt[0] }}</div>
+                            <label class="mb-0 flex-grow-1" style="cursor:pointer;" for="opt{{ opt[0] }}">{{ opt[1] }}</label>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 py-3 mt-4" id="nextBtn" disabled>
+                Next Question <i class="fas fa-chevron-right ms-2"></i>
+            </button>
+        </form>
+    </div>
+</div>
+
+<script>
+    let timeLeft = 60;
+    const timerEl = document.getElementById('timer');
+    const timeTakenEl = document.getElementById('time_taken');
+    const form = document.getElementById('qForm');
+
+    const interval = setInterval(() => {
+        timeLeft--;
+        timerEl.innerHTML = `<i class="far fa-clock me-1"></i> ${timeLeft}s`;
+        timeTakenEl.value = 60 - timeLeft;
+        if (timeLeft <= 15) timerEl.classList.add('urgent');
+        if (timeLeft <= 0) { clearInterval(interval); form.submit(); }
+    }, 1000);
+
+    function selectOption(val) {
+        document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+        document.getElementById('opt' + val).checked = true;
+        document.getElementById('card' + val).classList.add('selected');
+        document.getElementById('nextBtn').disabled = false;
+    }
+</script>
+{% endblock %}

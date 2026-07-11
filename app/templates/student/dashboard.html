@@ -1,0 +1,346 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="hero-banner mb-4 stagger-1">
+    <div class="hero-glow-orb" style="right: 10%; top: 20%;"></div>
+    <div class="position-relative" style="z-index: 1;">
+        <h1 class="page-title mb-2">Welcome back, <span class="text-gradient">{{ user.full_name or user.username }}</span></h1>
+        <p class="page-subtitle mb-0">Your ML-powered study command center — track progress, risk, and today's plan.</p>
+        {% if profile and not profile.has_completed_assessment %}
+        <div class="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-3 mt-4 mb-0">
+            <div><i class="fas fa-exclamation-triangle me-2"></i><strong>Complete your assessment</strong> to unlock personalized insights.</div>
+            <a href="{{ url_for('student.assessment_start') }}" class="btn btn-primary btn-sm">Start Now</a>
+        </div>
+        {% endif %}
+        {% if log_analysis and log_analysis.diverges_significantly %}
+        <div class="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-3 mt-4 mb-0">
+            <div>
+                <i class="fas fa-exclamation-triangle me-2 text-warning"></i>
+                <strong>Adaptive Planner Alert:</strong> Your logged study hours ({{ "%.1f"|format(log_analysis.total_logged_hours) }}h) diverge from planned target ({{ "%.1f"|format(log_analysis.total_planned_hours) }}h) with {{ log_analysis.missed_sessions }} missed blocks. We recommend adapting your planner to avoid study fatigue.
+            </div>
+            <form action="{{ url_for('student.planner_adapt_regenerate') }}" method="POST" class="mb-0">
+                <button type="submit" class="btn btn-warning btn-sm"><i class="fas fa-sync-alt me-1"></i> Adapt & Regenerate</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3 stagger-2">
+        <div class="card stat-card card-flat p-4">
+            <div class="stat-icon mb-3"><i class="fas fa-award text-gradient"></i></div>
+            <div class="text-muted small fw-bold mb-1">Academic Score</div>
+            <div class="stat-value text-gradient">{{ "%.1f"|format(profile.prior_academic_score) if profile else 0.0 }}%</div>
+            <span class="badge bg-low mt-2">{{ profile.level_of_study if profile else 'Average' }}</span>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3 stagger-2">
+        <div class="card stat-card card-flat p-4">
+            <div class="stat-icon mb-3" style="background: rgba(168, 85, 247, 0.1); border-color: rgba(168, 85, 247, 0.2);"><i class="fas fa-calendar-check text-gradient"></i></div>
+            <div class="text-muted small fw-bold mb-1">Planned This Week</div>
+            <div class="stat-value text-gradient">{{ total_scheduled }}h</div>
+            <span class="badge bg-medium mt-2">Schedule</span>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3 stagger-3">
+        <div class="card stat-card card-flat p-4">
+            <div class="stat-icon mb-3" style="background: rgba(52, 211, 153, 0.1); border-color: rgba(52, 211, 153, 0.2);"><i class="fas fa-robot" style="color: var(--green);"></i></div>
+            <div class="text-muted small fw-bold mb-1">ML Risk Level</div>
+            {% set max_risk = risk_data[0] %}
+            {% set overall = "High" %}
+            {% set badge_class = "bg-high" %}
+            {% if risk_data[1] >= max_risk %}
+                {% set max_risk = risk_data[1] %}
+                {% set overall = "Medium" %}
+                {% set badge_class = "bg-medium" %}
+            {% endif %}
+            {% if risk_data[2] > max_risk %}
+                {% set overall = "Low" %}
+                {% set badge_class = "bg-low" %}
+            {% endif %}
+            <div class="stat-value text-gradient">{{ overall if risk_data[0] + risk_data[1] + risk_data[2] > 0 else "N/A" }}</div>
+            <span class="badge {{ badge_class }} mt-2">Random Forest</span>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3 stagger-3">
+        <div class="card stat-card card-flat p-4">
+            <div class="stat-icon mb-3" style="background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.2);"><i class="fas fa-fire" style="color: var(--amber);"></i></div>
+            <div class="text-muted small fw-bold mb-1">Study Streak</div>
+            <div class="stat-value text-gradient">{{ streak }} Days</div>
+            <span class="badge bg-low mt-2">{{ "%.1f"|format(logged_hours) }}h logged</span>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4 stagger-4">
+    <div class="col-lg-4">
+        <div class="card card-flat p-4 h-100">
+            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-bolt me-2"></i> Quick Actions</h5>
+            <div class="d-flex flex-column gap-2">
+                <a href="{{ url_for('student.schedule') }}" class="quick-action">
+                    <div class="quick-action-icon" style="background: rgba(56, 189, 248, 0.12); color: var(--blue);"><i class="fas fa-magic"></i></div>
+                    <div>
+                        <div class="fw-bold">Generate Study Plan</div>
+                        <div class="small text-muted">ML adaptive scheduling</div>
+                    </div>
+                </a>
+                <a href="{{ url_for('student.predict') }}" class="quick-action">
+                    <div class="quick-action-icon" style="background: rgba(168, 85, 247, 0.12); color: var(--purple);"><i class="fas fa-chart-line"></i></div>
+                    <div>
+                        <div class="fw-bold">Run ML Predictor</div>
+                        <div class="small text-muted">Predict risk & build plan</div>
+                    </div>
+                </a>
+                <a href="{{ url_for('student.study_log') }}" class="quick-action">
+                    <div class="quick-action-icon" style="background: rgba(52, 211, 153, 0.12); color: var(--green);"><i class="fas fa-plus"></i></div>
+                    <div>
+                        <div class="fw-bold">Log Study Session</div>
+                        <div class="small text-muted">Track your hours</div>
+                    </div>
+                </a>
+            </div>
+        </div>
+        
+        <!-- Weekly Commitments Summary Widget -->
+        <div class="card card-flat p-4 mt-3">
+            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-clock me-2"></i> Weekly Commitments</h5>
+            <p class="text-muted small mb-3">Your weekly schedule commitments. Anything left over is allocated to Study.</p>
+            <div class="d-flex flex-column gap-2">
+                {% set colors = {
+                    'Sleep': '#a855f7',
+                    'Class/Academic': '#3b82f6',
+                    'Sports': '#f97316',
+                    'Social/Hangout': '#ec4899',
+                    'Entertainment': '#ef4444',
+                    'Personal/Chores': '#eab308',
+                    'Other': '#94a3b8',
+                    'Busy': '#94a3b8'
+                } %}
+                {% set total_commitments = namespace(val=0) %}
+                {% for cat, hrs in commitment_summary.items() %}
+                    {% set total_commitments.val = total_commitments.val + hrs %}
+                    <div class="d-flex align-items-center justify-content-between p-2 rounded border border-light bg-light text-dark mb-1">
+                        <div class="d-flex align-items-center gap-2">
+                            <span style="background-color: {{ colors[cat] or '#94a3b8' }}; width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
+                            <span class="small fw-semibold text-dark">{{ cat }}</span>
+                        </div>
+                        <span class="badge bg-secondary font-monospace">{{ "%.1f"|format(hrs) }}h</span>
+                    </div>
+                {% else %}
+                    <div class="text-center text-muted small py-3">No commitments configured. {{ "%.1f"|format(available_study_hours or 168.0) }} hours are available.</div>
+                {% endfor %}
+                {% if commitment_summary %}
+                    <div class="mt-2 text-end text-muted small fw-semibold">
+                        Leftover Available Study Time: <span class="text-success font-monospace">{{ "%.1f"|format(available_study_hours or 0) }}h</span>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="card card-flat p-4 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="text-gradient fw-bold mb-0"><i class="fas fa-sun me-2"></i> Today's Plan</h5>
+                <a href="{{ url_for('student.schedule') }}" class="btn btn-outline-primary btn-sm">Full week</a>
+            </div>
+            {% if today_slots %}
+            <div class="row g-2">
+                {% for slot in today_slots %}
+                {% set risk_class = 'risk-medium' %}
+                {% if 'High Risk' in slot.description %}{% set risk_class = 'risk-high' %}
+                {% elif 'Low Risk' in slot.description %}{% set risk_class = 'risk-low' %}
+                {% endif %}
+                <div class="col-md-6">
+                    <div class="schedule-card {{ risk_class }}">
+                        <div class="schedule-time">{{ slot.start_time.strftime('%I:%M %p') }} – {{ slot.end_time.strftime('%I:%M %p') }}</div>
+                        <div class="schedule-subject">{{ slot.subject_name }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-5 text-muted">
+                <i class="fas fa-calendar-plus fa-2x mb-3 opacity-50"></i>
+                <p class="mb-3">No sessions planned for today yet.</p>
+                <a href="{{ url_for('student.schedule') }}" class="btn btn-primary btn-sm">Build Your Plan</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-8">
+        <div class="card card-flat p-4">
+            <h5 class="text-gradient fw-bold mb-4"><i class="fas fa-chart-bar me-2"></i> Study Hour Allocation</h5>
+            <div style="height: 300px;"><canvas id="allocationChart"></canvas></div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card card-flat p-4">
+            <h5 class="text-gradient fw-bold mb-4"><i class="fas fa-chart-pie me-2"></i> Risk Breakdown</h5>
+            <div style="height: 300px;"><canvas id="riskChart"></canvas></div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4 stagger-5">
+    <!-- Topic Recommendations -->
+    <div class="col-md-6">
+        <div class="card card-flat p-4 h-100">
+            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-graduation-cap me-2 text-primary"></i> Recommended Topics to Revise</h5>
+            <p class="text-muted small mb-4">Jump straight into textbook lessons for areas that need improvement:</p>
+            {% if recommended_topics %}
+            <div class="list-group list-group-flush bg-transparent">
+                {% for rt in recommended_topics %}
+                <a href="{{ url_for('student.study_subject', subject_id=rt.subject_id) }}" class="list-group-item list-group-item-action bg-transparent text-white border-secondary d-flex justify-content-between align-items-center py-2 px-0">
+                    <div>
+                        <i class="fas fa-external-link-alt text-primary me-2 small"></i>
+                        <span class="fw-bold">{{ rt.name }}</span>
+                        <div class="text-muted fs-8">Unit: {{ rt.chapter_name }} ({{ rt.subject_name }})</div>
+                    </div>
+                    <span class="badge bg-purple">Study Lesson</span>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-5 text-muted">
+                <i class="fas fa-check-circle fa-2x text-success mb-2 opacity-50"></i>
+                <h6>All caught up!</h6>
+                <p class="small mb-0">No weak topics identified. Complete diagnostic assessments to unlock recommendations.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Recent Accomplishments -->
+    <div class="col-md-6">
+        <div class="card card-flat p-4 h-100">
+            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-trophy me-2 text-warning"></i> Recent Accomplishments</h5>
+            <p class="text-muted small mb-4">Milestones and study accomplishments achieved:</p>
+            <div class="d-flex flex-column gap-3">
+                {% for acc in accomplishments %}
+                <div class="d-flex align-items-center gap-3">
+                    <div class="p-2 rounded bg-dark border border-secondary" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                        <i class="fas {{ acc.icon }} fs-5"></i>
+                    </div>
+                    <div>
+                        <div class="fw-bold text-white small">{{ acc.title }}</div>
+                        <small class="text-muted" style="font-size: 0.8rem;">{{ acc.desc }}</small>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+</div>
+
+<div class="row g-4 mt-2 stagger-4">
+    <!-- Recommended Review for Upcoming Exams -->
+    {% if recommended_review_bookmarks %}
+    <div class="col-md-6">
+        <div class="card card-flat p-4 h-100 border border-warning" style="background: rgba(251, 191, 36, 0.03);">
+            <h5 class="fw-bold mb-3 text-warning"><i class="fas fa-exclamation-triangle me-2 animate-bounce"></i> Recommended Review (Exam in &lt; 7 Days!)</h5>
+            <p class="text-muted small mb-4">The following bookmarked topics are critical review material for your upcoming exam. Revise them immediately!</p>
+            <div class="d-flex flex-column gap-2">
+                {% for b in recommended_review_bookmarks %}
+                <a href="{{ url_for('student.study_subject', subject_id=b.topic.chapter.subject_id) }}" class="d-flex align-items-center justify-content-between p-3 rounded bg-dark border border-secondary text-decoration-none hover-scale" style="transition: all 0.2s ease;">
+                    <div class="d-flex align-items-center gap-3 text-white">
+                        <i class="fas fa-star text-warning"></i>
+                        <div>
+                            <div class="fw-bold small">{{ b.topic.name }}</div>
+                            <small class="text-muted" style="font-size: 0.75rem;">Chapter: {{ b.topic.chapter.name }} ({{ b.topic.chapter.subject.name }})</small>
+                        </div>
+                    </div>
+                    <span class="btn btn-sm btn-outline-warning py-1"><i class="fas fa-arrow-right"></i> Review</span>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Study History & Cached Downloads -->
+    <div class="col-md-{% if recommended_review_bookmarks %}6{% else %}12{% endif %}">
+        <div class="card card-flat p-4 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="text-gradient fw-bold mb-0"><i class="fas fa-history me-2"></i> Recently Studied &amp; Downloads</h5>
+                <a href="{{ url_for('student.my_downloads_page') }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-folder-open me-1"></i> View All</a>
+            </div>
+            <p class="text-muted small mb-4">Fast access to topics you have studied or downloaded as chapter PDFs.</p>
+            <div class="d-flex flex-column gap-2">
+                {% for hist in recent_study_history %}
+                <a href="{{ url_for('student.study_subject', subject_id=hist.topic.chapter.subject_id) }}" class="d-flex align-items-center justify-content-between p-3 rounded bg-dark border border-secondary text-decoration-none hover-scale" style="transition: all 0.2s ease;">
+                    <div class="d-flex align-items-center gap-3 text-white">
+                        <i class="fas fa-file-pdf text-danger"></i>
+                        <div>
+                            <div class="fw-bold small">{{ hist.topic.name }}</div>
+                            <small class="text-muted" style="font-size: 0.75rem;">Unit: {{ hist.topic.chapter.name }} ({{ hist.topic.chapter.subject.name }})</small>
+                        </div>
+                    </div>
+                    <span class="badge {% if hist.status == 'completed' %}bg-success{% else %}bg-info{% endif %}">{{ hist.status | upper }}</span>
+                </a>
+                {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="fas fa-history fa-2x mb-2 opacity-30"></i>
+                    <p class="small mb-0">No study history recorded yet. Open study room to get started!</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.06)';
+
+    const ctxBar = document.getElementById('allocationChart').getContext('2d');
+    const gradient = ctxBar.createLinearGradient(0, 0, 0, 300);
+    gradient.addColorStop(0, 'rgba(56, 189, 248, 0.85)');
+    gradient.addColorStop(1, 'rgba(168, 85, 247, 0.2)');
+
+    new Chart(ctxBar, {
+        type: 'bar',
+        data: {
+            labels: {{ chart_labels | tojson | safe }},
+            datasets: [{
+                label: 'Hours',
+                data: {{ chart_data | tojson | safe }},
+                backgroundColor: gradient,
+                borderRadius: 8,
+                borderSkipped: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } },
+                x: { grid: { display: false } }
+            }
+        }
+    });
+
+    new Chart(document.getElementById('riskChart'), {
+        type: 'doughnut',
+        data: {
+            labels: ['High', 'Medium', 'Low'],
+            datasets: [{
+                data: {{ risk_data | tojson | safe }},
+                backgroundColor: ['rgba(248,113,113,0.85)', 'rgba(251,191,36,0.85)', 'rgba(52,211,153,0.85)'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+</script>
+{% endblock %}

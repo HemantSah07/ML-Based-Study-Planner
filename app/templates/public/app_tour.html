@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}App Tour{% endblock %}
+
+{% block content %}
+<section class="landing-hero pb-4">
+    <h1 class="text-gradient">How Smart Study Works</h1>
+    <p class="lead text-muted mx-auto" style="max-width: 560px;">Four intelligent modules working together to help you study smarter at APU.</p>
+</section>
+
+<div class="row g-4 mb-5">
+    <div class="col-md-6 col-lg-3">
+        <div class="feature-card h-100 text-center stagger-1">
+            <div class="feature-icon mx-auto" style="background: rgba(56,189,248,0.12); color: var(--blue);"><i class="fas fa-calendar-alt"></i></div>
+            <h5 class="fw-bold">1. Plan</h5>
+            <p class="text-muted small mb-0">Add subjects, set weekly hours — ML allocates study blocks by predicted risk.</p>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="feature-card h-100 text-center stagger-2">
+            <div class="feature-icon mx-auto" style="background: rgba(168,85,247,0.12); color: var(--purple);"><i class="fas fa-robot"></i></div>
+            <h5 class="fw-bold">2. Predict</h5>
+            <p class="text-muted small mb-0">Random Forest analyzes 12 features to forecast grades and risk levels.</p>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="feature-card h-100 text-center stagger-3">
+            <div class="feature-icon mx-auto" style="background: rgba(52,211,153,0.12); color: var(--green);"><i class="fas fa-file-invoice"></i></div>
+            <h5 class="fw-bold">3. Scan</h5>
+            <p class="text-muted small mb-0">Upload marksheets — Tesseract OCR extracts grades into your profile.</p>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="feature-card h-100 text-center stagger-4">
+            <div class="feature-icon mx-auto" style="background: rgba(251,191,36,0.12); color: var(--amber);"><i class="fas fa-brain"></i></div>
+            <h5 class="fw-bold">4. Assess</h5>
+            <p class="text-muted small mb-0">Adaptive quizzes map your knowledge tier per subject automatically.</p>
+        </div>
+    </div>
+</div>
+
+<div class="card card-flat p-4 p-md-5 mx-auto" style="max-width: 720px;">
+    <h4 class="text-gradient fw-bold mb-4 text-center">Student Journey</h4>
+    <div class="tour-step mb-4">
+        <div class="tour-step-num">1</div>
+        <h6 class="fw-bold">Register & complete assessment</h6>
+        <p class="text-muted small mb-0">Establish your baseline knowledge across APU subjects.</p>
+    </div>
+    <div class="tour-step mb-4">
+        <div class="tour-step-num">2</div>
+        <h6 class="fw-bold">Upload academic documents</h6>
+        <p class="text-muted small mb-0">OCR ingests SEE, +2, or transcript marks into your profile.</p>
+    </div>
+    <div class="tour-step mb-4">
+        <div class="tour-step-num">3</div>
+        <h6 class="fw-bold">Generate adaptive study plan</h6>
+        <p class="text-muted small mb-0">ML weights high-risk subjects and builds your weekly calendar.</p>
+    </div>
+    <div class="tour-step">
+        <div class="tour-step-num">4</div>
+        <h6 class="fw-bold">Track & iterate</h6>
+        <p class="text-muted small mb-0">Log study hours, re-run predictions, and refine your schedule.</p>
+    </div>
+    <div class="text-center mt-4">
+        <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-lg px-5">Start Free</a>
+    </div>
+</div>
+{% endblock %}

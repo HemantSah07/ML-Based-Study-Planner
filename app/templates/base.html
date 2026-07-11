@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Smart Study{% endblock %} · Intelligent ML Study Planner</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/smart-study.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+{% if not current_user.is_authenticated %}
+    <nav class="navbar navbar-expand-lg public-navbar">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('main.home') }}">
+                <i class="fas fa-graduation-cap"></i>
+                <span>Smart Study</span>
+            </a>
+            <button class="navbar-toggler border-0 text-white" type="button" data-bs-toggle="collapse" data-bs-target="#publicNav">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="collapse navbar-collapse justify-content-center" id="publicNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('main.home') }}">Home</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('main.app_tour') }}">App Tour</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('main.about') }}">About</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('main.study_tips') }}">Study Tips</a></li>
+                </ul>
+            </div>
+            <div class="d-flex gap-2 d-none d-lg-flex">
+                <a href="{{ url_for('auth.register') }}" class="btn btn-public-signup">Sign Up</a>
+                <a href="{{ url_for('auth.login') }}" class="btn btn-public-login">Log In</a>
+            </div>
+            <div class="d-lg-none w-100 mt-3">
+                <a href="{{ url_for('auth.register') }}" class="btn btn-public-signup w-100 mb-2">Sign Up</a>
+                <a href="{{ url_for('auth.login') }}" class="btn btn-public-login w-100">Log In</a>
+            </div>
+        </div>
+    </nav>
+
+{% elif current_user.role == 'student' %}
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <div class="app-shell">
+        <aside class="app-sidebar" id="appSidebar">
+            <div class="app-sidebar-brand">
+                <a href="{{ url_for('student.dashboard') }}">
+                    <i class="fas fa-graduation-cap text-gradient"></i>
+                    <span class="text-gradient">Smart Study</span>
+                </a>
+            </div>
+            <nav class="app-sidebar-nav">
+                <div class="sidebar-section-label">Overview</div>
+                <a class="sidebar-link {% if request.endpoint == 'student.dashboard' %}active{% endif %}" href="{{ url_for('student.dashboard') }}">
+                    <i class="fas fa-chart-line"></i> Dashboard
+                </a>
+                <a class="sidebar-link {% if request.endpoint and 'assessment' in request.endpoint %}active{% endif %}" href="{{ url_for('student.assessment_start') }}">
+                    <i class="fas fa-brain"></i> Assessment
+                </a>
+                <a class="sidebar-link {% if request.endpoint == 'student.manage_subjects' %}active{% endif %}" href="{{ url_for('student.manage_subjects') }}">
+                    <i class="fas fa-book"></i> Active Subjects
+                </a>
+                <div class="sidebar-section-label mt-3">Planning</div>
+                <a class="sidebar-link planner-link {% if request.endpoint == 'student.schedule' %}active{% endif %}" href="{{ url_for('student.schedule') }}">
+                    <i class="fas fa-calendar-alt"></i> Study Planner
+                </a>
+                <a class="sidebar-link {% if request.endpoint == 'student.predict' %}active{% endif %}" href="{{ url_for('student.predict') }}">
+                    <i class="fas fa-robot"></i> ML Predictor
+                </a>
+                <a class="sidebar-link {% if request.endpoint == 'student.study_log' %}active{% endif %}" href="{{ url_for('student.study_log') }}">
+                    <i class="fas fa-clock"></i> Study Log
+                </a>
+                <a class="sidebar-link {% if request.endpoint == 'student.assistant' %}active{% endif %}" href="{{ url_for('student.assistant') }}">
+                    <i class="fas fa-robot"></i> AI Assistant
+                </a>
+                <a class="sidebar-link {% if request.endpoint == 'student.future_learning' %}active{% endif %}" href="{{ url_for('student.future_learning') }}">
+                    <i class="fas fa-rocket"></i> Future Learning
+                </a>
+                <a class="sidebar-link {% if request.endpoint == 'student.study_material' %}active{% endif %}" href="{{ url_for('student.study_material') }}">
+                    <i class="fas fa-book-open"></i> AI Study Material
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <a href="{{ url_for('student.profile') }}" class="sidebar-user text-decoration-none d-flex align-items-center gap-2">
+                    <div class="sidebar-avatar" style="padding: 0; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                        {% set user_profile = current_user.profile %}
+                        {% if user_profile and user_profile.profile_pic %}
+                        <img src="{{ url_for('static', filename=user_profile.profile_pic) }}" alt="Avatar" style="width: 100%; height: 100%; object-fit: cover;">
+                        {% else %}
+                        {{ (current_user.full_name or 'S')[0] }}
+                        {% endif %}
+                    </div>
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="fw-bold small text-truncate text-white">{{ current_user.full_name or current_user.email }}</div>
+                        <div class="text-muted" style="font-size: 0.72rem;">Student Profile</div>
+                    </div>
+                </a>
+                <a href="{{ url_for('auth.logout') }}" class="sidebar-link mt-2 text-danger" style="color: #f87171 !important;">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </a>
+            </div>
+        </aside>
+        <div class="app-main">
+            <header class="app-topbar">
+                <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Toggle menu">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <span class="text-gradient fw-bold">Smart Study</span>
+                <a href="{{ url_for('student.schedule') }}" class="btn btn-primary btn-sm">
+                    <i class="fas fa-magic me-1"></i> Plan
+                </a>
+            </header>
+{% else %}
+    <nav class="navbar navbar-expand-lg admin-navbar mb-4">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand" href="{{ url_for('admin.dashboard') }}">
+                <i class="fas fa-cogs"></i>
+                <span>Admin Panel</span>
+            </a>
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.logout') }}"><i class="fas fa-sign-out-alt me-1"></i> Logout</a></li>
+            </ul>
+        </div>
+    </nav>
+{% endif %}
+
+{% if not current_user.is_authenticated or current_user.role != 'student' %}
+    <div class="container pb-5">
+{% endif %}
+        {% include '_flash.html' %}
+        {% block content %}{% endblock %}
+{% if not current_user.is_authenticated or current_user.role != 'student' %}
+    </div>
+{% elif current_user.role == 'student' %}
+        </div>
+    </div>
+{% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/smart-study.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

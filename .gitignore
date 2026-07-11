@@ -1,0 +1,35 @@
+# Virtual environment
+venv/
+env/
+.env
+
+# Python cache / compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Flask instance folder (contains large seeds, databases, data csvs)
+instance/
+
+# Databases
+*.db
+*.sqlite3
+
+# ML models (large binaries) and training datasets (large text files)
+*.pkl
+models/*.csv
+
+# AI Agent workspace
+.agents/
+
+# User uploads
+app/static/uploads/
+
+# IDE configurations
+.vscode/
+.idea/
+
+# OS-specific metadata
+.DS_Store
+Thumbs.db

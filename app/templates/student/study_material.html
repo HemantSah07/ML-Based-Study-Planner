@@ -1,0 +1,869 @@
+{% extends 'base.html' %}
+{% block title %}AI Study Material{% endblock %}
+
+{% block head %}
+<style>
+    /* Premium Collapsible Panel Styles */
+    .material-section-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: 1rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
+    }
+    .material-section-card:hover {
+        border-color: var(--border-strong);
+        background: var(--surface-hover);
+        box-shadow: var(--shadow-sm);
+    }
+    .material-header-btn {
+        width: 100%;
+        padding: 1.25rem 1.5rem;
+        background: transparent;
+        border: none;
+        color: var(--text);
+        text-align: left;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-weight: 600;
+        font-size: 1.1rem;
+        cursor: pointer;
+        transition: color 0.2s ease;
+    }
+    .material-header-btn:focus {
+        outline: none;
+    }
+    .material-header-btn .header-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    .material-header-btn .header-left i {
+        font-size: 1.25rem;
+        transition: transform 0.3s ease;
+    }
+    .material-header-btn .toggle-icon {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        transition: transform 0.3s ease;
+    }
+    .material-section-card.expanded {
+        border-color: rgba(56, 189, 248, 0.3);
+        box-shadow: var(--shadow-sm);
+    }
+    .material-section-card.expanded .toggle-icon {
+        transform: rotate(180deg);
+        color: var(--blue);
+    }
+    .material-body-content {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        background: rgba(0, 0, 0, 0.15);
+    }
+    .material-body-inner {
+        padding: 1.5rem;
+        border-top: 1px solid var(--border);
+        color: rgba(241, 245, 249, 0.9);
+        line-height: 1.7;
+    }
+    
+    /* Interactive Flashcard CSS */
+    .flashcard-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 1rem 0;
+    }
+    .flashcard-wrapper {
+        perspective: 1000px;
+        width: 100%;
+        max-width: 480px;
+        height: 260px;
+        cursor: pointer;
+    }
+    .flashcard-inner-card {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        text-align: center;
+        transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        transform-style: preserve-3d;
+    }
+    .flashcard-wrapper.flipped .flashcard-inner-card {
+        transform: rotateY(180deg);
+    }
+    .flashcard-front, .flashcard-back {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        -webkit-backface-visibility: hidden;
+        backface-visibility: hidden;
+        border-radius: var(--radius-md);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 2rem;
+        border: 1px solid var(--border-strong);
+        box-shadow: var(--shadow-md);
+    }
+    .flashcard-front {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+        color: var(--text);
+    }
+    .flashcard-back {
+        background: linear-gradient(135deg, rgba(76, 29, 149, 0.95), rgba(15, 23, 42, 0.95));
+        color: var(--text);
+        transform: rotateY(180deg);
+    }
+    
+    /* Interactive MCQ Styles */
+    .mcq-item {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 1.25rem;
+        margin-bottom: 1.25rem;
+    }
+    .mcq-options-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+    }
+    .mcq-option-btn {
+        width: 100%;
+        text-align: left;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        color: var(--text);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    .mcq-option-btn:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: var(--blue);
+    }
+    .mcq-option-btn:focus {
+        outline: none;
+    }
+    .mcq-option-btn.correct {
+        background: rgba(52, 211, 153, 0.15) !important;
+        border-color: var(--green) !important;
+        color: #6ee7b7 !important;
+        font-weight: 600;
+    }
+    .mcq-option-btn.incorrect {
+        background: rgba(248, 113, 113, 0.15) !important;
+        border-color: var(--red) !important;
+        color: #fca5a5 !important;
+    }
+    .mcq-explanation {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: rgba(56, 189, 248, 0.06);
+        border-left: 3px solid var(--blue);
+        border-radius: 0 8px 8px 0;
+        font-size: 0.9rem;
+    }
+    
+    /* Loading overlay */
+    .ai-loading-overlay {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 5rem 2rem;
+        text-align: center;
+    }
+    .loading-pulse {
+        width: 70px;
+        height: 70px;
+        border-radius: 50%;
+        background: var(--blue);
+        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+        animation: pulsing 1.6s infinite cubic-bezier(0.66, 0, 0, 1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 2rem;
+    }
+    .loading-pulse i {
+        font-size: 2rem;
+        color: #070b14;
+    }
+    
+    @keyframes pulsing {
+        to {
+            box-shadow: 0 0 0 30px rgba(56, 189, 248, 0);
+        }
+    }
+    
+    .subject-selector-pill {
+        border-radius: 50px;
+        padding: 0.5rem 1.25rem;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.02);
+        color: var(--text-muted);
+        text-decoration: none;
+        transition: all 0.2s ease;
+        font-weight: 500;
+        font-size: 0.9rem;
+    }
+    .subject-selector-pill:hover {
+        background: rgba(255,255,255,0.06);
+        color: white;
+    }
+    .subject-selector-pill.active {
+        background: var(--grad-primary);
+        border-color: transparent;
+        color: white;
+        box-shadow: 0 4px 12px rgba(168, 85, 247, 0.35);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <!-- Hero Banner -->
+        <div class="hero-banner mb-4 stagger-1">
+            <div class="hero-glow-orb" style="right: 15%; top: 10%;"></div>
+            <div class="position-relative" style="z-index: 1;">
+                <h1 class="page-title mb-2"><i class="fas fa-magic text-gradient me-2"></i>AI Study Material</h1>
+                <p class="page-subtitle mb-0">Generate curriculum-aligned interactive revision notes, questions, MCQs, and flashcards instantly.</p>
+            </div>
+        </div>
+
+        <!-- System Detection Banner -->
+        <div class="card card-flat p-3 mb-4 stagger-2" style="background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.15);">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-primary px-3 py-2 rounded-pill"><i class="fas fa-graduation-cap me-1"></i> Class: {{ profile.study_level }}</span>
+                    <span class="badge bg-secondary px-3 py-2 rounded-pill"><i class="fas fa-book me-1"></i> Subject: {{ selected_subject.name }} ({{ selected_subject.code }})</span>
+                </div>
+                <div class="text-muted small">
+                    <i class="fas fa-info-circle me-1"></i> Automatically detected from active configuration.
+                </div>
+            </div>
+        </div>
+
+        <!-- Subject Switcher -->
+        <div class="mb-4 stagger-2">
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <span class="text-muted me-2 small fw-bold"><i class="fas fa-exchange-alt me-1"></i> Switch Subject:</span>
+                {% for subj in active_subjects %}
+                <a href="{{ url_for('student.study_material', subject_id=subj.id) }}" class="subject-selector-pill {% if subj.id == selected_subject.id %}active{% endif %}">
+                    {{ subj.name }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Main Workspace Card -->
+        <div class="card card-flat p-4 mb-4 stagger-3" id="materialWorkspace">
+            <!-- Loading Indicator -->
+            <div class="ai-loading-overlay" id="aiLoadingOverlay">
+                <div class="loading-pulse">
+                    <i class="fas fa-brain"></i>
+                </div>
+                <h4 class="text-white fw-bold mb-2">Generating Complete Study Material</h4>
+                <p class="text-muted max-width-500 mx-auto">Gemini is structuring your revision notes, common mistakes, formulas, flashcards, MCQs, and practice questions. This may take up to 20-35 seconds...</p>
+            </div>
+
+            <!-- Empty / Prompt State -->
+            <div class="text-center py-5 {% if material %}d-none{% endif %}" id="emptyStateContainer">
+                <div class="mb-4">
+                    <i class="fas fa-book-reader text-gradient opacity-75" style="font-size: 4rem;"></i>
+                </div>
+                <h3 class="text-white fw-bold">No Study Material Generated Yet</h3>
+                <p class="text-muted mx-auto" style="max-width: 500px;">
+                    Generate comprehensive study materials customized for <strong>{{ selected_subject.name }}</strong> ({{ profile.study_level }} level).
+                </p>
+                <button class="btn btn-primary btn-glow px-4 py-3 fw-bold mt-3" id="btnFirstGenerate">
+                    <i class="fas fa-magic me-2"></i> Generate Study Material
+                </button>
+            </div>
+
+            <!-- Content Renders Here -->
+            <div class="{% if not material %}d-none{% endif %}" id="studyMaterialContainer">
+                <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+                    <div>
+                        <h4 class="text-white fw-bold mb-1"><i class="fas fa-book text-primary me-2"></i>Revision Vault</h4>
+                        <p class="text-muted small mb-0">Saved on your profile. Load times are instant. Last updated: <span id="lastUpdatedText">{{ saved_material_obj.updated_at.strftime('%Y-%m-%d %H:%M') if saved_material_obj else 'Just now' }}</span></p>
+                    </div>
+                    <div>
+                        <button class="btn btn-outline-primary btn-sm py-2 px-3 fw-bold" id="btnRegenerate">
+                            <i class="fas fa-sync-alt me-1"></i> Regenerate Study Material
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Collapsible Sections -->
+                
+                <!-- 1. Introduction -->
+                <div class="material-section-card" id="card-intro">
+                    <button class="material-header-btn" onclick="toggleSection('card-intro')">
+                        <span class="header-left">📖 <span class="ms-1">Introduction</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner" id="content-intro">
+                            {{ material.introduction | safe if material }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Learning Objectives -->
+                <div class="material-section-card" id="card-objectives">
+                    <button class="material-header-btn" onclick="toggleSection('card-objectives')">
+                        <span class="header-left">🎯 <span class="ms-1">Learning Objectives</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner">
+                            <ul class="mb-0" id="content-objectives">
+                                {% if material and material.learning_objectives %}
+                                    {% for obj in material.learning_objectives %}
+                                        <li class="mb-2">{{ obj }}</li>
+                                    {% endfor %}
+                                {% endif %}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Notes -->
+                <div class="material-section-card" id="card-notes">
+                    <button class="material-header-btn" onclick="toggleSection('card-notes')">
+                        <span class="header-left">📘 <span class="ms-1">Notes</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner">
+                            <h5 class="text-gradient fw-bold mb-2">Detailed Notes</h5>
+                            <div class="notes-block mb-4" id="content-detailed-notes">
+                                {{ material.detailed_notes | safe if material }}
+                            </div>
+                            
+                            <hr class="border-secondary opacity-25">
+                            
+                            <h5 class="text-gradient fw-bold mb-2">Important Concepts</h5>
+                            <div class="concepts-block mb-4" id="content-concepts">
+                                {{ material.important_concepts | safe if material }}
+                            </div>
+
+                            <hr class="border-secondary opacity-25">
+
+                            <h5 class="text-gradient fw-bold mb-2">Easy Explanation</h5>
+                            <div class="easy-explain-block" id="content-easy-explanation" style="background: rgba(255,255,255,0.02); padding: 1rem; border-radius: 8px; border-left: 3px solid var(--purple);">
+                                {{ material.easy_explanation | safe if material }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. Examples -->
+                <div class="material-section-card" id="card-examples">
+                    <button class="material-header-btn" onclick="toggleSection('card-examples')">
+                        <span class="header-left">💡 <span class="ms-1">Examples</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner">
+                            <h5 class="text-primary fw-bold mb-3"><i class="fas fa-globe me-2"></i>Real-life Examples</h5>
+                            <ul class="mb-4" id="content-real-life-examples">
+                                {% if material and material.real_life_examples %}
+                                    {% for ex in material.real_life_examples %}
+                                        <li class="mb-2">{{ ex }}</li>
+                                    {% endfor %}
+                                {% endif %}
+                            </ul>
+
+                            <hr class="border-secondary opacity-25">
+
+                            <h5 class="text-purple fw-bold mb-3"><i class="fas fa-tasks me-2"></i>Worked Examples</h5>
+                            <div class="d-flex flex-column gap-3" id="content-worked-examples">
+                                {% if material and material.worked_examples %}
+                                    {% for we in material.worked_examples %}
+                                        <div class="p-3 rounded border border-secondary bg-dark-card">
+                                            {{ we | safe }}
+                                        </div>
+                                    {% endfor %}
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 5. Formulas -->
+                <div class="material-section-card" id="card-formulas">
+                    <button class="material-header-btn" onclick="toggleSection('card-formulas')">
+                        <span class="header-left">📐 <span class="ms-1">Formulas</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner" id="content-formulas">
+                            {{ material.important_formulas | safe if material }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. Common Mistakes -->
+                <div class="material-section-card" id="card-mistakes">
+                    <button class="material-header-btn" onclick="toggleSection('card-mistakes')">
+                        <span class="header-left">⚠ <span class="ms-1">Common Mistakes</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner">
+                            <div class="alert alert-danger mb-0" style="background: rgba(248, 113, 113, 0.05); border: 1px solid rgba(248, 113, 113, 0.15);">
+                                <ul class="mb-0 text-white" id="content-mistakes">
+                                    {% if material and material.common_mistakes %}
+                                        {% for m in material.common_mistakes %}
+                                            <li class="mb-2"><strong>Mistake:</strong> {{ m }}</li>
+                                        {% endfor %}
+                                    {% endif %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 7. Practice Questions -->
+                <div class="material-section-card" id="card-questions">
+                    <button class="material-header-btn" onclick="toggleSection('card-questions')">
+                        <span class="header-left">📝 <span class="ms-1">Practice Questions</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner">
+                            <h5 class="text-gradient fw-bold mb-3">Practice Questions (10)</h5>
+                            <ol class="mb-4" id="content-practice-questions">
+                                {% if material and material.practice_questions %}
+                                    {% for q in material.practice_questions %}
+                                        <li class="mb-2">{{ q }}</li>
+                                    {% endfor %}
+                                {% endif %}
+                            </ol>
+
+                            <hr class="border-secondary opacity-25">
+
+                            <h5 class="text-gradient fw-bold mb-3">Short Answer Questions (5)</h5>
+                            <ol id="content-short-questions">
+                                {% if material and material.short_answer_questions %}
+                                    {% for sq in material.short_answer_questions %}
+                                        <li class="mb-2">{{ sq }}</li>
+                                    {% endfor %}
+                                {% endif %}
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 8. MCQs -->
+                <div class="material-section-card" id="card-mcqs">
+                    <button class="material-header-btn" onclick="toggleSection('card-mcqs')">
+                        <span class="header-left">❓ <span class="ms-1">MCQs</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner">
+                            <p class="text-muted small mb-4"><i class="fas fa-info-circle me-1"></i> Interactive MCQ Quiz. Click on any option to verify your answer and read explanation.</p>
+                            <div class="d-flex flex-column gap-2" id="content-mcqs">
+                                {% if material and material.mcqs %}
+                                    {% for item in material.mcqs %}
+                                        {% set outer_loop = loop %}
+                                        <div class="mcq-item">
+                                            <div class="fw-bold text-white mb-2">{{ item.question }}</div>
+                                            <div class="mcq-options-list">
+                                                {% for opt in item.options %}
+                                                    {% set opt_letter = opt[0] %}
+                                                    <button type="button" class="mcq-option-btn" onclick="checkMcq(this, '{{ opt_letter }}', '{{ item.correct_answer }}', 'mcq-exp-{{ outer_loop.index0 }}', '{{ item.explanation | replace("'", "\\'") }}')">
+                                                        {{ opt }}
+                                                    </button>
+                                                {% endfor %}
+                                            </div>
+                                            <div class="mcq-explanation d-none" id="mcq-exp-{{ outer_loop.index0 }}"></div>
+                                        </div>
+                                    {% endfor %}
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 9. Flashcards -->
+                <div class="material-section-card" id="card-flashcards">
+                    <button class="material-header-btn" onclick="toggleSection('card-flashcards')">
+                        <span class="header-left">🧠 <span class="ms-1">Flashcards</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner">
+                            <p class="text-muted small text-center mb-3"><i class="fas fa-info-circle me-1"></i> Click card to flip. Use buttons below to navigate.</p>
+                            <div class="flashcard-container">
+                                <div class="flashcard-wrapper" id="flashcardBox" onclick="flipFlashcard()">
+                                    <div class="flashcard-inner-card">
+                                        <div class="flashcard-front">
+                                            <h5 class="fw-bold text-center" id="flashcardFrontText">Front text</h5>
+                                        </div>
+                                        <div class="flashcard-back">
+                                            <h5 class="fw-bold text-center" id="flashcardBackText">Back text</h5>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="d-flex align-items-center gap-4 mt-4">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="prevFlashcard()">
+                                        <i class="fas fa-chevron-left me-1"></i> Previous
+                                    </button>
+                                    <span class="text-muted small fw-bold" id="flashcardCounter">Card 1 / 10</span>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="nextFlashcard()">
+                                        Next <i class="fas fa-chevron-right ms-1"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 10. Summary -->
+                <div class="material-section-card" id="card-summary">
+                    <button class="material-header-btn" onclick="toggleSection('card-summary')">
+                        <span class="header-left">📄 <span class="ms-1">Summary</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner" id="content-summary">
+                            {{ material.chapter_summary | safe if material }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 11. Revision Notes -->
+                <div class="material-section-card" id="card-revision">
+                    <button class="material-header-btn" onclick="toggleSection('card-revision')">
+                        <span class="header-left">📚 <span class="ms-1">Revision Notes</span></span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div class="material-body-content">
+                        <div class="material-body-inner">
+                            <h5 class="text-gradient fw-bold mb-3">Key Points</h5>
+                            <ul class="mb-4" id="content-key-points">
+                                {% if material and material.key_points %}
+                                    {% for kp in material.key_points %}
+                                        <li class="mb-2">{{ kp }}</li>
+                                    {% endfor %}
+                                {% endif %}
+                            </ul>
+
+                            <hr class="border-secondary opacity-25">
+
+                            <h5 class="text-gradient fw-bold mb-3">Quick Revision Guide</h5>
+                            <div id="content-revision-notes">
+                                {{ material.revision_notes | safe if material }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // In-memory generated material representation
+    let materialData = {% if material %}{{ material | tojson | safe }}{% else %}null{% endif %};
+    let flashcards = [];
+    let currentFlashcardIdx = 0;
+
+    document.addEventListener("DOMContentLoaded", function() {
+        // Wire generation buttons
+        document.getElementById("btnFirstGenerate").addEventListener("click", () => triggerGeneration(false));
+        document.getElementById("btnRegenerate").addEventListener("click", () => triggerGeneration(true));
+        
+        // Initial setup for flashcards
+        if (materialData && materialData.flashcards && materialData.flashcards.length > 0) {
+            flashcards = materialData.flashcards;
+            initFlashcards();
+        }
+    });
+
+    // Expand/Collapse controller
+    function toggleSection(cardId) {
+        const card = document.getElementById(cardId);
+        const bodyContent = card.querySelector(".material-body-content");
+        
+        if (card.classList.contains("expanded")) {
+            bodyContent.style.maxHeight = "0";
+            card.classList.remove("expanded");
+        } else {
+            // Expand
+            card.classList.add("expanded");
+            // Set max-height dynamically to fit content
+            bodyContent.style.maxHeight = bodyContent.scrollHeight + "px";
+        }
+    }
+
+    // Call dynamic generation endpoint
+    function triggerGeneration(isRegenerate) {
+        const emptyState = document.getElementById("emptyStateContainer");
+        const loader = document.getElementById("aiLoadingOverlay");
+        const contentArea = document.getElementById("studyMaterialContainer");
+        
+        // Update viewports
+        emptyState.classList.add("d-none");
+        contentArea.classList.add("d-none");
+        loader.style.display = "flex";
+        
+        // Form Data
+        const formData = new FormData();
+        formData.append("subject_id", "{{ selected_subject.id }}");
+        if (isRegenerate) {
+            formData.append("regenerate", "1");
+        }
+        
+        fetch("{{ url_for('student.generate_study_material_route') }}", {
+            method: "POST",
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error("HTTP error " + response.status);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.status === "success") {
+                materialData = data.data;
+                renderGeneratedContent(data.data);
+                
+                // Update UI visibility
+                loader.style.display = "none";
+                contentArea.classList.remove("d-none");
+                
+                // Show datetime
+                const now = new Date();
+                const pad = (n) => n.toString().padStart(2, '0');
+                const timeString = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+                document.getElementById("lastUpdatedText").innerText = timeString;
+            } else {
+                alert("Error: " + data.message);
+                resetToInitialView();
+            }
+        })
+        .catch(error => {
+            console.error("AI Generation Error:", error);
+            alert("AI generation failed or timed out. Please try again.");
+            resetToInitialView();
+        });
+    }
+
+    function resetToInitialView() {
+        document.getElementById("aiLoadingOverlay").style.display = "none";
+        if (materialData) {
+            document.getElementById("studyMaterialContainer").classList.remove("d-none");
+        } else {
+            document.getElementById("emptyStateContainer").classList.remove("d-none");
+        }
+    }
+
+    // Dynamically insert content into collapsible containers
+    function renderGeneratedContent(data) {
+        // 1. Introduction
+        document.getElementById("content-intro").innerHTML = data.introduction;
+        
+        // 2. Learning Objectives
+        const objectivesList = document.getElementById("content-objectives");
+        objectivesList.innerHTML = "";
+        data.learning_objectives.forEach(obj => {
+            const li = document.createElement("li");
+            li.className = "mb-2";
+            li.innerText = obj;
+            objectivesList.appendChild(li);
+        });
+        
+        // 3. Notes
+        document.getElementById("content-detailed-notes").innerHTML = data.detailed_notes;
+        document.getElementById("content-concepts").innerHTML = data.important_concepts;
+        document.getElementById("content-easy-explanation").innerHTML = data.easy_explanation;
+        
+        // 4. Examples
+        const realLifeList = document.getElementById("content-real-life-examples");
+        realLifeList.innerHTML = "";
+        data.real_life_examples.forEach(ex => {
+            const li = document.createElement("li");
+            li.className = "mb-2";
+            li.innerText = ex;
+            realLifeList.appendChild(li);
+        });
+        
+        const workedContainer = document.getElementById("content-worked-examples");
+        workedContainer.innerHTML = "";
+        data.worked_examples.forEach(we => {
+            const div = document.createElement("div");
+            div.className = "p-3 rounded border border-secondary bg-dark-card";
+            div.innerHTML = we;
+            workedContainer.appendChild(div);
+        });
+        
+        // 5. Formulas
+        document.getElementById("content-formulas").innerHTML = data.important_formulas;
+        
+        // 6. Common Mistakes
+        const mistakesList = document.getElementById("content-mistakes");
+        mistakesList.innerHTML = "";
+        data.common_mistakes.forEach(m => {
+            const li = document.createElement("li");
+            li.className = "mb-2";
+            li.innerHTML = `<strong>Mistake:</strong> ${m}`;
+            mistakesList.appendChild(li);
+        });
+        
+        // 7. Practice Questions
+        const practiceList = document.getElementById("content-practice-questions");
+        practiceList.innerHTML = "";
+        data.practice_questions.forEach(q => {
+            const li = document.createElement("li");
+            li.className = "mb-2";
+            li.innerText = q;
+            practiceList.appendChild(li);
+        });
+        
+        const shortList = document.getElementById("content-short-questions");
+        shortList.innerHTML = "";
+        data.short_answer_questions.forEach(sq => {
+            const li = document.createElement("li");
+            li.className = "mb-2";
+            li.innerText = sq;
+            shortList.appendChild(li);
+        });
+        
+        // 8. MCQs
+        const mcqsContainer = document.getElementById("content-mcqs");
+        mcqsContainer.innerHTML = "";
+        data.mcqs.forEach((item, index) => {
+            const mcqItemDiv = document.createElement("div");
+            mcqItemDiv.className = "mcq-item";
+            
+            const questionDiv = document.createElement("div");
+            questionDiv.className = "fw-bold text-white mb-2";
+            questionDiv.innerText = item.question;
+            mcqItemDiv.appendChild(questionDiv);
+            
+            const optionsDiv = document.createElement("div");
+            optionsDiv.className = "mcq-options-list";
+            
+            item.options.forEach(opt => {
+                const optLetter = opt.trim()[0];
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "mcq-option-btn";
+                btn.innerText = opt;
+                btn.onclick = function() {
+                    checkMcq(btn, optLetter, item.correct_answer, `mcq-exp-${index}`, item.explanation);
+                };
+                optionsDiv.appendChild(btn);
+            });
+            mcqItemDiv.appendChild(optionsDiv);
+            
+            const explanationDiv = document.createElement("div");
+            explanationDiv.className = "mcq-explanation d-none";
+            explanationDiv.id = `mcq-exp-${index}`;
+            mcqItemDiv.appendChild(explanationDiv);
+            
+            mcqsContainer.appendChild(mcqItemDiv);
+        });
+        
+        // 9. Flashcards
+        if (data.flashcards && data.flashcards.length > 0) {
+            flashcards = data.flashcards;
+            currentFlashcardIdx = 0;
+            initFlashcards();
+        }
+        
+        // 10. Summary
+        document.getElementById("content-summary").innerHTML = data.chapter_summary;
+        
+        // 11. Revision Notes
+        const keyPointsList = document.getElementById("content-key-points");
+        keyPointsList.innerHTML = "";
+        data.key_points.forEach(kp => {
+            const li = document.createElement("li");
+            li.className = "mb-2";
+            li.innerText = kp;
+            keyPointsList.appendChild(li);
+        });
+        
+        document.getElementById("content-revision-notes").innerHTML = data.revision_notes;
+    }
+
+    // MCQ interactive checking
+    function checkMcq(selectedBtn, selectedLetter, correctLetter, expDivId, explanationText) {
+        const parentList = selectedBtn.parentNode;
+        const allButtons = parentList.querySelectorAll(".mcq-option-btn");
+        
+        // Disable all buttons in this MCQ block
+        allButtons.forEach(btn => {
+            btn.disabled = true;
+            
+            // Highlight correct one automatically
+            const currentLetter = btn.innerText.trim()[0];
+            if (currentLetter === correctLetter) {
+                btn.classList.add("correct");
+            }
+        });
+        
+        // If wrong option was chosen, style it red
+        if (selectedLetter !== correctLetter) {
+            selectedBtn.classList.add("incorrect");
+        }
+        
+        // Reveal explanation
+        const expDiv = document.getElementById(expDivId);
+        expDiv.innerHTML = `<strong>Answer: ${correctLetter}</strong> · ${explanationText}`;
+        expDiv.classList.remove("d-none");
+    }
+
+    // Interactive Flashcards Controller
+    function initFlashcards() {
+        const box = document.getElementById("flashcardBox");
+        box.classList.remove("flipped");
+        
+        if (flashcards.length > 0) {
+            const card = flashcards[currentFlashcardIdx];
+            document.getElementById("flashcardFrontText").innerText = card.front;
+            document.getElementById("flashcardBackText").innerText = card.back;
+            document.getElementById("flashcardCounter").innerText = `Card ${currentFlashcardIdx + 1} / ${flashcards.length}`;
+        }
+    }
+
+    function flipFlashcard() {
+        document.getElementById("flashcardBox").classList.toggle("flipped");
+    }
+
+    function nextFlashcard() {
+        if (flashcards.length === 0) return;
+        currentFlashcardIdx = (currentFlashcardIdx + 1) % flashcards.length;
+        initFlashcards();
+    }
+
+    function prevFlashcard() {
+        if (flashcards.length === 0) return;
+        currentFlashcardIdx = (currentFlashcardIdx - 1 + flashcards.length) % flashcards.length;
+        initFlashcards();
+    }
+</script>
+{% endblock %}

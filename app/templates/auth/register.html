@@ -1,0 +1,424 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .strength-meter { height: 6px; background-color: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden; transition: all 0.3s ease; }
+    .strength-meter div { height: 100%; width: 0; transition: all 0.3s ease; }
+    .strength-weak { width: 33%; background: var(--neon-red) !important; }
+    .strength-medium { width: 66%; background: var(--neon-yellow) !important; }
+    .strength-strong { width: 100%; background: var(--neon-green) !important; }
+</style>
+
+<div class="row justify-content-center align-items-center" style="min-height: calc(100vh - 120px); padding: 40px 0;">
+    <div class="col-md-8">
+        <div class="card auth-card card-flat p-4">
+            <div class="card-body">
+                <div class="text-center mb-4">
+                    <i class="fas fa-user-plus text-gradient fs-1 mb-2"></i>
+                    <h3 class="fw-bold text-gradient">Create Student Account</h3>
+                    <p class="text-muted small">Register to start organizing your study plans adaptively</p>
+                </div>
+                <form id="registerForm" method="POST" novalidate>
+                    <!-- Full Name & Email -->
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Full Name</label>
+                            <input type="text" id="full_name" name="full_name" class="form-control" placeholder="John Doe" required>
+                            <div class="invalid-feedback text-danger small mt-1" id="nameError">Full name must be at least 3 letters (no numbers or special characters).</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Email Address</label>
+                            <input type="email" id="email" name="email" class="form-control" placeholder="name@gmail.com" required>
+                            <div class="invalid-feedback text-danger small mt-1" id="emailError">Must be a valid email address.</div>
+                        </div>
+                    </div>
+
+
+
+                    <!-- Country & Curriculum selection -->
+                    <div class="row">
+                        <div class="col-md-6 mb-3" id="country-container">
+                            <label class="form-label">Country</label>
+                            <select id="country" name="country" class="form-select" required>
+                                <option value="">Loading Countries...</option>
+                            </select>
+                            <div class="invalid-feedback text-danger small mt-1" id="countryError">Please select a country.</div>
+                        </div>
+
+                        <div class="col-md-6 mb-3 d-none" id="curriculum-container">
+                            <label class="form-label">Curriculum</label>
+                            <select id="curriculum" name="curriculum" class="form-select">
+                                <option value="">Select Country First...</option>
+                            </select>
+                            <div class="invalid-feedback text-danger small mt-1" id="curriculumError">Please select a curriculum.</div>
+                        </div>
+                    </div>
+
+                    <!-- Level of Study & Faculty / Program -->
+                    <div class="row">
+                        <div class="col-md-6 mb-3" id="level-container">
+                            <label class="form-label">Level of Study</label>
+                            <select id="level_of_study" name="level_of_study" class="form-select" required>
+                                <option value="">Select Curriculum First...</option>
+                            </select>
+                            <div class="invalid-feedback text-danger small mt-1" id="levelError">Please select a level of study.</div>
+                        </div>
+
+                        <div class="col-md-6 mb-3 d-none" id="program-container">
+                            <label class="form-label">Faculty / Program</label>
+                            <select id="program" name="program" class="form-select">
+                                <option value="">Select Level First...</option>
+                            </select>
+                            <div class="invalid-feedback text-danger small mt-1" id="programError">Please select a program.</div>
+                        </div>
+                    </div>
+
+                    <!-- Semester Selection -->
+                    <div class="row">
+                        <div class="col-md-12 mb-3 d-none" id="semester-container">
+                            <label class="form-label" id="semester-label">Semester / Year</label>
+                            <select id="semester" name="semester" class="form-select">
+                                <option value="">Select Faculty/Program First...</option>
+                            </select>
+                            <div class="invalid-feedback text-danger small mt-1" id="semesterError">Please select a semester or year.</div>
+                        </div>
+                    </div>
+
+                    <!-- Password and Confirmation -->
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <div class="input-group">
+                            <input type="password" id="password" name="password" class="form-control" placeholder="Min 8 characters" required>
+                            <button class="btn btn-outline-primary border-secondary" type="button" id="togglePassword" style="border-top-right-radius: 10px; border-bottom-right-radius: 10px;">👁️</button>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mt-1">
+                            <small class="text-muted">Characters: <span id="charCount" class="fw-bold">0</span></small>
+                        </div>
+                        <div class="strength-meter mt-2"><div id="strengthBar"></div></div>
+                        <div class="invalid-feedback text-danger small mt-1" id="passwordError">Must contain 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special character.</div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="form-label">Confirm Password</label>
+                        <div class="input-group">
+                            <input type="password" id="confirm_password" name="confirm_password" class="form-control" placeholder="Confirm your password" required>
+                            <span class="input-group-text bg-dark border-secondary text-white" id="matchIcon" style="border-top-right-radius: 10px; border-bottom-right-radius: 10px;"></span>
+                        </div>
+                        <div class="invalid-feedback text-danger small mt-1" id="confirmError">Passwords do not match.</div>
+                    </div>
+                    
+                    <button type="submit" id="submitBtn" class="btn btn-primary w-100 py-2.5" disabled>
+                        <span id="btnText">Register</span>
+                        <span id="loadingSpinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                    </button>
+                </form>
+                <div class="text-center mt-4 border-top pt-3" style="border-color: rgba(255,255,255,0.05) !important;">
+                    <p class="mb-0 text-muted">Already have an account? <a href="{{ url_for('auth.login') }}" class="text-gradient fw-bold text-decoration-none">Login Here</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('registerForm');
+    const fullName = document.getElementById('full_name');
+    const email = document.getElementById('email');
+    
+    const countrySelect = document.getElementById('country');
+    const curriculumSelect = document.getElementById('curriculum');
+    const levelOfStudy = document.getElementById('level_of_study');
+    const programSelect = document.getElementById('program');
+    const semesterSelect = document.getElementById('semester');
+    
+    const password = document.getElementById('password');
+    const confirmPassword = document.getElementById('confirm_password');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    const strengthBar = document.getElementById('strengthBar');
+    const charCount = document.getElementById('charCount');
+    const matchIcon = document.getElementById('matchIcon');
+
+    // Universal validation regex patterns
+    const nameRegex = /^[A-Za-z\s]{3,}$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const derivedCurriculum = {
+        "Nepal": "NEB/CTEVT",
+        "United States": "US Common Core/AP",
+        "United Kingdom": "A-Levels/GCSE",
+        "Australia": "HSC/VCE/SACE",
+        "Canada": "Provincial/IB",
+        "India": "CBSE/ICSE/State Boards"
+    };
+    const facultyLevels = ["Class 11", "Class 12", "Bachelors", "Masters"];
+    const termLevels = ["Bachelors", "Masters"];
+
+    function syncConditionalEducationFields() {
+        const level = levelOfStudy.value;
+        const showProgram = facultyLevels.includes(level);
+        const showSemester = termLevels.includes(level);
+        document.getElementById("program-container").classList.toggle("d-none", !showProgram);
+        document.getElementById("semester-container").classList.toggle("d-none", !showSemester);
+        programSelect.required = showProgram;
+        semesterSelect.required = showSemester;
+        if (!showProgram) {
+            programSelect.value = "";
+            programSelect.classList.remove("is-valid", "is-invalid");
+        }
+        if (!showSemester) {
+            semesterSelect.value = "";
+            semesterSelect.classList.remove("is-valid", "is-invalid");
+        }
+    }
+
+    function populateSelect(selectEl, items, placeholderText) {
+        selectEl.innerHTML = `<option value="">${placeholderText}</option>`;
+        if (items && items.length > 0) {
+            items.forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item;
+                opt.innerText = item;
+                selectEl.appendChild(opt);
+            });
+        }
+    }
+
+    // 1. Initial Countries Loading
+    fetch("/student/api/curriculum-data")
+        .then(res => res.json())
+        .then(data => {
+            populateSelect(countrySelect, data.countries, "Select Country...");
+            validateForm();
+        })
+        .catch(err => {
+            console.error("Error loading countries:", err);
+            populateSelect(countrySelect, ["Nepal"], "Select Country...");
+            validateForm();
+        });
+
+    // 2. Country Change ➔ Load Curricula
+    countrySelect.addEventListener('change', function() {
+        const country = this.value;
+        const curr = derivedCurriculum[country] || "National";
+        curriculumSelect.innerHTML = `<option value="${curr}" selected>${curr}</option>`;
+        levelOfStudy.innerHTML = '<option value="">Loading...</option>';
+        programSelect.innerHTML = '<option value="">Select Level First...</option>';
+        semesterSelect.innerHTML = '<option value="">Select Faculty/Program First...</option>';
+        syncConditionalEducationFields();
+        
+        if (!country) {
+            curriculumSelect.innerHTML = '<option value="">Select Country First...</option>';
+            validateForm();
+            return;
+        }
+
+        fetch(`/student/api/curriculum-data?country=${encodeURIComponent(country)}&curriculum=${encodeURIComponent(curr)}`)
+            .then(res => res.json())
+            .then(data => {
+                populateSelect(levelOfStudy, data.levels, "Select Level...");
+                validateForm();
+            });
+    });
+
+    // 3. Curriculum Change ➔ Load Levels
+    curriculumSelect.addEventListener('change', function() {
+        const country = countrySelect.value;
+        const curr = this.value;
+        
+        levelOfStudy.innerHTML = '<option value="">Loading...</option>';
+        programSelect.innerHTML = '<option value="">Select Level First...</option>';
+        semesterSelect.innerHTML = '<option value="">Select Faculty/Program First...</option>';
+
+        if (!curr) {
+            levelOfStudy.innerHTML = '<option value="">Select Curriculum First...</option>';
+            validateForm();
+            return;
+        }
+
+        fetch(`/student/api/curriculum-data?country=${encodeURIComponent(country)}&curriculum=${encodeURIComponent(curr)}`)
+            .then(res => res.json())
+            .then(data => {
+                populateSelect(levelOfStudy, data.levels, "Select Level...");
+                validateForm();
+            });
+    });
+
+    // 4. Level Change ➔ Load Programs
+    levelOfStudy.addEventListener('change', function() {
+        const country = countrySelect.value;
+        const curr = curriculumSelect.value;
+        const lvl = this.value;
+
+        programSelect.innerHTML = '<option value="">Loading...</option>';
+        semesterSelect.innerHTML = '<option value="">Select Faculty/Program First...</option>';
+        syncConditionalEducationFields();
+
+        if (!lvl) {
+            programSelect.innerHTML = '<option value="">Select Level First...</option>';
+            validateForm();
+            return;
+        }
+
+        if (!facultyLevels.includes(lvl)) {
+            validateForm();
+            return;
+        }
+
+        fetch(`/student/api/curriculum-data?country=${encodeURIComponent(country)}&curriculum=${encodeURIComponent(curr)}&level=${encodeURIComponent(lvl)}`)
+            .then(res => res.json())
+            .then(data => {
+                // If programs is empty or contains only null/empty strings, handle as no program needed
+                const validProgs = data.programs.filter(p => p && p.trim() !== "");
+                if (validProgs.length === 0) {
+                    populateSelect(programSelect, [], "General Studies (No Faculty needed)");
+                    if (termLevels.includes(lvl)) fetchSemesters(country, curr, lvl, "");
+                } else {
+                    populateSelect(programSelect, validProgs, "Select Faculty / Program...");
+                }
+                syncConditionalEducationFields();
+                validateForm();
+            });
+    });
+
+    // 5. Program Change ➔ Load Semesters
+    programSelect.addEventListener('change', function() {
+        const country = countrySelect.value;
+        const curr = curriculumSelect.value;
+        const lvl = levelOfStudy.value;
+        const prog = this.value;
+
+        semesterSelect.innerHTML = '<option value="">Loading...</option>';
+
+        if (lvl === "" || !termLevels.includes(lvl)) {
+            semesterSelect.innerHTML = '<option value="">Select Faculty/Program First...</option>';
+            syncConditionalEducationFields();
+            validateForm();
+            return;
+        }
+
+        fetchSemesters(country, curr, lvl, prog);
+    });
+
+    function fetchSemesters(country, curr, lvl, prog) {
+        fetch(`/student/api/curriculum-data?country=${encodeURIComponent(country)}&curriculum=${encodeURIComponent(curr)}&level=${encodeURIComponent(lvl)}&program=${encodeURIComponent(prog)}`)
+            .then(res => res.json())
+            .then(data => {
+                const validSems = data.semesters.filter(s => s && s.trim() !== "");
+                if (validSems.length === 0) {
+                    populateSelect(semesterSelect, [], "Default/Annual Scheme");
+                    // Add default option if empty so validation passes
+                    semesterSelect.innerHTML = `<option value="${lvl}" selected>${lvl} (Annual Scheme)</option>`;
+                } else {
+                    populateSelect(semesterSelect, validSems, "Select Semester / Year...");
+                }
+                validateForm();
+            });
+    }
+
+    function checkPasswordStrength(pass) {
+        let criteria = 0;
+        if (/[A-Z]/.test(pass)) criteria++;
+        if (/[a-z]/.test(pass)) criteria++;
+        if (/[0-9]/.test(pass)) criteria++;
+        if (/[@#$%^&*!_+\-=\[\]{};':"\\|,.<>\/?]/.test(pass)) criteria++;
+        return criteria;
+    }
+
+    function setValidationClass(element, isValid, errorElementId) {
+        const errorEl = document.getElementById(errorElementId);
+        if (!element) return false;
+        
+        if (element.value.length === 0 && element.tagName !== 'SELECT') {
+            element.classList.remove('is-valid', 'is-invalid');
+            if(errorEl) errorEl.style.display = 'none';
+            return false;
+        }
+        if (element.tagName === 'SELECT' && element.value === "") {
+             element.classList.remove('is-valid', 'is-invalid');
+             if(errorEl) errorEl.style.display = 'none';
+             return false;
+        }
+        
+        if (isValid) {
+            element.classList.remove('is-invalid');
+            element.classList.add('is-valid');
+            if(errorEl) errorEl.style.display = 'none';
+        } else {
+            element.classList.remove('is-valid');
+            element.classList.add('is-invalid');
+            if(errorEl) errorEl.style.display = 'block';
+        }
+        return isValid;
+    }
+
+    function validateForm() {
+        let validName = setValidationClass(fullName, nameRegex.test(fullName.value), 'nameError');
+        let validEmail = setValidationClass(email, emailRegex.test(email.value), 'emailError');
+        let validCountry = setValidationClass(countrySelect, countrySelect.value !== "", 'countryError');
+        let validCurriculum = curriculumSelect.value !== "";
+        let validLevel = setValidationClass(levelOfStudy, levelOfStudy.value !== "", 'levelError');
+        
+        const showProgram = facultyLevels.includes(levelOfStudy.value);
+        const showSemester = termLevels.includes(levelOfStudy.value);
+        let validProgram = !showProgram || setValidationClass(programSelect, programSelect.value !== "", 'programError');
+        let validSemester = !showSemester || setValidationClass(semesterSelect, semesterSelect.value !== "", 'semesterError');
+        
+        // Password logic
+        charCount.innerText = password.value.length;
+        let pStrength = checkPasswordStrength(password.value);
+        let validPassword = false;
+        
+        strengthBar.className = '';
+        if (password.value.length > 0) {
+            if (pStrength < 3 || password.value.length < 8) {
+                strengthBar.classList.add('strength-weak');
+            } else if (pStrength === 3 && password.value.length >= 8) {
+                strengthBar.classList.add('strength-medium');
+            } else if (pStrength >= 4 && password.value.length >= 8) {
+                strengthBar.classList.add('strength-strong');
+                validPassword = true;
+            }
+        }
+        
+        setValidationClass(password, validPassword, 'passwordError');
+
+        // Confirm Password logic
+        let validConfirm = false;
+        matchIcon.innerHTML = '';
+        if (confirmPassword.value.length > 0) {
+            validConfirm = (confirmPassword.value === password.value);
+            setValidationClass(confirmPassword, validConfirm, 'confirmError');
+            matchIcon.innerHTML = validConfirm ? '<span class="text-success">✔️</span>' : '<span class="text-danger">❌</span>';
+        } else {
+            confirmPassword.classList.remove('is-valid', 'is-invalid');
+            document.getElementById('confirmError').style.display = 'none';
+        }
+
+        // Button state
+        submitBtn.disabled = !(validName && validEmail && validCountry && validCurriculum && validLevel && validProgram && validSemester && validPassword && validConfirm);
+    }
+
+    // Event Listeners
+    const inputs = [fullName, email, countrySelect, curriculumSelect, levelOfStudy, programSelect, semesterSelect, password, confirmPassword];
+    inputs.forEach(input => {
+        if(input) {
+            input.addEventListener('input', validateForm);
+            input.addEventListener('change', validateForm);
+        }
+    });
+
+    document.getElementById('togglePassword').addEventListener('click', function() {
+        const type = password.getAttribute('type') === 'password' ? 'text' : 'password';
+        password.setAttribute('type', type);
+        this.innerHTML = type === 'password' ? '👁️' : '🙈';
+    });
+
+    form.addEventListener('submit', function() {
+        submitBtn.disabled = true;
+        document.getElementById('btnText').classList.add('d-none');
+        document.getElementById('loadingSpinner').classList.remove('d-none');
+    });
+});
+</script>
+{% endblock %}

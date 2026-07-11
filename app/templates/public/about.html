@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}About{% endblock %}
+
+{% block content %}
+<section class="landing-hero pb-3">
+    <h1 class="text-gradient">About Smart Study</h1>
+    <p class="lead text-muted mx-auto" style="max-width: 640px;">
+        An intelligent study planner for students from Class 8 to Master level — Final Year Project by Hemant Kumar Sah (NP069826).
+    </p>
+</section>
+
+<div class="row g-4 mx-auto" style="max-width: 900px;">
+    <div class="col-md-6">
+        <div class="card card-flat p-4 h-100">
+            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-bullseye me-2"></i> Mission</h5>
+            <p class="text-muted mb-0">Help students systematically manage academic workload by identifying performance trends and generating actionable, data-driven study schedules powered by machine learning.</p>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card card-flat p-4 h-100">
+            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-users me-2"></i> Built For</h5>
+            <p class="text-muted mb-0">APU computing students — especially those balancing multiple subjects with varying difficulty, attendance patterns, and exam performance across semesters.</p>
+        </div>
+    </div>
+    <div class="col-12">
+        <div class="card card-flat p-4">
+            <h5 class="text-gradient fw-bold mb-4"><i class="fas fa-microchip me-2"></i> Technology Stack</h5>
+            <div class="row g-3">
+                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Backend</strong><br><span class="text-muted small">Flask · SQLAlchemy · Flask-Login · Bcrypt</span></div></div>
+                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Machine Learning</strong><br><span class="text-muted small">Scikit-learn Random Forest · 90%+ accuracy · 12 features</span></div></div>
+                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">OCR Pipeline</strong><br><span class="text-muted small">PyTesseract · pdfplumber · Pillow</span></div></div>
+                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Frontend</strong><br><span class="text-muted small">Bootstrap 5 · Chart.js · Custom design system</span></div></div>
+                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Database</strong><br><span class="text-muted small">SQLite (dev) · MySQL (production)</span></div></div>
+                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Dataset</strong><br><span class="text-muted small">10,000 synthetic APU student records for model training</span></div></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
