@@ -189,6 +189,8 @@ class AssessmentQuestion(db.Model):
     correct_answer = db.Column(db.String(1), nullable=False) # A, B, C, D
     difficulty = db.Column(db.String(20), nullable=False) # beginner, intermediate, advanced
     question_type = db.Column(db.String(50), nullable=False)
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    source = db.Column(db.String(50), default="ai_generated")
 
     # Relationships
     topic = db.relationship('Topic')
@@ -201,6 +203,7 @@ class StudentAssessment(db.Model):
     subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
     total_score = db.Column(db.Float, default=0.0)
     max_score = db.Column(db.Float, default=100.0)
+    weighted_score = db.Column(db.Float, default=0.0)
     knowledge_tier = db.Column(db.String(20)) # beginner, intermediate, advanced
     completed_at = db.Column(db.DateTime, default=datetime.utcnow)
     time_taken_seconds = db.Column(db.Integer)
@@ -213,6 +216,14 @@ class AssessmentResponse(db.Model):
     selected_answer = db.Column(db.String(1)) # A, B, C, D
     is_correct = db.Column(db.Boolean, default=False)
     response_time_seconds = db.Column(db.Integer)
+
+class StudentSeenQuestion(db.Model):
+    __tablename__ = "student_seen_questions"
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    question_id = db.Column(db.Integer, db.ForeignKey('assessment_questions.id'), nullable=False)
+    seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    was_correct = db.Column(db.Boolean, default=False)
 
 class AcademicDocument(db.Model):
     __tablename__ = "academic_documents"

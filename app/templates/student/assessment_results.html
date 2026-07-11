@@ -8,7 +8,7 @@
             <span class="text-gradient">{{ "%.0f"|format(avg_score) }}%</span>
         </div>
         <h1 class="page-title mb-2">Diagnostic Assessment Report</h1>
-        <p class="page-subtitle mx-auto">Your knowledge profile has been computed. Average score: <strong class="text-gradient">{{ "%.1f"|format(avg_score) }}%</strong></p>
+        <p class="page-subtitle mx-auto">Your knowledge profile has been computed. Average Weighted Score: <strong class="text-gradient">{{ "%.1f"|format(avg_score) }}%</strong></p>
     </div>
 </div>
 
@@ -19,7 +19,8 @@
             <h6 class="fw-bold mb-2 text-truncate">{{ r.subject }}</h6>
             <span class="badge {% if r.tier == 'beginner' %}bg-high{% elif r.tier == 'intermediate' %}bg-medium{% else %}bg-low{% endif %} mb-3">{{ r.tier|title }}</span>
             <div class="stat-value text-gradient">{{ "%.1f"|format(r.score) }}%</div>
-            <div class="small text-muted mt-2"><i class="fas fa-check text-gradient me-1"></i>{{ r.correct }} / 15 correct</div>
+            <div class="small text-muted mt-2"><i class="fas fa-check text-gradient me-1"></i>{{ r.correct }} / {{ r.total }} correct (Weighted)</div>
+            <div class="small text-muted"><i class="fas fa-bullseye text-secondary me-1"></i>Flat Score: {{ "%.1f"|format(r.flat_score) }}%</div>
         </div>
     </div>
     {% endfor %}

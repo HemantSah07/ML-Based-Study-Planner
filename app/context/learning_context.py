@@ -821,18 +821,23 @@ class StudentLearningContext:
         count = 0
 
         for sub_id, data in scores.items():
-            pct = (data["correct"] / 15.0) * 100 if data.get("total", 0) > 0 else 0
+            total_q = data.get('total', 12)
+            flat_pct = (data['correct'] / total_q) * 100 if total_q > 0 else 0
+            
+            w_pts = data.get('weighted_points', 0)
+            m_pts = data.get('max_points', total_q)
+            weighted_pct = (w_pts / m_pts) * 100 if m_pts > 0 else 0
+            
             tier = "beginner"
-            if pct >= 70:
-                tier = "advanced"
-            elif pct >= 40:
-                tier = "intermediate"
+            if weighted_pct >= 70: tier = "advanced"
+            elif weighted_pct >= 40: tier = "intermediate"
 
             sa = StudentAssessment(
                 student_id=self.student_id,
                 subject_id=int(sub_id),
-                total_score=pct,
+                total_score=flat_pct,
                 max_score=100.0,
+                weighted_score=weighted_pct,
                 knowledge_tier=tier,
             )
             db.session.add(sa)
@@ -840,11 +845,11 @@ class StudentLearningContext:
             subj = Subject.query.get(int(sub_id))
             results.append({
                 "subject": subj.name if subj else "Unknown",
-                "score": pct,
+                "score": weighted_pct,
                 "tier": tier,
                 "correct": data["correct"],
             })
-            total_pct += pct
+            total_pct += weighted_pct
             count += 1
 
         avg_score = total_pct / count if count > 0 else 0

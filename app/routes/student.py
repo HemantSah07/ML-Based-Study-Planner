@@ -356,8 +356,10 @@ def get_subject_performance_snapshot(user_id, subject_id):
         .first()
     )
     if latest_quiz:
-        max_s = latest_quiz.max_score or 15.0
-        assessment_score = (latest_quiz.total_score / max_s) * 100.0
+        if getattr(latest_quiz, 'weighted_score', 0) > 0:
+            assessment_score = latest_quiz.weighted_score
+        else:
+            assessment_score = latest_quiz.total_score
 
     chapter_quizzes = ChapterQuizScore.query.join(Topic).join(Chapter).filter(
         ChapterQuizScore.student_id == user_id,
@@ -1449,20 +1451,20 @@ def generate_assessment_questions_for_subject(subject_id):
         f"Curriculum context: Nepal NEB or equivalent college level standards.\n\n"
         f"{ch_info}\n"
         "Requirements:\n"
-        "1. Generate exactly 5 beginner questions, 5 intermediate questions, and 5 advanced questions.\n"
+        "1. Generate exactly 5 'easy', 5 'medium', and 5 'hard' questions.\n"
         "2. Each question must have 4 options (A, B, C, D) and one correct answer.\n"
-        "3. Provide distinct, subject-relevant, non-repetitive questions.\n"
+        "3. Provide distinct, subject-relevant, non-repetitive questions. Do NOT repeat classic boilerplate questions.\n"
         "4. Map each question to a chapter number and topic name from the list above if possible.\n\n"
         "Output the result strictly in valid JSON format matching the schema:\n"
         "[\n"
         "  {\n"
         '    "q": "Question text?",\n'
-        '    "a": "Option A",\n'
-        '    "b": "Option B",\n'
-        '    "c": "Option C",\n'
-        '    "d": "Option D",\n'
+        '    "a": "Option A text",\n'
+        '    "b": "Option B text",\n'
+        '    "c": "Option C text",\n'
+        '    "d": "Option D text",\n'
         '    "ans": "A",\n'
-        '    "diff": "beginner",\n'
+        '    "diff": "easy",\n'
         '    "type": "conceptual",\n'
         '    "ch_num": 1,\n'
         '    "topic_name": "Fundamentals"\n'
@@ -1483,10 +1485,26 @@ def generate_assessment_questions_for_subject(subject_id):
     
     count = 0
     if isinstance(questions_data, list):
-        # Delete old questions for this subject first to avoid duplication
-        AssessmentQuestion.query.filter_by(subject_id=subject_id).delete()
+        # Part B: Additive generation. DO NOT delete old questions!
+        # Fetch existing questions to avoid near-duplicates
+        existing_qs = [q.question_text.lower()[:50] for q in AssessmentQuestion.query.filter_by(subject_id=subject_id).all()]
         
         for q in questions_data:
+            # Validation
+            q_text = q.get("q", "")
+            if not q_text or len(q_text) < 10:
+                continue
+            if q_text.lower()[:50] in existing_qs:
+                continue # Skip near-duplicates
+                
+            opt_a = q.get("a")
+            opt_b = q.get("b")
+            opt_c = q.get("c")
+            opt_d = q.get("d")
+            correct = q.get("ans", q.get("correct_answer", q.get("correct", "")))
+            if not all([opt_a, opt_b, opt_c, opt_d]) or correct.upper() not in ["A", "B", "C", "D"]:
+                continue
+
             # Map chapter and topic
             chapter_id = None
             topic_id = None
@@ -1519,22 +1537,22 @@ def generate_assessment_questions_for_subject(subject_id):
                     if first_topic:
                         topic_id = first_topic.id
             
-            diff_val = q.get("diff", q.get("difficulty", "beginner"))
+            diff_val = q.get("diff", q.get("difficulty", "medium"))
             type_val = q.get("type", q.get("question_type", "conceptual"))
-            correct_ans_val = q.get("ans", q.get("correct_answer", q.get("correct", "A")))
             
             new_q = AssessmentQuestion(
                 subject_id=subject_id,
                 chapter_id=chapter_id,
                 topic_id=topic_id,
-                question_text=q.get("q"),
-                option_a=q.get("a"),
-                option_b=q.get("b"),
-                option_c=q.get("c"),
-                option_d=q.get("d"),
-                correct_answer=correct_ans_val,
+                question_text=q_text,
+                option_a=opt_a,
+                option_b=opt_b,
+                option_c=opt_c,
+                option_d=opt_d,
+                correct_answer=correct.upper(),
                 difficulty=diff_val.lower(),
-                question_type=type_val
+                question_type=type_val,
+                source="ai_generated"
             )
             db.session.add(new_q)
             count += 1
@@ -1574,20 +1592,26 @@ def assessment_start():
             flash("Please select at least one active profile subject.", "warning")
             return redirect(url_for('student.assessment_start'))
             
-        # Ensure we have subject-specific questions generated
+        # Ensure we have enough unseen questions
         for sub_id in selected_subjects:
-            q_count = AssessmentQuestion.query.filter_by(subject_id=sub_id).count()
-            if q_count < 15:
-                generated = generate_assessment_questions_for_subject(sub_id)
-                if generated < 15:
-                    flash("Failed to generate enough assessment questions for the selected subjects. Please try again.", "danger")
-                    return redirect(url_for('student.assessment_start'))
+            seen_subquery = db.session.query(StudentSeenQuestion.question_id).filter_by(student_id=current_user.id)
+            unseen_count = AssessmentQuestion.query.filter(
+                AssessmentQuestion.subject_id == sub_id,
+                ~AssessmentQuestion.id.in_(seen_subquery)
+            ).count()
+            
+            if unseen_count < 15:
+                generate_assessment_questions_for_subject(sub_id)
 
         session['assessment_subjects'] = selected_subjects
         session['assessment_current_idx'] = 0
         session['assessment_scores'] = {}
         session['assessment_history'] = {} # Track correct/wrong per subject for adaptive difficulty
         session['assessment_question_history'] = {} # Track detailed question outcomes
+        
+        # Clear difficulty state
+        for sub_id in selected_subjects:
+            session.pop(f'assessment_diff_{sub_id}', None)
         
         first_sub = session['assessment_subjects'][0]
         return redirect(url_for('student.assessment_question', subject_id=first_sub, q_num=1))
@@ -1602,8 +1626,8 @@ def assessment_start():
 @student_bp.route("/assessment/question/<int:subject_id>/<int:q_num>")
 @login_required
 def assessment_question(subject_id, q_num):
-    # Total 15 questions per subject
-    if q_num > 15:
+    # Total 12 questions per subject (Adaptive Assessment)
+    if q_num > 12:
         # Move to next subject
         subs = session.get('assessment_subjects', [])
         idx = session.get('assessment_current_idx', 0) + 1
@@ -1615,22 +1639,47 @@ def assessment_question(subject_id, q_num):
             
     # Adaptive logic
     history = session.get('assessment_history', {}).get(str(subject_id), [])
-    difficulty = 'beginner'
-    if len(history) >= 3:
-        if all(history[-3:]): # last 3 correct
-            difficulty = 'intermediate'
-        if len(history) >= 6 and all(history[-3:]): # very good
-            difficulty = 'advanced'
+    current_diff = session.get(f'assessment_diff_{subject_id}', 'medium')
     
-    # Pick a question
-    questions = AssessmentQuestion.query.filter_by(subject_id=subject_id, difficulty=difficulty).all()
-    q = questions[q_num % len(questions)] if questions else AssessmentQuestion.query.filter_by(subject_id=subject_id).first()
+    if len(history) >= 2:
+        last_two = history[-2:]
+        if last_two == [True, True]:
+            if current_diff == 'easy': current_diff = 'medium'
+            elif current_diff == 'medium': current_diff = 'hard'
+        elif last_two == [False, False]:
+            if current_diff == 'hard': current_diff = 'medium'
+            elif current_diff == 'medium': current_diff = 'easy'
+            
+    session[f'assessment_diff_{subject_id}'] = current_diff
+    
+    # Pick an unseen question
+    import random
+    seen_subquery = db.session.query(StudentSeenQuestion.question_id).filter_by(student_id=current_user.id)
+    questions = AssessmentQuestion.query.filter(
+        AssessmentQuestion.subject_id == subject_id,
+        AssessmentQuestion.difficulty == current_diff,
+        ~AssessmentQuestion.id.in_(seen_subquery)
+    ).all()
+    
+    if not questions:
+        # Fallback to any difficulty unseen
+        questions = AssessmentQuestion.query.filter(
+            AssessmentQuestion.subject_id == subject_id,
+            ~AssessmentQuestion.id.in_(seen_subquery)
+        ).all()
+        
+    if not questions:
+        # Absolute fallback
+        questions = AssessmentQuestion.query.filter_by(subject_id=subject_id).all()
+        
+    q = random.choice(questions) if questions else None
+    
     if not q:
         flash("No assessment questions found for this subject. Ensure databases are seeded.", "danger")
         return redirect(url_for('student.assessment_start'))
     
     subject = Subject.query.get(subject_id)
-    return render_template("student/assessment_question.html", question=q, subject=subject, q_num=q_num, total_q=15)
+    return render_template("student/assessment_question.html", question=q, subject=subject, q_num=q_num, total_q=12)
 
 @student_bp.route("/assessment/answer", methods=["POST"])
 @login_required
@@ -1643,6 +1692,15 @@ def assessment_answer():
     
     q = AssessmentQuestion.query.get(q_id)
     is_correct = (answer == q.correct_answer)
+    
+    # Log to StudentSeenQuestion
+    seen_q = StudentSeenQuestion(
+        student_id=current_user.id,
+        question_id=q_id,
+        was_correct=is_correct
+    )
+    db.session.add(seen_q)
+    db.session.commit()
     
     # Track history
     history = session.get('assessment_history', {})
@@ -1659,11 +1717,20 @@ def assessment_answer():
     # Track score
     scores = session.get('assessment_scores', {})
     if str(sub_id) not in scores:
-        scores[str(sub_id)] = {'correct': 0, 'total': 0}
+        scores[str(sub_id)] = {'correct': 0, 'total': 0, 'weighted_points': 0, 'max_points': 0}
     
     scores[str(sub_id)]['total'] += 1
+    
+    weight = 1.0
+    diff = (q.difficulty or "").lower()
+    if diff == "medium" or diff == "intermediate": weight = 1.5
+    if diff == "hard" or diff == "advanced": weight = 2.0
+    
+    scores[str(sub_id)]['max_points'] += weight
     if is_correct:
         scores[str(sub_id)]['correct'] += 1
+        scores[str(sub_id)]['weighted_points'] += weight
+        
     session['assessment_scores'] = scores
     
     return redirect(url_for('student.assessment_question', subject_id=sub_id, q_num=q_num + 1))
@@ -1683,16 +1750,26 @@ def assessment_results():
     # Build display results list from scores dict
     results = []
     for sub_id, data in scores.items():
-        pct = (data['correct'] / 15.0) * 100 if data.get('total', 0) > 0 else 0
+        total_q = data.get('total', 12)
+        flat_pct = (data['correct'] / total_q) * 100 if total_q > 0 else 0
+        
+        # Weighted scoring calculation
+        w_pts = data.get('weighted_points', 0)
+        m_pts = data.get('max_points', total_q)
+        weighted_pct = (w_pts / m_pts) * 100 if m_pts > 0 else 0
+        
         tier = 'beginner'
-        if pct >= 70: tier = 'advanced'
-        elif pct >= 40: tier = 'intermediate'
+        if weighted_pct >= 70: tier = 'advanced'
+        elif weighted_pct >= 40: tier = 'intermediate'
+        
         subj = Subject.query.get(int(sub_id))
         results.append({
             'subject': subj.name if subj else 'Unknown',
-            'score': pct,
+            'score': weighted_pct, # Display weighted percentage
+            'flat_score': flat_pct,
             'tier': tier,
             'correct': data['correct'],
+            'total': total_q
         })
 
     # Weak chapters & recommended topics — read from context (avoids re-querying)
