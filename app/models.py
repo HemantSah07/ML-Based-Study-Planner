@@ -52,6 +52,8 @@ class StudentProfile(db.Model):
     target_weekly_hours = db.Column(db.Float, default=20.0)
     commute_buffer_minutes = db.Column(db.Integer, default=0)
     attendance_pct = db.Column(db.Float, default=85.0)  # Student's actual attendance percentage (0–100)
+    target_score_goal = db.Column(db.Float, default=70.0)   # Desired academic percentage (contextual only)
+    peak_focus_time = db.Column(db.String(20), default="Morning")  # Morning/Afternoon/Evening/Night
 
 class StudentSubject(db.Model):
     __tablename__ = "student_subjects"
@@ -189,6 +191,7 @@ class AssessmentQuestion(db.Model):
     correct_answer = db.Column(db.String(1), nullable=False) # A, B, C, D
     difficulty = db.Column(db.String(20), nullable=False) # beginner, intermediate, advanced
     question_type = db.Column(db.String(50), nullable=False)
+    explanation = db.Column(db.Text, nullable=True)
     generated_at = db.Column(db.DateTime, default=datetime.utcnow)
     source = db.Column(db.String(50), default="ai_generated")
 
@@ -370,6 +373,30 @@ class AICache(db.Model):
     prompt = db.Column(db.Text, nullable=False)
     response_text = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class DailyAPIUsage(db.Model):
+    """
+    Tracks Gemini API call counts per feature and model per calendar day.
+
+    feature     — 'mcq' (assessment generation) or 'assistant' (chat tutor)
+    model_name  — the name of the Gemini model used (e.g. 'gemini-3.1-flash-lite', 'gemini-2.5-flash', etc.)
+    usage_date  — the UTC date the calls were made
+    call_count  — number of successful generate_content calls made today
+
+    One row per (feature, model_name, usage_date).  The daily cap is enforced in
+    AIService._check_quota() before any API call is attempted.
+    """
+    __tablename__ = "daily_api_usage"
+    id         = db.Column(db.Integer, primary_key=True)
+    feature    = db.Column(db.String(32), nullable=False, index=True)
+    model_name = db.Column(db.String(64), nullable=True, index=True)
+    usage_date = db.Column(db.Date, nullable=False, index=True)
+    call_count = db.Column(db.Integer, nullable=False, default=0)
+    __table_args__ = (
+        db.UniqueConstraint("feature", "model_name", "usage_date", name="uq_daily_api_usage_feature_model_date"),
+    )
+
 
 class AvailabilitySlot(db.Model):
     __tablename__ = "availability_slots"

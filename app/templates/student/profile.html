@@ -77,21 +77,31 @@
         </div>
     </div>
 
-    <!-- Details Columns & Editing Form -->
-    <div class="col-lg-7 stagger-3">
+    {% if edit_mode %}
+    <!-- EDIT MODE FORM -->
+    <div class="col-lg-12 stagger-3">
         <div class="card card-light p-4">
-            <h5 class="fw-bold text-white mb-4"><i class="fas fa-edit text-primary me-2"></i> Update Profile Details</h5>
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5 class="fw-bold text-white mb-0"><i class="fas fa-edit text-primary me-2"></i> Edit Profile Details</h5>
+                <form method="POST" action="{{ url_for('student.profile') }}" style="display:inline;">
+                    <input type="hidden" name="action" value="cancel">
+                    <button type="submit" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-times me-1"></i> Cancel
+                    </button>
+                </form>
+            </div>
             
-            <form method="POST" enctype="multipart/form-data" id="profileForm">
+            <form method="POST" enctype="multipart/form-data" id="profileForm" action="{{ url_for('student.profile') }}">
+                <input type="hidden" name="action" value="save">
                 <!-- Personal -->
                 <div class="row g-3 mb-4">
-                    <div class="col-12">
+                    <div class="col-md-6">
                         <label class="form-label text-muted small">Full Name</label>
-                        <input type="text" name="full_name" class="form-control" value="{{ user.full_name }}" required>
+                        <input type="text" name="full_name" class="form-control bg-dark border-secondary text-white" value="{{ user.full_name }}" required>
                     </div>
-                    <div class="col-12">
+                    <div class="col-md-6">
                         <label class="form-label text-muted small">Upload Profile Picture</label>
-                        <input type="file" name="profile_pic" class="form-control" accept=".jpg,.jpeg,.png">
+                        <input type="file" name="profile_pic" class="form-control bg-dark border-secondary text-white" accept=".jpg,.jpeg,.png">
                     </div>
                 </div>
 
@@ -158,22 +168,42 @@
                 <!-- Academic Info -->
                 <h6 class="fw-bold text-white mb-3"><i class="fas fa-chart-bar text-primary me-2"></i> Academic Info</h6>
                 <div class="row g-3 mb-4">
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <label class="form-label text-muted small" id="gradeLabel">Previous GPA <span class="text-danger">*</span> <span class="text-muted">(0 – 4 scale)</span></label>
-                        <input type="number" name="cumulative_gpa" id="gradeInput" class="form-control" value="{{ profile.cumulative_gpa }}" step="0.01" min="0" max="4" required>
+                        <input type="number" name="cumulative_gpa" id="gradeInput" class="form-control bg-dark border-secondary text-white" value="{{ profile.cumulative_gpa }}" step="0.01" min="0" max="4" required>
                         <div class="form-text text-muted small" id="gradeHint">
                             Enter your GPA (0.00 – 4.00). &nbsp;<span id="gpaPercent" class="text-primary fw-semibold">{% if profile.cumulative_gpa %}≈ {{ "%.1f"|format(profile.cumulative_gpa * 25) }}%{% endif %}</span>
                         </div>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <label class="form-label text-muted small">Attendance % <span class="text-danger">*</span></label>
-                        <input type="number" name="attendance_pct" class="form-control" value="{{ profile.attendance_pct or 85 }}" step="1" min="0" max="100" required>
+                        <input type="number" name="attendance_pct" class="form-control bg-dark border-secondary text-white" value="{{ profile.attendance_pct or 85 }}" step="1" min="0" max="100" required>
                         <div class="form-text text-muted small">Your actual class attendance percentage (0–100).</div>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <label class="form-label text-muted small">Commute Buffer (minutes)</label>
-                        <input type="number" name="commute_buffer_minutes" class="form-control" value="{{ profile.commute_buffer_minutes or 0 }}" min="0" max="180" step="5">
+                        <input type="number" name="commute_buffer_minutes" class="form-control bg-dark border-secondary text-white" value="{{ profile.commute_buffer_minutes or 0 }}" min="0" max="180" step="5">
                         <div class="form-text text-muted small">Added before and after Class/Academic and Work blocks.</div>
+                    </div>
+                </div>
+
+                <!-- Scheduling & Targets Preferences -->
+                <h6 class="fw-bold text-white mb-3"><i class="fas fa-bullseye text-primary me-2"></i> Scheduler &amp; Learning Preferences</h6>
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label text-muted small">Target Score Goal (%)</label>
+                        <input type="number" name="target_score_goal" class="form-control bg-dark border-secondary text-white" value="{{ profile.target_score_goal or 70.0 }}" min="0" max="100" step="1">
+                        <div class="form-text text-muted small">Desired academic percentage. Used as context only (does not overwrite planner study hours).</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label text-muted small">Peak Focus Time</label>
+                        <select name="peak_focus_time" class="form-select border-secondary bg-dark text-white">
+                            <option value="Morning" {% if profile.peak_focus_time == 'Morning' or not profile.peak_focus_time %}selected{% endif %}>Morning</option>
+                            <option value="Afternoon" {% if profile.peak_focus_time == 'Afternoon' %}selected{% endif %}>Afternoon</option>
+                            <option value="Evening" {% if profile.peak_focus_time == 'Evening' %}selected{% endif %}>Evening</option>
+                            <option value="Night" {% if profile.peak_focus_time == 'Night' %}selected{% endif %}>Night</option>
+                        </select>
+                        <div class="form-text text-muted small">Preferences scheduler places high priority subjects here when suitable.</div>
                     </div>
                 </div>
 
@@ -182,7 +212,6 @@
                 <!-- Tutor Preferences -->
                 <h6 class="fw-bold text-white mb-3"><i class="fas fa-robot text-primary me-2"></i> AI Academic Tutor Preferences</h6>
 
-                <!-- System-auto info notice -->
                 <div class="alert d-flex align-items-start gap-2 mb-3 py-2 px-3" style="background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.35);border-radius:10px;">
                     <i class="fas fa-magic text-primary mt-1" style="font-size:0.9rem;"></i>
                     <div class="small text-muted lh-sm">
@@ -223,65 +252,236 @@
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-glow w-100 py-3 mt-2">
-                    <i class="fas fa-save me-2"></i> Save Profile Details
-                </button>
+                <div class="d-flex gap-3">
+                    <button type="submit" class="btn btn-primary btn-glow flex-grow-1 py-3">
+                        <i class="fas fa-save me-2"></i> Save Profile Details
+                    </button>
+                </div>
             </form>
         </div>
     </div>
-
-    <!-- Strong & Weak Subjects and Profile Stats -->
-    <div class="col-lg-5 stagger-3">
-        <div class="card card-light p-4 mb-4">
-            <h5 class="fw-bold text-white mb-3"><i class="fas fa-brain text-success me-2"></i> Performance Analysis</h5>
-            
-            <div class="mb-4">
-                <label class="form-label text-muted small mb-2">🟢 Strong Subjects</label>
-                <div class="d-flex flex-wrap gap-2">
-                    {% if strong_subjects %}
-                        {% for s in strong_subjects %}
-                        <span class="badge bg-success-subtle text-success py-2 px-3 border border-success rounded-pill fw-bold">{{ s }}</span>
-                        {% endfor %}
-                    {% else %}
-                        <span class="text-muted small">No strong subjects logged. Keep practicing!</span>
-                    {% endif %}
-                </div>
+    {% else %}
+    <!-- READ-ONLY AI INSIGHTS DASHBOARD -->
+    <!-- Column 1: Academic Settings & Mastery Matrix -->
+    <div class="col-lg-7 stagger-3">
+        <!-- Curriculum Settings Panel -->
+        <div class="card card-flat p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="fw-bold text-white mb-0"><i class="fas fa-graduation-cap text-primary me-2"></i> Curriculum &amp; Academic Settings</h5>
+                <a href="{{ url_for('student.profile', edit='1') }}" class="btn btn-outline-primary btn-sm">
+                    <i class="fas fa-edit me-1"></i> Edit Profile
+                </a>
             </div>
-
-            <div>
-                <label class="form-label text-muted small mb-2">🔴 Weak Subjects</label>
-                <div class="d-flex flex-wrap gap-2">
-                    {% if weak_subjects %}
-                        {% for s in weak_subjects %}
-                        <span class="badge bg-danger-subtle text-danger py-2 px-3 border border-danger rounded-pill fw-bold">{{ s }}</span>
-                        {% endfor %}
-                    {% else %}
-                        <span class="text-muted small">No weak subjects logged. Great job!</span>
-                    {% endif %}
+            
+            <div class="row g-3 small">
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Country</span>
+                    <span class="fw-semibold text-white">{{ profile.country or 'Nepal' }}</span>
+                </div>
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Academic Board</span>
+                    <span class="fw-semibold text-white">{{ profile.curriculum or 'National' }}</span>
+                </div>
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Class / Level</span>
+                    <span class="fw-semibold text-white">{{ profile.study_level or 'Not set' }}</span>
+                </div>
+                {% if profile.program %}
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Faculty / Program</span>
+                    <span class="fw-semibold text-white">{{ profile.program }}</span>
+                </div>
+                {% endif %}
+                {% if profile.semester %}
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Semester</span>
+                    <span class="fw-semibold text-white">{{ profile.semester }}</span>
+                </div>
+                {% endif %}
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Previous Grade GPA</span>
+                    <span class="fw-semibold text-white">{{ "%.2f"|format(profile.cumulative_gpa or 0.0) }} / 4.00</span>
+                </div>
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Timezone</span>
+                    <span class="fw-semibold text-white">{{ profile.timezone or 'Asia/Kathmandu' }}</span>
+                </div>
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Commute Buffer</span>
+                    <span class="fw-semibold text-white">{{ profile.commute_buffer_minutes or 0 }} minutes</span>
+                </div>
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Target Score Goal</span>
+                    <span class="badge bg-purple text-white">{{ profile.target_score_goal or 70.0 }}%</span>
+                </div>
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">Peak Focus Time</span>
+                    <span class="badge bg-info text-white">{{ profile.peak_focus_time or 'Morning' }}</span>
                 </div>
             </div>
         </div>
 
-        <div class="card card-light p-4">
-            <h5 class="fw-bold text-white mb-3"><i class="fas fa-star text-warning me-2"></i> Streaks &amp; Trophy Case</h5>
+        <!-- Subject Mastery Matrix -->
+        <div class="card card-flat p-4 mb-4">
+            <h5 class="fw-bold text-white mb-3"><i class="fas fa-layer-group text-primary me-2"></i> Subject Mastery Matrix</h5>
+            <p class="text-muted small mb-4">Demonstrated conceptual understanding computed across marksheets and active recall assessments.</p>
             
-            <div class="d-flex align-items-center gap-3 p-3 rounded bg-dark border border-secondary mb-3">
-                <i class="fas fa-trophy text-warning fa-2x"></i>
-                <div>
-                    <h6 class="fw-bold mb-1 text-white">Quiz Master Title</h6>
-                    <p class="text-muted small mb-0">Awarded for taking over 5 active recall practice quizzes.</p>
+            {% if subject_mastery %}
+                <div class="d-flex flex-column gap-3">
+                    {% for name, pct in subject_mastery.items() %}
+                    <div>
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="fw-bold text-white small">{{ name }}</span>
+                            <span class="text-gradient fw-bold small">{{ pct }}% Mastery</span>
+                        </div>
+                        <div class="progress" style="height: 8px; background: rgba(255,255,255,0.05);">
+                            <div class="progress-bar bg-gradient" style="width: {{ pct }}%; height: 8px; border-radius: 4px;"></div>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
-            </div>
+            {% else %}
+                <div class="text-muted small py-3 text-center">
+                    <i class="fas fa-info-circle me-1"></i> No active subjects. Link subjects to see mastery analytics.
+                </div>
+            {% endif %}
+        </div>
 
-            <div class="d-flex align-items-center gap-3 p-3 rounded bg-dark border border-secondary">
-                <i class="fas fa-medal text-primary fa-2x"></i>
-                <div>
-                    <h6 class="fw-bold mb-1 text-white">Consistency Badge</h6>
-                    <p class="text-muted small mb-0">Awarded for study logs spanning multiple consecutive days.</p>
+        <!-- Attention Required (Weakest Topics) -->
+        <div class="card card-flat p-4">
+            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-exclamation-triangle text-danger me-2"></i> Attention Required (Weak Areas)</h5>
+            <p class="text-muted small mb-4">System has identified top three weakest topics based on incorrect quiz and diagnostic answers.</p>
+            
+            <div class="d-flex flex-column gap-3">
+                {% for wt in weak_topics %}
+                <div class="p-3 rounded bg-dark bg-opacity-40 border border-secondary">
+                    <div class="d-flex justify-content-between align-items-start mb-1">
+                        <div>
+                            <span class="fw-bold text-white small d-block">{{ wt.name }}</span>
+                            <small class="text-muted text-uppercase fs-8">{{ wt.subject_name }} &bull; {{ wt.chapter_name }}</small>
+                        </div>
+                        <span class="badge bg-danger bg-opacity-10 text-danger border border-danger">Action Required</span>
+                    </div>
                 </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
+                    <h6>No Weak Topics Identified</h6>
+                    <p class="small mb-0">Outstanding accuracy across all concept testing checks!</p>
+                </div>
+                {% endfor %}
             </div>
         </div>
     </div>
+
+    <!-- Column 2: Streaks, Consistency, Compact Assessment History -->
+    <div class="col-lg-5 stagger-3">
+        <!-- Consistency Tracker & Streak -->
+        <div class="card card-flat p-4 mb-4">
+            <h5 class="fw-bold text-white mb-4"><i class="fas fa-fire text-gradient me-2"></i> Consistency Tracker</h5>
+            
+            <div class="d-flex align-items-center gap-3 p-3 rounded bg-dark border border-secondary mb-4">
+                <i class="fas fa-fire text-gradient fa-2x"></i>
+                <div>
+                    <h6 class="fw-bold mb-1 text-white">{{ streak }} Day Study Streak</h6>
+                    <p class="text-muted small mb-0">Longest Study Streak: {{ streak }} days.</p>
+                </div>
+            </div>
+
+            <h6 class="fw-bold text-white small mb-3">Academic Summary Statistics</h6>
+            <div class="d-flex flex-column gap-2 small">
+                <div class="d-flex justify-content-between border-bottom border-secondary pb-2">
+                    <span class="text-muted">Strongest Subject:</span>
+                    <span class="fw-semibold text-success">{{ strongest_subject }}</span>
+                </div>
+                <div class="d-flex justify-content-between border-bottom border-secondary pb-2">
+                    <span class="text-muted">Weakest Subject:</span>
+                    <span class="fw-semibold text-danger">{{ weakest_subject }}</span>
+                </div>
+                <div class="d-flex justify-content-between border-bottom border-secondary pb-2">
+                    <span class="text-muted">Academic Overall Score:</span>
+                    <span class="fw-semibold text-white">{{ overall_stats.accuracy }}% Accuracy</span>
+                </div>
+                <div class="d-flex justify-content-between border-bottom border-secondary pb-2">
+                    <span class="text-muted">Overall Mastery Average:</span>
+                    <span class="fw-semibold text-gradient">{{ overall_mastery }}%</span>
+                </div>
+                <div class="d-flex justify-content-between border-bottom border-secondary pb-2">
+                    <span class="text-muted">Academic Trend:</span>
+                    <span class="fw-semibold {% if improvement_trend == 'improving' %}text-success{% elif improvement_trend == 'declining' %}text-danger{% else %}text-muted{% endif %}">
+                        {{ improvement_trend | title }}
+                    </span>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <span class="text-muted">ML Risk Assessment:</span>
+                    <span class="badge {% if risk_summary == 'high' %}bg-danger{% elif risk_summary == 'medium' %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                        {{ risk_summary|upper }} RISK
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Compact Assessment Summary -->
+        <div class="card card-flat p-4">
+            <h5 class="fw-bold text-white mb-3"><i class="fas fa-history text-primary me-2"></i> Recent Assessments</h5>
+            <p class="text-muted small mb-3">Showing 3 most recent diagnostic attempts.</p>
+
+            <div class="d-flex flex-column gap-2 text-center py-2 bg-dark rounded border border-secondary mb-3 small text-muted">
+                <div class="row g-0">
+                    <div class="col-3">
+                        <div class="fs-6 fw-bold text-white">{{ overall_stats.total_attempted }}</div>
+                        <div class="fs-8">Attempted</div>
+                    </div>
+                    <div class="col-3">
+                        <div class="fs-6 fw-bold text-success">{{ overall_stats.correct }}</div>
+                        <div class="fs-8">Correct</div>
+                    </div>
+                    <div class="col-3">
+                        <div class="fs-6 fw-bold text-danger">{{ overall_stats.incorrect }}</div>
+                        <div class="fs-8">Incorrect</div>
+                    </div>
+                    <div class="col-3">
+                        <div class="fs-6 fw-bold text-gradient">{{ overall_stats.accuracy }}%</div>
+                        <div class="fs-8">Accuracy</div>
+                    </div>
+                </div>
+            </div>
+
+            {% if recent_assessments %}
+            <div class="table-responsive mb-3">
+                <table class="table table-dark table-hover border-secondary align-middle small mb-0">
+                    <thead>
+                        <tr class="text-muted">
+                            <th>Subject</th>
+                            <th>Date</th>
+                            <th class="text-end">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in recent_assessments %}
+                        <tr>
+                            <td class="fw-bold text-white">{{ r.subject }}</td>
+                            <td>{{ r.date.strftime('%m-%d') }}</td>
+                            <td class="text-end">
+                                <span class="badge bg-purple">{{ r.correct }}/{{ r.total }}</span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-muted py-3 text-center small">
+                <i class="fas fa-info-circle me-1"></i> Complete your first assessment to unlock analytics.
+            </div>
+            {% endif %}
+
+            <a href="{{ url_for('student.assessment_start') }}" class="btn btn-outline-primary w-100 btn-sm mt-2">
+                <i class="fas fa-external-link-alt me-1"></i> View Full History
+            </a>
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 

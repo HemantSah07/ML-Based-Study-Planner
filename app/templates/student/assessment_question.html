@@ -32,15 +32,23 @@
             <div class="row g-3">
                 {% for opt in [('A', question.option_a), ('B', question.option_b), ('C', question.option_c), ('D', question.option_d)] %}
                 <div class="col-md-6">
-                    <div class="card h-100 option-card" id="card{{ opt[0] }}" onclick="selectOption('{{ opt[0] }}')">
+                    <div class="card h-100 option-card cursor-pointer" id="card{{ opt[0] }}" onclick="selectOption('{{ opt[0] }}')">
                         <div class="card-body p-4 d-flex align-items-center gap-3">
                             <input class="form-check-input d-none" type="radio" name="answer" value="{{ opt[0] }}" id="opt{{ opt[0] }}">
-                            <div class="option-letter">{{ opt[0] }}</div>
-                            <label class="mb-0 flex-grow-1" style="cursor:pointer;" for="opt{{ opt[0] }}">{{ opt[1] }}</label>
+                            <div class="option-letter" id="letter{{ opt[0] }}">{{ opt[0] }}</div>
+                            <label class="mb-0 flex-grow-1 cursor-pointer" id="label{{ opt[0] }}" for="opt{{ opt[0] }}">{{ opt[1] }}</label>
                         </div>
                     </div>
                 </div>
                 {% endfor %}
+            </div>
+
+            <!-- Feedback & Explanation Box -->
+            <div id="feedbackBox" class="mt-4 p-4 rounded d-none">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <h5 class="fw-bold mb-0" id="feedbackTitle"></h5>
+                </div>
+                <p class="mb-0 small text-white" id="explanationText"></p>
             </div>
 
             <button type="submit" class="btn btn-primary w-100 py-3 mt-4" id="nextBtn" disabled>
@@ -52,22 +60,106 @@
 
 <script>
     let timeLeft = 60;
+    let answered = false;
     const timerEl = document.getElementById('timer');
     const timeTakenEl = document.getElementById('time_taken');
     const form = document.getElementById('qForm');
+    const correctAnswer = "{{ question.correct_answer }}";
+    const explanation = "{{ question.explanation or 'Diagnostic evaluation question.' }}";
 
     const interval = setInterval(() => {
+        if (answered) return;
         timeLeft--;
         timerEl.innerHTML = `<i class="far fa-clock me-1"></i> ${timeLeft}s`;
         timeTakenEl.value = 60 - timeLeft;
         if (timeLeft <= 15) timerEl.classList.add('urgent');
-        if (timeLeft <= 0) { clearInterval(interval); form.submit(); }
+        if (timeLeft <= 0) {
+            clearInterval(interval);
+            handleTimeout();
+        }
     }, 1000);
 
     function selectOption(val) {
-        document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+        if (answered) return;
+        answered = true;
+        clearInterval(interval);
+
+        // Lock answers
+        document.querySelectorAll('.option-card').forEach(c => {
+            c.style.pointerEvents = 'none';
+        });
+
+        // Set radio value
         document.getElementById('opt' + val).checked = true;
-        document.getElementById('card' + val).classList.add('selected');
+        timeTakenEl.value = 60 - timeLeft;
+
+        const selectedBox = document.getElementById('card' + val);
+        const correctBox = document.getElementById('card' + correctAnswer);
+
+        const feedbackBox = document.getElementById('feedbackBox');
+        const feedbackTitle = document.getElementById('feedbackTitle');
+        const explanationText = document.getElementById('explanationText');
+
+        if (val === correctAnswer) {
+            // Correct answer Selected
+            selectedBox.classList.add('border-success', 'bg-success', 'bg-opacity-10');
+            const letterEl = document.getElementById('letter' + val);
+            if (letterEl) {
+                letterEl.innerHTML = '<i class="fas fa-check"></i>';
+                letterEl.classList.add('bg-success', 'text-white');
+            }
+            feedbackBox.classList.remove('d-none');
+            feedbackBox.classList.add('bg-success', 'bg-opacity-10', 'border', 'border-success');
+            feedbackTitle.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i> Correct</span>';
+        } else {
+            // Incorrect answer Selected
+            selectedBox.classList.add('border-danger', 'bg-danger', 'bg-opacity-10');
+            const selLetterEl = document.getElementById('letter' + val);
+            if (selLetterEl) {
+                selLetterEl.innerHTML = '<i class="fas fa-times"></i>';
+                selLetterEl.classList.add('bg-danger', 'text-white');
+            }
+            
+            // Highlight correct one
+            correctBox.classList.add('border-success', 'bg-success', 'bg-opacity-10');
+            const corLetterEl = document.getElementById('letter' + correctAnswer);
+            if (corLetterEl) {
+                corLetterEl.innerHTML = '<i class="fas fa-check"></i>';
+                corLetterEl.classList.add('bg-success', 'text-white');
+            }
+            feedbackBox.classList.remove('d-none');
+            feedbackBox.classList.add('bg-danger', 'bg-opacity-10', 'border', 'border-danger');
+            feedbackTitle.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle me-1"></i> Incorrect</span>';
+        }
+
+        explanationText.textContent = explanation;
+        document.getElementById('nextBtn').disabled = false;
+    }
+
+    function handleTimeout() {
+        answered = true;
+        // Lock answers
+        document.querySelectorAll('.option-card').forEach(c => {
+            c.style.pointerEvents = 'none';
+        });
+
+        const correctBox = document.getElementById('card' + correctAnswer);
+        correctBox.classList.add('border-success', 'bg-success', 'bg-opacity-10');
+        const corLetterEl = document.getElementById('letter' + correctAnswer);
+        if (corLetterEl) {
+            corLetterEl.innerHTML = '<i class="fas fa-check"></i>';
+            corLetterEl.classList.add('bg-success', 'text-white');
+        }
+
+        const feedbackBox = document.getElementById('feedbackBox');
+        const feedbackTitle = document.getElementById('feedbackTitle');
+        const explanationText = document.getElementById('explanationText');
+
+        feedbackBox.classList.remove('d-none');
+        feedbackBox.classList.add('bg-warning', 'bg-opacity-10', 'border', 'border-warning');
+        feedbackTitle.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-circle me-1"></i> Time Expired</span>';
+        explanationText.textContent = "You did not select an answer in time. " + explanation;
+
         document.getElementById('nextBtn').disabled = false;
     }
 </script>

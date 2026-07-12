@@ -652,8 +652,10 @@ def dashboard():
     if current_user.role != 'student':
         return redirect(url_for('admin.dashboard'))
 
-    # ── Centralized context — single source of truth for this request ─────────
+    # ── Context: read all data via the shared analytics service (avoids duplicate queries)
     ctx = get_learning_context(current_user.id)
+    from app.services.analytics_service import StudentAnalyticsService
+    analytics = StudentAnalyticsService(current_user.id)
 
     # Subject hours chart — read from context
     subject_hours = ctx.subject_hours_chart
@@ -661,15 +663,9 @@ def dashboard():
     chart_data = list(subject_hours.values())
     total_scheduled = sum(chart_data)
 
-    # Assignment completion — read from context
-    assignment_completion = ctx.assignment_completion
-
     # Risk counts — read from context
     risk = ctx.schedule_risk_counts
     high_risk, medium_risk, low_risk = risk["high"], risk["medium"], risk["low"]
-
-    # Recommendations — read from context (risk-based + weak-subject aware)
-    recs = ctx.recommendations
 
     # Today's tasks — read from context
     today_slots = ctx.current_tasks
@@ -679,12 +675,6 @@ def dashboard():
     logged_hours = ctx.study_hours
     streak = ctx.streak
 
-    # Achievements — read from context (assessment + quiz + lesson completions)
-    accomplishments = ctx.achievements
-
-    # Recommended topics for revision — read from context (based on weak chapters)
-    recommended_topics = ctx.recommended_topics
-
     # Run study log analysis against planner targets
     from app.utils.log_analyzer import analyze_student_logs
     log_analysis = None
@@ -693,7 +683,7 @@ def dashboard():
     except Exception:
         pass
 
-    # 5. Bookmarked chapters recommendation if days_until_exam is under 7 days
+    # Bookmarked chapters recommendation if days_until_exam is under 7 days
     from app.models import Exam, BookmarkedChapter
     today_local = local_today_for_user(current_user.id)
     week_away = today_local + timedelta(days=7)
@@ -732,6 +722,9 @@ def dashboard():
         commitment_summary[cat] = round(commitment_summary[cat], 1)
     available_study_hours = round(get_available_study_hours_total(current_user.id), 1)
 
+    # Get compact assessment summary
+    summary = analytics.assessment_summary(limit=3)
+
     return render_template("student/dashboard.html",
                            user=current_user,
                            profile=ctx.profile,
@@ -739,8 +732,6 @@ def dashboard():
                            logged_hours=logged_hours,
                            log_analysis=log_analysis,
                            streak=streak,
-                           accomplishments=accomplishments[:4],
-                           recommended_topics=recommended_topics,
                            commitment_summary=commitment_summary,
                            available_study_hours=available_study_hours,
                            chart_labels=chart_labels,
@@ -749,7 +740,14 @@ def dashboard():
                            risk_data=[high_risk, medium_risk, low_risk],
                            today_slots=today_slots,
                            recommended_review_bookmarks=recommended_review_bookmarks,
-                           recent_study_history=recent_study_history)
+                           recent_study_history=recent_study_history,
+                           recent_assessments=summary["recent"],
+                           overall_stats={
+                               "total_attempted": summary["total_attempted"],
+                               "correct": summary["total_correct"],
+                               "incorrect": summary["total_incorrect"],
+                               "accuracy": summary["accuracy"]
+                           })
 
 @student_bp.route("/evaluation", methods=["GET", "POST"])
 @login_required
@@ -1425,90 +1423,180 @@ def generate_schedule():
     return redirect(url_for('student.schedule'))
 
 
-def generate_assessment_questions_for_subject(subject_id):
-    from app.services.ai_service import ai_service
-    
+import logging as _logging
+_gen_logger = _logging.getLogger('smart_study.question_gen')
+
+
+def generate_assessment_questions_for_subject(subject_id, student_id=None):
+    """
+    Generate 15 assessment questions (5 easy / 5 medium / 5 hard) for *subject_id*
+    via Gemini AI (structured JSON) with automatic JSON-text fallback.
+
+    Works for EVERY class level, faculty, and program stored in the Subject table.
+    Returns the number of questions actually saved to the database (0 on failure).
+    """
+    from app.services.ai_service import ai_service, QuotaExceededError, FEATURE_MCQ
+
     subject = Subject.query.get(subject_id)
     if not subject:
+        _gen_logger.error("generate_questions: subject_id=%s not found.", subject_id)
         return 0
-        
-    # Get chapters/topics of this subject to help link questions
+
+    level   = subject.level_of_study or "Unknown Level"
+    program = subject.program or "General"
+    name    = subject.name or "Unknown Subject"
+
+    total_existing = AssessmentQuestion.query.filter_by(subject_id=subject_id).count()
+    if total_existing == 0:
+        _gen_logger.info(
+            "COLD START — generating first question batch for '%s' "
+            "(level='%s', program='%s', subject_id=%s)",
+            name, level, program, subject_id,
+        )
+    else:
+        _gen_logger.info(
+            "TOPUP — existing=%d, generating more for '%s' "
+            "(level='%s', program='%s', subject_id=%s)",
+            total_existing, name, level, program, subject_id,
+        )
+
+    # ── Build chapter/topic context ─────────────────────────────────────────
     chapters = Chapter.query.filter_by(subject_id=subject_id).all()
     ch_info = ""
-    ch_map = {}
+    ch_map  = {}
     if chapters:
         ch_info = "The chapters/topics for this subject are:\n"
         for ch in chapters:
             ch_info += f"- Chapter {ch.chapter_number}: {ch.name}\n"
-            topics = Topic.query.filter_by(chapter_id=ch.id).all()
-            for t in topics:
+            for t in Topic.query.filter_by(chapter_id=ch.id).all():
                 ch_info += f"  - Topic {t.topic_number}: {t.name}\n"
-                ch_map[t.name.lower()] = (ch.id, t.id)
+                ch_map[t.name.lower()]  = (ch.id, t.id)
                 ch_map[ch.name.lower()] = (ch.id, t.id)
-                
-    # 1 & 2: Fetch previously answered questions to avoid repetition
-    seen_qs_text = []
-    if current_user and current_user.is_authenticated:
-        seen_q_ids = [sq.question_id for sq in StudentSeenQuestion.query.filter_by(student_id=current_user.id).all()]
-        if seen_q_ids:
-            seen_qs = AssessmentQuestion.query.filter(
-                AssessmentQuestion.id.in_(seen_q_ids),
-                AssessmentQuestion.subject_id == subject_id
-            ).all()
-            seen_qs_text = [q.question_text for q in seen_qs]
-            
+
+    # ── Build seen-question exclusion list ──────────────────────────────────
     exclusion_text = ""
-    if seen_qs_text:
-        # Just send a subset if it's too large to save tokens
-        exclusion_text = "\nDo not repeat any of these questions:\n" + "\n".join(f"- {q}" for q in seen_qs_text[-50:])
+    try:
+        uid = student_id or (current_user.id if current_user and current_user.is_authenticated else None)
+        if uid:
+            seen_q_ids = [
+                sq.question_id
+                for sq in StudentSeenQuestion.query.filter_by(student_id=uid).all()
+            ]
+            if seen_q_ids:
+                seen_qs = AssessmentQuestion.query.filter(
+                    AssessmentQuestion.id.in_(seen_q_ids),
+                    AssessmentQuestion.subject_id == subject_id,
+                ).all()
+                if seen_qs:
+                    exclusion_text = "\nDo not repeat any of these questions:\n" + "\n".join(
+                        f"- {q.question_text}" for q in seen_qs[-50:]
+                    )
+    except Exception:
+        pass  # Not fatal — exclusion list is best-effort
+
+    # ── Curriculum context line (handles every level correctly) ─────────────
+    if "university" in level.lower() or "bachelor" in level.lower() or "master" in level.lower():
+        curriculum_ctx = f"Nepal university / higher-education curriculum for the {program} program."
+    elif any(cls in level.lower() for cls in ["11", "12"]):
+        curriculum_ctx = f"Nepal NEB (National Examination Board) {level} — {program}."
+    elif any(cls in level.lower() for cls in ["9", "10"]):
+        curriculum_ctx = f"Nepal CDC / SEE curriculum, {level}."
+    else:
+        curriculum_ctx = f"Nepal CDC curriculum, {level}."
 
     prompt = (
-        f"Generate exactly 15 high-quality, distinct multiple-choice questions covering the core syllabus topics of the subject '{subject.name}' "
-        f"for a student in '{subject.level_of_study}' under the '{subject.program or 'General'}' program.\n"
-        f"Curriculum context: Nepal NEB or equivalent college level standards.\n\n"
+        f"Generate exactly 15 high-quality, distinct multiple-choice questions "
+        f"covering the core syllabus topics of the subject '{name}' "
+        f"for a student at the '{level}' level under the '{program}' program.\n"
+        f"Curriculum context: {curriculum_ctx}\n\n"
         f"{ch_info}\n"
         "Requirements:\n"
         "1. Generate exactly 5 'easy', 5 'medium', and 5 'hard' questions.\n"
-        "2. Each question must have 4 options (A, B, C, D) and one correct answer.\n"
-        "3. Provide distinct, subject-relevant, non-repetitive questions. Do NOT repeat classic boilerplate questions.\n"
+        "2. Each question must have 4 options (A, B, C, D) and exactly one correct answer.\n"
+        "3. Provide distinct, subject-relevant, non-repetitive questions.\n"
         "4. Map each question to a chapter number and topic name from the list above if possible.\n"
-        f"{exclusion_text}"
+        "5. For each question provide a concise explanation of the correct answer.\n"
+        f"{exclusion_text}\n"
+        "Return ONLY a JSON array. Each element must have keys: "
+        "q, a, b, c, d, ans (A/B/C/D), diff (easy/medium/hard), "
+        "explanation, ch_num (int or null), topic_name (string or null)."
     )
-    
-    system_instruction = "You are an expert examiner for the National Examination Board (NEB) of Nepal."
-    
+
+    system_instruction = (
+        "You are an expert curriculum examiner who writes assessments for students "
+        "across Class 6 through Master's level under Nepal's educational system. "
+        "Always respond with valid JSON only — no markdown fences, no extra text."
+    )
+
+    # ── Attempt 1: Structured Gemini JSON ───────────────────────────────────
     response_schema = {
         "type": "ARRAY",
         "items": {
             "type": "OBJECT",
             "properties": {
-                "q": {"type": "STRING", "description": "Question text"},
-                "a": {"type": "STRING"},
-                "b": {"type": "STRING"},
-                "c": {"type": "STRING"},
-                "d": {"type": "STRING"},
-                "ans": {"type": "STRING", "description": "Correct option: A, B, C, or D"},
-                "diff": {"type": "STRING", "description": "easy, medium, or hard"},
-                "type": {"type": "STRING"},
-                "ch_num": {"type": "INTEGER"},
-                "topic_name": {"type": "STRING"},
-                "explanation": {"type": "STRING", "description": "Explanation of the correct answer"}
+                "q":           {"type": "STRING"},
+                "a":           {"type": "STRING"},
+                "b":           {"type": "STRING"},
+                "c":           {"type": "STRING"},
+                "d":           {"type": "STRING"},
+                "ans":         {"type": "STRING"},
+                "diff":        {"type": "STRING"},
+                "type":        {"type": "STRING"},
+                "ch_num":      {"type": "INTEGER"},
+                "topic_name":  {"type": "STRING"},
+                "explanation": {"type": "STRING"},
             },
-            "required": ["q", "a", "b", "c", "d", "ans", "diff", "explanation"]
-        }
+            "required": ["q", "a", "b", "c", "d", "ans", "diff", "explanation"],
+        },
     }
-    
+
+    questions_data = None
     try:
         response_text = ai_service.generate_content(
-            prompt, 
+            prompt,
+            feature=FEATURE_MCQ,
             system_instruction=system_instruction,
             response_mime_type="application/json",
-            response_schema=response_schema
+            response_schema=response_schema,
         )
         questions_data = parse_json_safely(response_text)
+        _gen_logger.debug(
+            "Structured Gemini response parsed: %d items",
+            len(questions_data) if isinstance(questions_data, list) else -1,
+        )
+    except QuotaExceededError:
+        # Daily cap reached — re-raise so the calling route can show a friendly message.
+        raise
     except Exception as e:
-        print(f"Error calling AI / parsing JSON: {e}")
-        return 0
+        _gen_logger.warning(
+            "Structured Gemini generation failed for subject_id=%s ('%s'): %s. "
+            "Attempting plain-text JSON fallback.",
+            subject_id, name, e,
+        )
+
+    # ── Attempt 2: Plain-text fallback (no response_schema) ─────────────────
+    if not isinstance(questions_data, list) or len(questions_data) == 0:
+        try:
+            response_text2 = ai_service.generate_content(
+                prompt,
+                feature=FEATURE_MCQ,
+                system_instruction=system_instruction,
+            )
+            questions_data = parse_json_safely(response_text2)
+            _gen_logger.info(
+                "Plain-text fallback parsed: %d items for subject_id=%s",
+                len(questions_data) if isinstance(questions_data, list) else -1,
+                subject_id,
+            )
+        except QuotaExceededError:
+            # Daily cap reached — re-raise so the calling route can show a friendly message.
+            raise
+        except Exception as e2:
+            _gen_logger.error(
+                "ALL AI generation attempts failed for subject_id=%s ('%s' / '%s' / '%s'): %s",
+                subject_id, name, level, program, e2,
+            )
+            return 0
     
     count = 0
     if isinstance(questions_data, list):
@@ -1619,35 +1707,56 @@ def assessment_start():
             flash("Please select at least one active profile subject.", "warning")
             return redirect(url_for('student.assessment_start'))
             
-        # Ensure we have enough unseen questions
-        for sub_id in selected_subjects:
-            seen_subquery = db.session.query(StudentSeenQuestion.question_id).filter_by(student_id=current_user.id)
-            unseen_count = AssessmentQuestion.query.filter(
-                AssessmentQuestion.subject_id == sub_id,
-                ~AssessmentQuestion.id.in_(seen_subquery)
-            ).count()
-            
-            if unseen_count < 15:
-                generate_assessment_questions_for_subject(sub_id)
+
 
         session['assessment_subjects'] = selected_subjects
         session['assessment_current_idx'] = 0
         session['assessment_scores'] = {}
-        session['assessment_history'] = {} # Track correct/wrong per subject for adaptive difficulty
-        session['assessment_question_history'] = {} # Track detailed question outcomes
-        
+        session['assessment_history'] = {}  # Track correct/wrong per subject for adaptive difficulty
+        session['assessment_question_history'] = {}  # Track detailed question outcomes
+        session['assessment_ids_by_subject'] = {}  # {str(subject_id): StudentAssessment.id}
+
         # Clear difficulty state
         for sub_id in selected_subjects:
             session.pop(f'assessment_diff_{sub_id}', None)
-        
+
         first_sub = session['assessment_subjects'][0]
         return redirect(url_for('student.assessment_question', subject_id=first_sub, q_num=1))
         
+    # Recent assessment history for the panel above subject selection
+    from app.models import StudentAssessment, Subject as SubjectModel
+    recent_assessments = (
+        StudentAssessment.query
+        .filter_by(student_id=current_user.id)
+        .order_by(StudentAssessment.completed_at.desc())
+        .all()
+    )
+    recent_assessment_display = []
+    for sa in recent_assessments:
+        # Skip incomplete attempts with 0 responses
+        resp_count = AssessmentResponse.query.filter_by(assessment_id=sa.id).count()
+        if resp_count == 0:
+            continue
+        subj = SubjectModel.query.get(sa.subject_id)
+        correct = round((sa.total_score or 0.0) / 100.0 * resp_count)
+        recent_assessment_display.append({
+            "id": sa.id,
+            "subject": subj.name if subj else "Unknown",
+            "date": sa.completed_at,
+            "score_pct": round(sa.weighted_score or sa.total_score or 0.0, 1),
+            "correct": correct,
+            "total": resp_count,
+            "tier": sa.knowledge_tier or "beginner",
+        })
+        if len(recent_assessment_display) >= 5:
+            break
+
     return render_template(
         "student/assessment_start.html",
         subjects=subjects,
         profile=profile,
         preselected_subject_id=preselected_subject_id,
+        recent_assessments=recent_assessment_display,
     )
 
 @student_bp.route("/assessment/question/<int:subject_id>/<int:q_num>")
@@ -1655,14 +1764,8 @@ def assessment_start():
 def assessment_question(subject_id, q_num):
     # Total 12 questions per subject (Adaptive Assessment)
     if q_num > 12:
-        # Move to next subject
-        subs = session.get('assessment_subjects', [])
-        idx = session.get('assessment_current_idx', 0) + 1
-        if idx < len(subs):
-            session['assessment_current_idx'] = idx
-            return redirect(url_for('student.assessment_question', subject_id=subs[idx], q_num=1))
-        else:
-            return redirect(url_for('student.assessment_results'))
+        # Show subject summary before moving to next subject
+        return redirect(url_for('student.assessment_subject_summary', subject_id=subject_id))
             
     # Adaptive logic
     history = session.get('assessment_history', {}).get(str(subject_id), [])
@@ -1702,8 +1805,37 @@ def assessment_question(subject_id, q_num):
     q = random.choice(questions) if questions else None
     
     if not q:
-        flash("No assessment questions found for this subject. Ensure databases are seeded.", "danger")
-        return redirect(url_for('student.assessment_start'))
+        # One automatic on-demand generation attempt before giving up
+        _gen_logger.warning(
+            "No questions available for subject_id=%s at q_num=%s. "
+            "Attempting on-demand generation.",
+            subject_id, q_num,
+        )
+        try:
+            generated = generate_assessment_questions_for_subject(subject_id)
+        except QuotaExceededError:
+            # Daily MCQ generation limit reached — show friendly message, no retry.
+            flash(
+                "We've reached today's assessment generation limit. "
+                "Please try again tomorrow — your questions will be ready!",
+                "warning",
+            )
+            return redirect(url_for('student.assessment_start'))
+        except Exception as _gen_err:
+            _gen_logger.error("On-demand generation error: %s", _gen_err)
+            generated = 0
+
+        if generated > 0:
+            # Re-query after successful generation
+            questions = AssessmentQuestion.query.filter_by(subject_id=subject_id).all()
+            q = random.choice(questions) if questions else None
+
+        if not q:
+            flash(
+                "We're preparing your assessment questions — please try again in a moment.",
+                "warning",
+            )
+            return redirect(url_for('student.assessment_start'))
     
     subject = Subject.query.get(subject_id)
     return render_template("student/assessment_question.html", question=q, subject=subject, q_num=q_num, total_q=12)
@@ -1741,102 +1873,272 @@ def assessment_answer():
     q_history[str(q_id)] = is_correct
     session['assessment_question_history'] = q_history
     
-    # Track score
-    scores = session.get('assessment_scores', {})
-    if str(sub_id) not in scores:
-        scores[str(sub_id)] = {'correct': 0, 'total': 0, 'weighted_points': 0, 'max_points': 0}
-    
-    scores[str(sub_id)]['total'] += 1
-    
-    weight = 1.0
-    diff = (q.difficulty or "").lower()
-    if diff == "medium" or diff == "intermediate": weight = 1.5
-    if diff == "hard" or diff == "advanced": weight = 2.0
-    
-    scores[str(sub_id)]['max_points'] += weight
-    if is_correct:
-        scores[str(sub_id)]['correct'] += 1
-        scores[str(sub_id)]['weighted_points'] += weight
-        
-    session['assessment_scores'] = scores
-    
+    # ── Upsert StudentAssessment stub for this subject (created once per session) ──
+    sa_ids = session.get('assessment_ids_by_subject', {})
+    sa_id = sa_ids.get(str(sub_id))
+    if not sa_id:
+        sa_stub = StudentAssessment(
+            student_id=current_user.id,
+            subject_id=sub_id,
+            total_score=0.0,
+            max_score=100.0,
+            weighted_score=0.0,
+            knowledge_tier='beginner',
+        )
+        db.session.add(sa_stub)
+        db.session.flush()  # get ID without full commit
+        sa_id = sa_stub.id
+        sa_ids[str(sub_id)] = sa_id
+        session['assessment_ids_by_subject'] = sa_ids
+
+    # ── Write AssessmentResponse row ─────────────────────────────────────────
+    resp = AssessmentResponse(
+        assessment_id=sa_id,
+        question_id=q_id,
+        selected_answer=answer if answer else None,
+        is_correct=is_correct,
+        response_time_seconds=time_taken,
+    )
+    db.session.add(resp)
+    db.session.commit()
+
     return redirect(url_for('student.assessment_question', subject_id=sub_id, q_num=q_num + 1))
+
+@student_bp.route("/assessment/subject-summary/<int:subject_id>")
+@login_required
+def assessment_subject_summary(subject_id):
+    """One-way subject summary screen shown after finishing each subject."""
+    subject = Subject.query.get_or_404(subject_id)
+    sa_ids = session.get('assessment_ids_by_subject', {})
+    sa_id = sa_ids.get(str(subject_id))
+    
+    correct = 0
+    total_q = 0
+    w_pts = 0.0
+    m_pts = 0.0
+    questions_detail = []
+    
+    if sa_id:
+        responses = AssessmentResponse.query.filter_by(assessment_id=sa_id).all()
+        total_q = len(responses)
+        correct = sum(1 for r in responses if r.is_correct)
+        for r in responses:
+            q = AssessmentQuestion.query.get(r.question_id)
+            weight = 1.0
+            if q:
+                diff = (q.difficulty or "").lower()
+                if diff in ("medium", "intermediate"):
+                    weight = 1.5
+                elif diff in ("hard", "advanced"):
+                    weight = 2.0
+                questions_detail.append({
+                    'question': q.question_text,
+                    'option_a': q.option_a,
+                    'option_b': q.option_b,
+                    'option_c': q.option_c,
+                    'option_d': q.option_d,
+                    'correct': q.correct_answer,
+                    'selected': r.selected_answer,
+                    'is_correct': r.is_correct,
+                })
+            m_pts += weight
+            if r.is_correct:
+                w_pts += weight
+                
+    weighted_pct = (w_pts / m_pts * 100) if m_pts > 0 else 0.0
+    flat_pct = (correct / total_q * 100) if total_q > 0 else 0.0
+    tier = 'beginner'
+    if weighted_pct >= 70: tier = 'advanced'
+    elif weighted_pct >= 40: tier = 'intermediate'
+
+    # Determine next destination
+    subs = session.get('assessment_subjects', [])
+    current_idx = session.get('assessment_current_idx', 0)
+    next_idx = current_idx + 1
+    is_last_subject = (next_idx >= len(subs))
+
+    if not is_last_subject:
+        next_subject_id = subs[next_idx]
+    else:
+        next_subject_id = None
+
+    return render_template(
+        'student/assessment_subject_summary.html',
+        subject=subject,
+        correct=correct,
+        total_q=total_q,
+        weighted_pct=round(weighted_pct, 1),
+        flat_pct=round(flat_pct, 1),
+        tier=tier,
+        questions_detail=questions_detail,
+        is_last_subject=is_last_subject,
+        next_subject_id=next_subject_id,
+    )
+
+
+@student_bp.route("/assessment/subject-summary/<int:subject_id>/next", methods=["POST"])
+@login_required
+def assessment_subject_summary_next(subject_id):
+    """Move to next subject or final results — called via POST from summary screen."""
+    subs = session.get('assessment_subjects', [])
+    current_idx = session.get('assessment_current_idx', 0)
+    next_idx = current_idx + 1
+    if next_idx < len(subs):
+        session['assessment_current_idx'] = next_idx
+        return redirect(url_for('student.assessment_question', subject_id=subs[next_idx], q_num=1))
+    return redirect(url_for('student.assessment_results'))
+
+
+@student_bp.route("/assessment/detail/<int:sa_id>", methods=["GET"])
+@login_required
+def assessment_detail(sa_id):
+    """AJAX endpoint — returns per-question detail for a past assessment (modal)."""
+    sa = StudentAssessment.query.get_or_404(sa_id)
+    if sa.student_id != current_user.id:
+        return jsonify({'status': 'error', 'message': 'Access denied'}), 403
+
+    responses = AssessmentResponse.query.filter_by(assessment_id=sa_id).all()
+    items = []
+    for r in responses:
+        q = AssessmentQuestion.query.get(r.question_id)
+        if q:
+            items.append({
+                'question': q.question_text,
+                'option_a': q.option_a,
+                'option_b': q.option_b,
+                'option_c': q.option_c,
+                'option_d': q.option_d,
+                'correct': q.correct_answer,
+                'selected': r.selected_answer,
+                'is_correct': r.is_correct,
+                'explanation': getattr(q, 'explanation', None),
+            })
+    return jsonify({'status': 'success', 'items': items})
+
 
 @student_bp.route("/assessment/results")
 @login_required
 def assessment_results():
-    scores = session.get('assessment_scores', {})
-    q_history = session.get('assessment_question_history', {})
+    sa_ids = session.get('assessment_ids_by_subject', {})
 
-    # ── Context: persist results and derive weak/strong areas ────────────────
+    # ── Context: finalize SA stub scores + profile flag ─────────────────────────
     ctx = get_learning_context(current_user.id)
 
-    # Delegate DB writes to context (StudentAssessment rows + profile flag)
-    avg_score = ctx.update_assessment_results(scores, q_history)
-
-    # Build display results list from scores dict
     results = []
-    for sub_id, data in scores.items():
-        total_q = data.get('total', 12)
-        flat_pct = (data['correct'] / total_q) * 100 if total_q > 0 else 0
+    study_times = []
+    total_correct_all = 0
+    total_questions_all = 0
+    total_pct = 0.0
+    count = 0
+
+    for sub_id_str, sa_id in sa_ids.items():
+        sub_id = int(sub_id_str)
+        # Query responses for this sa_id
+        responses = AssessmentResponse.query.filter_by(assessment_id=sa_id).all()
+        total_q = len(responses)
         
-        # Weighted scoring calculation
-        w_pts = data.get('weighted_points', 0)
-        m_pts = data.get('max_points', total_q)
-        weighted_pct = (w_pts / m_pts) * 100 if m_pts > 0 else 0
+        # Skip if 0 responses (edge case of incomplete attempt)
+        if total_q == 0:
+            continue
+            
+        correct = sum(1 for r in responses if r.is_correct)
+        
+        # Calculate weighted points
+        w_pts = 0.0
+        m_pts = 0.0
+        for r in responses:
+            q = AssessmentQuestion.query.get(r.question_id)
+            weight = 1.0
+            if q:
+                diff = (q.difficulty or "").lower()
+                if diff in ("medium", "intermediate"):
+                    weight = 1.5
+                elif diff in ("hard", "advanced"):
+                    weight = 2.0
+            m_pts += weight
+            if r.is_correct:
+                w_pts += weight
+                
+        flat_pct = (correct / total_q) * 100
+        weighted_pct = (w_pts / m_pts * 100) if m_pts > 0 else 0.0
         
         tier = 'beginner'
         if weighted_pct >= 70: tier = 'advanced'
         elif weighted_pct >= 40: tier = 'intermediate'
-        
-        subj = Subject.query.get(int(sub_id))
+
+        # Finalize the SA stub created during the quiz
+        sa_row = StudentAssessment.query.get(sa_id)
+        if sa_row:
+            sa_row.total_score = flat_pct
+            sa_row.weighted_score = weighted_pct
+            sa_row.knowledge_tier = tier
+
+        subj = Subject.query.get(sub_id)
         results.append({
             'subject': subj.name if subj else 'Unknown',
-            'score': weighted_pct, # Display weighted percentage
+            'score': weighted_pct,
             'flat_score': flat_pct,
             'tier': tier,
-            'correct': data['correct'],
-            'total': total_q
+            'correct': correct,
+            'total': total_q,
+        })
+        
+        # Divisor fix: use dynamic total_q
+        if flat_pct < 40:
+            rec_hours = "3.0 hours/day (High priority)"
+        elif flat_pct < 70:
+            rec_hours = "2.0 hours/day (Medium priority)"
+        else:
+            rec_hours = "1.0 hour/day (Low priority)"
+        study_times.append({
+            "subject_name": subj.name if subj else "Unknown",
+            "score": flat_pct,
+            "recommended_hours": rec_hours,
         })
 
-    # Weak chapters & recommended topics — read from context (avoids re-querying)
+        total_correct_all += correct
+        total_questions_all += total_q
+        total_pct += weighted_pct
+        count += 1
+
+    # Mark profile as assessment-complete
+    p = ctx.profile
+    if p:
+        p.has_completed_assessment = True
+        if p.prior_academic_score == 0 and count > 0:
+            p.prior_academic_score = total_pct / count
+    db.session.commit()
+
+    # Invalidate context caches
+    ctx._assessment_history = None
+    ctx._weak_chapters = None
+    ctx._weak_topics = None
+    ctx._strong_chapters = None
+    ctx._strong_topics = None
+    ctx._recommended_topics = None
+
+    avg_score = total_pct / count if count > 0 else 0
+    overall_pct = (total_correct_all / total_questions_all * 100) if total_questions_all > 0 else 0.0
+
     weak_chapters = ctx.weak_chapters
     recommended_topics = ctx.weak_topics
 
-    # Build revision plan steps from weak topics
     revision_plan_steps = []
     for ch_info in weak_chapters:
         topics = Topic.query.filter_by(chapter_id=ch_info["id"]).all()
         for t in topics:
             revision_plan_steps.append(
-                f"Revise textbook material for '{t.name}' under "
-                f"Chapter {ch_info['chapter_number']} of {ch_info['subject_name']} "
-                f"for 45 mins. Log it in study log."
+                f"Revise '{t.name}' under Chapter {ch_info['chapter_number']} of {ch_info['subject_name']} for 45 mins."
             )
-
-    # Study time suggestions per subject
-    study_times = []
-    for sub_id, data in scores.items():
-        subj = Subject.query.get(int(sub_id))
-        if not subj:
-            continue
-        pct = (data['correct'] / 15.0) * 100 if data.get('total', 0) > 0 else 0
-        if pct < 40:
-            rec_hours = "3.0 hours/day (High priority)"
-        elif pct < 70:
-            rec_hours = "2.0 hours/day (Medium priority)"
-        else:
-            rec_hours = "1.0 hour/day (Low priority)"
-        study_times.append({
-            "subject_name": subj.name,
-            "score": pct,
-            "recommended_hours": rec_hours,
-        })
 
     return render_template(
         "student/assessment_results.html",
         results=results,
         avg_score=avg_score,
+        overall_pct=round(overall_pct, 1),
+        total_correct_all=total_correct_all,
+        total_incorrect_all=total_questions_all - total_correct_all,
+        total_questions_all=total_questions_all,
         weak_chapters=weak_chapters,
         recommended_topics=recommended_topics[:6],
         revision_plan_steps=revision_plan_steps[:4],
@@ -3169,7 +3471,14 @@ def profile():
         db.session.commit()
         ctx._profile = None  # reset cache so next access picks up new record
 
+    # Determine if we are in Edit Mode
+    edit_mode = (request.args.get("edit") == "1")
+
     if request.method == "POST":
+        action = request.form.get("action", "save")
+        if action == "cancel":
+            return redirect(url_for("student.profile"))
+
         current_user.full_name = request.form.get("full_name")
 
         # Collect profile field updates
@@ -3183,14 +3492,14 @@ def profile():
             raw_timezone = raw_timezone if raw_timezone in allowed_timezones else default_timezone_for_country(raw_country)
         else:
             raw_timezone = default_timezone_for_country(raw_country)
-        # Derive curriculum automatically from country — never from form input
+        
         derived_curriculum = COUNTRY_CURRICULUM_MAP.get(raw_country, "National")
-        # level_of_study mirrors study_level for backward-compat with other parts of the codebase
+        
         profile_data = {
             "country":           raw_country,
             "timezone":          raw_timezone,
             "curriculum":        derived_curriculum,
-            "level_of_study":    raw_study_lvl,   # keep in sync for legacy lookups
+            "level_of_study":    raw_study_lvl,
             "study_level":       raw_study_lvl,
             "program":           raw_program,
             "semester":          raw_semester,
@@ -3200,9 +3509,11 @@ def profile():
             "explanation_level": request.form.get("explanation_level", "Intermediate"),
             "study_goal":        request.form.get("study_goal", "Improve Grades"),
             "preferred_language":request.form.get("preferred_language", "English"),
+            "target_score_goal": float(request.form.get("target_score_goal") or 70.0),
+            "peak_focus_time":   request.form.get("peak_focus_time") or "Morning",
         }
 
-        # Handle profile picture (file I/O remains here — not a context concern)
+        # Handle profile picture
         if 'profile_pic' in request.files:
             file = request.files['profile_pic']
             if file and file.filename != '':
@@ -3221,24 +3532,46 @@ def profile():
                     else:
                         flash("Profile picture exceeds 2MB limit.", "danger")
 
-        # ── Context mutation: update_profile commits all fields + invalidates caches
         ctx.update_profile(profile_data)
-        db.session.commit()  # commit full_name change on User model
+        db.session.commit()
         flash("Profile updated successfully!", "success")
         return redirect(url_for("student.profile"))
 
-    # GET — read all display data from context (no extra queries)
+    # GET — read all data from the shared analytics service (avoids duplicate queries)
+    from app.services.analytics_service import StudentAnalyticsService
+    analytics = StudentAnalyticsService(current_user.id)
+
+    mastery = analytics.subject_mastery()
+    summary = analytics.assessment_summary(limit=3)
+    weak_topics = analytics.weak_topics(limit=3)
+    academic = analytics.academic_summary()
+
     return render_template(
         "student/profile.html",
+        edit_mode=edit_mode,
         profile=ctx.profile,
+        user=current_user,
         logged_hours=ctx.study_hours,
         streak=ctx.streak,
-        strong_subjects=ctx.strong_subjects,
-        weak_subjects=ctx.weak_subjects,
         risk_summary=ctx.risk_summary,
         completed_quizzes_count=ctx.completed_quizzes_count,
         completed_lessons_count=ctx.completed_lessons_count,
-        user=current_user,
+        
+        # Analytics details
+        subject_mastery=mastery,
+        weak_topics=weak_topics,
+        recent_assessments=summary["recent"],
+        overall_stats={
+            "total_attempted": summary["total_attempted"],
+            "correct": summary["total_correct"],
+            "incorrect": summary["total_incorrect"],
+            "accuracy": summary["accuracy"]
+        },
+        strongest_subject=academic["strongest_subject"],
+        weakest_subject=academic["weakest_subject"],
+        improvement_trend=academic["improvement_trend"],
+        overall_mastery=academic["overall_mastery"],
+        subjects=ctx.subjects,
     )
 
 
@@ -3412,15 +3745,45 @@ def parse_json_safely(response_text):
         if lines and lines[-1].startswith("```"):
             lines = lines[:-1]
         cleaned = "\n".join(lines).strip()
+    
+    # Quick fix for trailing commas in arrays/objects which standard json decoder rejects
+    # e.g., [1, 2, ] or {"a": 1, }
+    cleaned_no_trailing = re.sub(r',\s*([\]}])', r'\1', cleaned)
+    
     try:
-        return json.loads(cleaned)
+        return json.loads(cleaned_no_trailing)
     except Exception as e:
-        match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-        if match:
+        # Try finding array block first
+        match_arr = re.search(r'\[.*\]', cleaned, re.DOTALL)
+        if match_arr:
             try:
-                return json.loads(match.group(0))
+                # clean trailing commas inside the extracted array
+                arr_str = re.sub(r',\s*([\]}])', r'\1', match_arr.group(0))
+                return json.loads(arr_str)
             except Exception:
                 pass
+        
+        # Try finding object block
+        match_obj = re.search(r'\{.*\}', cleaned, re.DOTALL)
+        if match_obj:
+            try:
+                obj_str = re.sub(r',\s*([\]}])', r'\1', match_obj.group(0))
+                return json.loads(obj_str)
+            except Exception:
+                pass
+                
+        # Last ditch effort: try parsing using a regex to extract JSON objects one by one
+        # If it's a list of objects, we can build the list manually
+        objs = []
+        for obj_match in re.finditer(r'\{\s*"q"\s*:\s*.*?\s*\}', cleaned, re.DOTALL | re.IGNORECASE):
+            try:
+                clean_obj = re.sub(r',\s*([\]}])', r'\1', obj_match.group(0))
+                objs.append(json.loads(clean_obj))
+            except Exception:
+                pass
+        if objs:
+            return objs
+            
         raise e
 
 

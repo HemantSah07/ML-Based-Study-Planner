@@ -14,3 +14,5 @@ Pillow
 pdfplumber
 pymupdf
 google-generativeai
+google-genai>=2.11.0
+anthropic

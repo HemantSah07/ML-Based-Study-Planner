@@ -600,6 +600,7 @@ class StudentLearningContext:
                     "chapter_number": ch.chapter_number,
                     "subject_name": subj_name,
                     "count": count,
+                    "wrong_count": count,
                 })
                 for t in Topic.query.filter_by(chapter_id=ch.id).all():
                     if not any(rt["id"] == t.id for rt in topics):
@@ -1019,9 +1020,9 @@ class StudentLearningContext:
         str_fields = [
             "country", "curriculum", "level_of_study", "study_level",
             "program", "semester", "timezone", "explanation_level",
-            "study_goal", "preferred_language", "profile_pic",
+            "study_goal", "preferred_language", "profile_pic", "peak_focus_time",
         ]
-        float_fields = ["cumulative_gpa", "attendance_pct"]
+        float_fields = ["cumulative_gpa", "attendance_pct", "target_score_goal"]
         int_fields = ["commute_buffer_minutes"]
 
         for field in str_fields:
