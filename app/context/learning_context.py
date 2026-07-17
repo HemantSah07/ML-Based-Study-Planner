@@ -1021,6 +1021,7 @@ class StudentLearningContext:
             "country", "curriculum", "level_of_study", "study_level",
             "program", "semester", "timezone", "explanation_level",
             "study_goal", "preferred_language", "profile_pic", "peak_focus_time",
+            "university",
         ]
         float_fields = ["cumulative_gpa", "attendance_pct", "target_score_goal"]
         int_fields = ["commute_buffer_minutes"]

@@ -37,6 +37,7 @@ class StudentProfile(db.Model):
     level_of_study = db.Column(db.String(50))
     semester = db.Column(db.String(50))
     study_level = db.Column(db.String(50), nullable=True, default='Class 9')
+    university = db.Column(db.String(100), nullable=True)
     
     # Universal additions
     country = db.Column(db.String(100), default="Nepal")

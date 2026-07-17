@@ -161,6 +161,30 @@
                             {% endfor %}
                         </select>
                     </div>
+
+                    <!-- University (Bachelors / Masters only) -->
+                    <div class="col-md-6" id="universityGroup" style="display:none;">
+                        <label class="form-label text-muted small">University <span class="text-danger">*</span></label>
+                        <select name="university_select" id="universitySelect" class="form-select border-secondary bg-dark text-white">
+                            <option value="">-- Select University --</option>
+                            <option value="Tribhuvan University (TU)">Tribhuvan University (TU)</option>
+                            <option value="Kathmandu University (KU)">Kathmandu University (KU)</option>
+                            <option value="Purbanchal University (PU)">Purbanchal University (PU)</option>
+                            <option value="Pokhara University (PokU)">Pokhara University (PokU)</option>
+                            <option value="Mid-Western University">Mid-Western University</option>
+                            <option value="Far-Western University">Far-Western University</option>
+                            <option value="Agriculture and Forestry University (AFU)">Agriculture and Forestry University (AFU)</option>
+                            <option value="Nepal Sanskrit University">Nepal Sanskrit University</option>
+                            <option value="Foreign-Affiliated">Foreign-Affiliated</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+
+                    <!-- University Custom/Follow-up (shown when Foreign-Affiliated or Other selected) -->
+                    <div class="col-md-6" id="universityCustomGroup" style="display:none;">
+                        <label class="form-label text-muted small" id="universityCustomLabel">Specify institution <span class="text-danger">*</span></label>
+                        <input type="text" name="university_custom" id="universityCustomInput" class="form-control bg-dark border-secondary text-white" placeholder="Enter institution name">
+                    </div>
                 </div>
 
                 <hr class="border-secondary mb-4">
@@ -296,6 +320,20 @@
                 <div class="col-6 col-md-4">
                     <span class="text-muted d-block">Semester</span>
                     <span class="fw-semibold text-white">{{ profile.semester }}</span>
+                </div>
+                {% endif %}
+                {% if profile.university %}
+                <div class="col-6 col-md-4">
+                    <span class="text-muted d-block">University</span>
+                    <span class="fw-semibold text-white">
+                        {% if profile.university.startswith("Foreign-Affiliated: ") %}
+                            {{ profile.university[20:] }} (Foreign-Affiliated)
+                        {% elif profile.university.startswith("Other: ") %}
+                            {{ profile.university[7:] }}
+                        {% else %}
+                            {{ profile.university }}
+                        {% endif %}
+                    </span>
                 </div>
                 {% endif %}
                 <div class="col-6 col-md-4">
@@ -492,6 +530,7 @@ const SAVED_COUNTRY     = {{ (profile.country or '') | tojson }};
 const SAVED_STUDY_LEVEL = {{ (profile.study_level or '') | tojson }};
 const SAVED_PROGRAM     = {{ (profile.program or '') | tojson }};
 const SAVED_SEMESTER    = {{ (profile.semester or '') | tojson }};
+const SAVED_UNIVERSITY  = {{ (profile.university or '') | tojson }};
 const SAVED_TIMEZONE    = {{ (profile.timezone or 'Asia/Kathmandu') | tojson }};
 
 // ── Level options per country ────────────────────────────────────────────────
@@ -568,6 +607,11 @@ const facultyLabel   = document.getElementById("facultyLabel");
 const facultySelect  = document.getElementById("facultySelect");
 const semesterGroup  = document.getElementById("semesterGroup");
 const semesterSelect = document.getElementById("semesterSelect");
+const universityGroup       = document.getElementById("universityGroup");
+const universitySelect      = document.getElementById("universitySelect");
+const universityCustomGroup = document.getElementById("universityCustomGroup");
+const universityCustomLabel = document.getElementById("universityCustomLabel");
+const universityCustomInput = document.getElementById("universityCustomInput");
 const timezoneGroup  = document.getElementById("timezoneGroup");
 const timezoneSelect = document.getElementById("timezoneSelect");
 const timezoneHidden = document.getElementById("timezoneHidden");
@@ -686,6 +730,29 @@ function updateConditionalFields(country, level, savedProg) {
     semesterGroup.style.display = showSemester ? "" : "none";
     if (!showSemester) semesterSelect.value = "";
 
+    // University visibility
+    const showUniversity = (country === "Nepal" && ["Bachelors","Masters"].includes(level));
+    universityGroup.style.display = showUniversity ? "" : "none";
+    universitySelect.required = showUniversity;
+    if (!showUniversity) {
+        universitySelect.value = "";
+        universityCustomGroup.style.display = "none";
+        universityCustomInput.value = "";
+        universityCustomInput.required = false;
+    } else {
+        const val = universitySelect.value;
+        const needsCustom = (val === "Foreign-Affiliated" || val === "Other");
+        universityCustomGroup.style.display = needsCustom ? "" : "none";
+        universityCustomInput.required = needsCustom;
+        if (val === "Foreign-Affiliated") {
+            universityCustomLabel.innerHTML = 'Specify affiliated institution <span class="text-danger">*</span>';
+            universityCustomInput.placeholder = 'e.g. London Metropolitan University';
+        } else if (val === "Other") {
+            universityCustomLabel.innerHTML = 'Specify university <span class="text-danger">*</span>';
+            universityCustomInput.placeholder = 'e.g. Gandaki University';
+        }
+    }
+
     // Grade label
     if (GRADE_LABELS[level]) {
         gradeLabelEl.textContent = GRADE_LABELS[level].label;
@@ -705,6 +772,24 @@ studyLevelSel.addEventListener("change", function() {
     updateConditionalFields(countrySelect.value, this.value, "");
 });
 
+if (universitySelect) {
+    universitySelect.addEventListener("change", function() {
+        const val = this.value;
+        const needsCustom = (val === "Foreign-Affiliated" || val === "Other");
+        universityCustomGroup.style.display = needsCustom ? "" : "none";
+        universityCustomInput.required = needsCustom;
+        if (val === "Foreign-Affiliated") {
+            universityCustomLabel.innerHTML = 'Specify affiliated institution <span class="text-danger">*</span>';
+            universityCustomInput.placeholder = 'e.g. London Metropolitan University';
+        } else if (val === "Other") {
+            universityCustomLabel.innerHTML = 'Specify university <span class="text-danger">*</span>';
+            universityCustomInput.placeholder = 'e.g. Gandaki University';
+        } else {
+            universityCustomInput.value = "";
+        }
+    });
+}
+
 // ── Initialise on page load ──────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", function() {
     if (SAVED_COUNTRY) {
@@ -718,6 +803,19 @@ document.addEventListener("DOMContentLoaded", function() {
                     break;
                 }
             }
+        }
+        // university restore
+        if (SAVED_UNIVERSITY) {
+            if (SAVED_UNIVERSITY.startsWith("Foreign-Affiliated: ")) {
+                universitySelect.value = "Foreign-Affiliated";
+                universityCustomInput.value = SAVED_UNIVERSITY.substring("Foreign-Affiliated: ".length);
+            } else if (SAVED_UNIVERSITY.startsWith("Other: ")) {
+                universitySelect.value = "Other";
+                universityCustomInput.value = SAVED_UNIVERSITY.substring("Other: ".length);
+            } else {
+                universitySelect.value = SAVED_UNIVERSITY;
+            }
+            updateConditionalFields(countrySelect.value, studyLevelSel.value, SAVED_PROGRAM);
         }
     }
 });

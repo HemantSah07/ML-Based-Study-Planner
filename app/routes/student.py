@@ -3494,6 +3494,18 @@ def profile():
             raw_timezone = default_timezone_for_country(raw_country)
         
         derived_curriculum = COUNTRY_CURRICULUM_MAP.get(raw_country, "National")
+
+        raw_university = ""
+        if raw_country == "Nepal" and raw_study_lvl in ("Bachelors", "Masters"):
+            sel_univ = request.form.get("university_select", "").strip()
+            if sel_univ in ("Foreign-Affiliated", "Other"):
+                custom_univ = request.form.get("university_custom", "").strip()
+                if custom_univ:
+                    raw_university = f"{sel_univ}: {custom_univ}"
+                else:
+                    raw_university = sel_univ
+            else:
+                raw_university = sel_univ
         
         profile_data = {
             "country":           raw_country,
@@ -3503,6 +3515,7 @@ def profile():
             "study_level":       raw_study_lvl,
             "program":           raw_program,
             "semester":          raw_semester,
+            "university":        raw_university,
             "cumulative_gpa":    request.form.get("cumulative_gpa", 0.0),
             "commute_buffer_minutes": request.form.get("commute_buffer_minutes", 0),
             "attendance_pct":    float(request.form.get("attendance_pct") or 85.0),
@@ -3783,6 +3796,16 @@ def parse_json_safely(response_text):
                 pass
         if objs:
             return objs
+
+        # Final fallback: use json_repair to handle truncated/malformed AI responses
+        # This commonly occurs when max_output_tokens is exceeded mid-string
+        try:
+            import json_repair
+            repaired = json_repair.repair_json(cleaned, return_objects=True)
+            if repaired:
+                return repaired
+        except Exception:
+            pass
             
         raise e
 
@@ -3929,7 +3952,11 @@ def generate_study_material_route():
     )
 
     try:
-        response_text = ai_service.generate_content(prompt, system_instruction=system_instruction)
+        response_text = ai_service.generate_content(
+            prompt,
+            system_instruction=system_instruction,
+            max_output_tokens=32768,   # study material JSON can be large; default 8192 causes truncation
+        )
         material_data = parse_json_safely(response_text)
 
         if not saved_material:
@@ -3955,6 +3982,15 @@ def generate_study_material_route():
     except Exception as e:
         db.session.rollback()
         import traceback
+        tb = traceback.format_exc()
+        try:
+            with open("c:/smart_study/scratch/error_log.txt", "w") as f:
+                f.write(f"Exception: {str(e)}\n\nTraceback:\n{tb}")
+            if 'response_text' in locals() and response_text:
+                with open("c:/smart_study/scratch/raw_response.txt", "w", encoding="utf-8") as f:
+                    f.write(response_text)
+        except Exception as log_err:
+            print(f"Failed to write log file: {log_err}")
         traceback.print_exc()
         return jsonify({"status": "error", "message": f"AI generation failed: {str(e)}"}), 500
 

@@ -85,7 +85,7 @@ class GeminiProvider(BaseAIProvider):
             temperature=kwargs.get("temperature", 0.3),
             response_mime_type=response_mime_type,
             response_schema=response_schema,
-            max_output_tokens=8192,
+            max_output_tokens=kwargs.get("max_output_tokens", 8192),
         )
 
         delay = initial_delay
