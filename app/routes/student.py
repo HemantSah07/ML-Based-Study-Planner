@@ -1902,6 +1902,49 @@ def assessment_answer():
     db.session.add(resp)
     db.session.commit()
 
+    # ── Finalize immediately if this was the last question (q_num == 12) ──
+    if q_num == 12:
+        try:
+            responses = AssessmentResponse.query.filter_by(assessment_id=sa_id).all()
+            total_q = len(responses)
+            if total_q > 0:
+                correct_count = sum(1 for r in responses if r.is_correct)
+                w_pts = 0.0
+                m_pts = 0.0
+                for r in responses:
+                    q_item = AssessmentQuestion.query.get(r.question_id)
+                    weight = 1.0
+                    if q_item:
+                        diff = (q_item.difficulty or "").lower()
+                        if diff in ("medium", "intermediate"):
+                            weight = 1.5
+                        elif diff in ("hard", "advanced"):
+                            weight = 2.0
+                    m_pts += weight
+                    if r.is_correct:
+                        w_pts += weight
+                
+                flat_pct = (correct_count / total_q) * 100
+                weighted_pct = (w_pts / m_pts * 100) if m_pts > 0 else 0.0
+                
+                tier = 'beginner'
+                if weighted_pct >= 70: tier = 'advanced'
+                elif weighted_pct >= 40: tier = 'intermediate'
+                
+                sa_row = StudentAssessment.query.get(sa_id)
+                if sa_row:
+                    sa_row.total_score = flat_pct
+                    sa_row.weighted_score = weighted_pct
+                    sa_row.knowledge_tier = tier
+                    sa_row.completed_at = datetime.utcnow()
+                    db.session.commit()
+                    current_app.logger.info(
+                        f"[Assessment Finalize] Subject {sub_id} successfully finalized at q_num=12. "
+                        f"Score: {flat_pct:.2f}%, Weighted: {weighted_pct:.2f}%, Tier: {tier}"
+                    )
+        except Exception as e:
+            current_app.logger.error(f"[Assessment Finalize] Failed to finalize subject {sub_id} at q_num=12: {e}")
+
     return redirect(url_for('student.assessment_question', subject_id=sub_id, q_num=q_num + 1))
 
 @student_bp.route("/assessment/subject-summary/<int:subject_id>")
@@ -2072,6 +2115,11 @@ def assessment_results():
             sa_row.total_score = flat_pct
             sa_row.weighted_score = weighted_pct
             sa_row.knowledge_tier = tier
+            sa_row.completed_at = datetime.utcnow()
+            current_app.logger.info(
+                f"[Assessment Results Finalize] sa_id={sa_id} for subject {sub_id} updated. "
+                f"Score: {flat_pct:.2f}%, Weighted: {weighted_pct:.2f}%, Tier: {tier}"
+            )
 
         subj = Subject.query.get(sub_id)
         results.append({
