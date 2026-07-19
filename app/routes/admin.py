@@ -608,11 +608,25 @@ def health():
     except Exception:
         subjects_zero_q = 0
 
+    # Count broken cached PDFs (< 5KB check)
+    broken_pdfs_count = 0
+    try:
+        import os
+        cache_dir = os.path.join(current_app.root_path, "static", "cache", "pdfs")
+        if os.path.exists(cache_dir):
+            for f in os.listdir(cache_dir):
+                if f.startswith("chapter_") and f.endswith(".pdf"):
+                    if os.path.getsize(os.path.join(cache_dir, f)) < 5000:
+                        broken_pdfs_count += 1
+    except Exception:
+        broken_pdfs_count = 0
+
     return render_template(
         "admin/health.html",
         checks=checks, disk=disk, python_info=python_info,
         model_config=model_config, overall=overall,
         api_usage=api_usage, subjects_zero_q=subjects_zero_q,
+        broken_pdfs_count=broken_pdfs_count,
     )
 
 
