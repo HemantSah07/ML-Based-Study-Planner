@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 from app import db, bcrypt
-from app.models import User, AuditLog, StudentProfile, AvailabilitySlot
+from app.models import User, AuditLog, StudentProfile, AvailabilitySlot, University
 from app.utils.timezone_utils import default_timezone_for_country
 from datetime import datetime, timedelta
 import re
@@ -97,6 +97,16 @@ def register():
         level_of_study = request.form.get("level_of_study")
         program = request.form.get("program") if level_of_study in ("Class 11", "Class 12", "Bachelors", "Masters") else ""
         semester = request.form.get("semester") if level_of_study in ("Bachelors", "Masters") else ""
+
+        # University (shown on registration for Bachelors / Masters, Nepal only)
+        university = ""
+        if level_of_study in ("Bachelors", "Masters"):
+            uni_select = request.form.get("university_select", "").strip()
+            uni_custom = request.form.get("university_custom", "").strip()
+            if uni_select in ("Foreign-Affiliated", "Other"):
+                university = f"{uni_select}: {uni_custom}" if uni_custom else uni_select
+            else:
+                university = uni_select
         
         # Auto-generate a unique student identifier internally
         import uuid
@@ -141,6 +151,7 @@ def register():
             study_level=level_of_study,
             semester=semester,
             country=country,
+            university=university,
             timezone=default_timezone_for_country(country),
             curriculum=curriculum,
             cumulative_gpa=0.0
@@ -173,7 +184,7 @@ def register():
 
         return redirect(url_for('auth.login'))
         
-    return render_template("auth/register.html")
+    return render_template("auth/register.html", active_universities=University.query.filter_by(is_active=True).order_by(University.sort_order).all())
 
 @auth_bp.route("/logout")
 @login_required

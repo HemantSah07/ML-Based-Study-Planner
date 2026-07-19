@@ -84,6 +84,24 @@
                         </div>
                     </div>
 
+                    <!-- University (shown only for Bachelors / Masters) -->
+                    <div class="row" id="university-row">
+                        <div class="col-md-6 mb-3 d-none" id="university-container">
+                            <label class="form-label">University</label>
+                            <select id="university" name="university_select" class="form-select">
+                                <option value="">-- Select University --</option>
+                                {% for uni in active_universities %}
+                                <option value="{{ uni.name }}">{{ uni.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <div class="invalid-feedback text-danger small mt-1" id="universityError">Please select a university.</div>
+                        </div>
+                        <div class="col-md-6 mb-3 d-none" id="university-custom-container">
+                            <label class="form-label" id="university-custom-label">Specify institution <span class="text-danger">*</span></label>
+                            <input type="text" id="university_custom" name="university_custom" class="form-control" placeholder="Enter institution name">
+                        </div>
+                    </div>
+
                     <!-- Password and Confirmation -->
                     <div class="mb-3">
                         <label class="form-label">Password</label>
@@ -120,6 +138,7 @@
     </div>
 </div>
 
+<script src="{{ url_for('static', filename='js/profile-fields.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('registerForm');
@@ -131,7 +150,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const levelOfStudy = document.getElementById('level_of_study');
     const programSelect = document.getElementById('program');
     const semesterSelect = document.getElementById('semester');
-    
+    const universitySelect = document.getElementById('university');
+    const universityCustomContainer = document.getElementById('university-custom-container');
+    const universityCustomLabel = document.getElementById('university-custom-label');
+    const universityCustomInput = document.getElementById('university_custom');
+
     const password = document.getElementById('password');
     const confirmPassword = document.getElementById('confirm_password');
     const submitBtn = document.getElementById('submitBtn');
@@ -143,25 +166,24 @@ document.addEventListener('DOMContentLoaded', function() {
     // Universal validation regex patterns
     const nameRegex = /^[A-Za-z\s]{3,}$/;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const derivedCurriculum = {
-        "Nepal": "NEB/CTEVT",
-        "United States": "US Common Core/AP",
-        "United Kingdom": "A-Levels/GCSE",
-        "Australia": "HSC/VCE/SACE",
-        "Canada": "Provincial/IB",
-        "India": "CBSE/ICSE/State Boards"
-    };
+    // Use shared data from profile-fields.js
+    const derivedCurriculum = ProfileFields.DERIVED_CURRICULUM;
     const facultyLevels = ["Class 11", "Class 12", "Bachelors", "Masters"];
     const termLevels = ["Bachelors", "Masters"];
+    const universityLevels = ["Bachelors", "Masters"];
 
     function syncConditionalEducationFields() {
         const level = levelOfStudy.value;
         const showProgram = facultyLevels.includes(level);
         const showSemester = termLevels.includes(level);
+        const showUniversity = universityLevels.includes(level) && countrySelect.value === 'Nepal';
+
         document.getElementById("program-container").classList.toggle("d-none", !showProgram);
         document.getElementById("semester-container").classList.toggle("d-none", !showSemester);
+        document.getElementById("university-container").classList.toggle("d-none", !showUniversity);
         programSelect.required = showProgram;
         semesterSelect.required = showSemester;
+
         if (!showProgram) {
             programSelect.value = "";
             programSelect.classList.remove("is-valid", "is-invalid");
@@ -169,6 +191,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!showSemester) {
             semesterSelect.value = "";
             semesterSelect.classList.remove("is-valid", "is-invalid");
+        }
+        if (!showUniversity) {
+            if (universitySelect) universitySelect.value = "";
+            if (universityCustomContainer) universityCustomContainer.classList.add("d-none");
+            if (universityCustomInput) universityCustomInput.value = "";
         }
     }
 
@@ -400,13 +427,26 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Event Listeners
-    const inputs = [fullName, email, countrySelect, curriculumSelect, levelOfStudy, programSelect, semesterSelect, password, confirmPassword];
+    const inputs = [fullName, email, countrySelect, curriculumSelect, levelOfStudy, programSelect, semesterSelect, universitySelect, universityCustomInput, password, confirmPassword];
     inputs.forEach(input => {
         if(input) {
             input.addEventListener('input', validateForm);
             input.addEventListener('change', validateForm);
         }
     });
+
+    // University custom toggle (shared helper)
+    if (universitySelect) {
+        universitySelect.addEventListener('change', function() {
+            ProfileFields.refreshUniversityCustom(
+                this.value,
+                universityCustomContainer,
+                universityCustomInput,
+                universityCustomLabel
+            );
+            validateForm();
+        });
+    }
 
     document.getElementById('togglePassword').addEventListener('click', function() {
         const type = password.getAttribute('type') === 'password' ? 'text' : 'password';

@@ -967,6 +967,32 @@ def risk_analysis():
             
     if not subjects_list:
         return jsonify({"status": "error", "message": "No subjects provided for analysis."}), 400
+
+    # Server-side range checks
+    for s in subjects_list:
+        name = s.get("name")
+        if not name:
+            continue
+        try:
+            grade = float(s.get("previous_grade", 70.0))
+            if grade < 0 or grade > 100:
+                return jsonify({"status": "error", "message": f"Validation failed: Grade % for '{name}' must be between 0 and 100."}), 400
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": f"Validation failed: Invalid Grade % value for '{name}'."}), 400
+
+        try:
+            att = float(s.get("attendance", 85.0))
+            if att < 0 or att > 100:
+                return jsonify({"status": "error", "message": f"Validation failed: Attendance % for '{name}' must be between 0 and 100."}), 400
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": f"Validation failed: Invalid Attendance % value for '{name}'."}), 400
+
+        try:
+            hrs = float(s.get("study_hours", 6.0))
+            if hrs < 0 or hrs > 168:
+                return jsonify({"status": "error", "message": f"Validation failed: Study hrs/wk for '{name}' must be between 0 and 168."}), 400
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": f"Validation failed: Invalid Study hrs/wk value for '{name}'."}), 400
         
     model = load_ml_model('random_forest')
     scaler = load_ml_model('scaler')
@@ -1054,6 +1080,73 @@ def risk_analysis():
     })
 
 
+def _build_planner_advice(sd: dict) -> str:
+    """
+    Return a context-aware advice string for a planner schedule entry.
+
+    Risk tier mapping (mirrors generate_schedule logic):
+      risk_pred == 2  →  High Risk   (risk_score >= 0.6)
+      risk_pred == 1  →  Medium Risk (risk_score 0.35-0.59)
+      risk_pred == 0  →  Low Risk    (risk_score < 0.35)
+
+    The text names the student's weakest metric so each entry reads
+    differently rather than repeating the same line everywhere.
+    Uses only data already in the sd dict — zero extra API calls.
+    """
+    grade = sd.get('grade', 70.0)
+    att   = sd.get('attendance', 85.0)
+    diff  = sd.get('difficulty', 3.0)
+    risk  = sd.get('risk', 1)   # 0=Low, 1=Medium, 2=High
+
+    # ── Identify the single weakest metric to name in the tip ────────────
+    # Score each metric (0 = fine, higher = more concern)
+    grade_concern = max(0.0, (70.0 - grade) / 70.0)   # below 70 % starts concern
+    att_concern   = max(0.0, (80.0 - att)   / 80.0)   # below 80 % starts concern
+    diff_concern  = max(0.0, (diff - 3.0)   / 2.0)    # above 3 starts concern
+
+    worst = max(grade_concern, att_concern, diff_concern)
+
+    if worst == grade_concern and grade_concern > 0:
+        weak_metric = f"grade ({grade:.0f}%)"
+    elif worst == att_concern and att_concern > 0:
+        weak_metric = f"attendance ({att:.0f}%)"
+    elif diff_concern > 0:
+        weak_metric = f"subject difficulty (level {diff:.0f}/5)"
+    else:
+        weak_metric = None   # no metric in danger zone — student is doing well
+
+    # ── High Risk (risk_pred == 2) ────────────────────────────────────────
+    if risk == 2:
+        if weak_metric == f"grade ({grade:.0f}%)":
+            return f"Prioritise past papers & worked examples — your grade ({grade:.0f}%) needs a boost"
+        elif weak_metric == f"attendance ({att:.0f}%)":
+            return f"Attend every session & review missed content — attendance ({att:.0f}%) is dragging your score"
+        elif weak_metric and "difficulty" in weak_metric:
+            return f"Break difficult concepts into smaller chunks — difficulty level {diff:.0f}/5 demands extra revision time"
+        else:
+            return "Urgent: block daily revision sessions and tackle weak areas immediately"
+
+    # ── Medium Risk (risk_pred == 1) ─────────────────────────────────────
+    if risk == 1:
+        if weak_metric == f"grade ({grade:.0f}%)":
+            return f"Steady effort needed — aim to lift your grade above 70% through regular practice"
+        elif weak_metric == f"attendance ({att:.0f}%)":
+            return f"Improve class attendance ({att:.0f}%) to avoid knowledge gaps"
+        elif weak_metric and "difficulty" in weak_metric:
+            return f"Allocate extra time for tricky topics — difficulty {diff:.0f}/5 warrants consistent review"
+        else:
+            return "Keep up steady weekly sessions to consolidate progress"
+
+    # ── Low Risk (risk_pred == 0) ─────────────────────────────────────────
+    if weak_metric == f"grade ({grade:.0f}%)":
+        return f"Looking solid overall — keep working on grade consistency ({grade:.0f}%)"
+    elif weak_metric == f"attendance ({att:.0f}%)":
+        return f"Good standing — try to maintain attendance above 80% to stay on track"
+    elif weak_metric and "difficulty" in weak_metric:
+        return f"On track — stay ahead on harder topics (difficulty {diff:.0f}/5) with light weekly review"
+    else:
+        return "Maintain current study habits — you're on track to succeed"
+
 
 @student_bp.route("/schedule/generate", methods=["POST"])
 @login_required
@@ -1077,6 +1170,37 @@ def generate_schedule():
     if not subject_names:
         flash("Run ML Predictor for at least one assessed subject before generating a schedule.", "warning")
         return redirect(url_for('student.schedule'))
+
+    # Server-side range checks
+    for i, name in enumerate(subject_names):
+        if not name:
+            continue
+        try:
+            grade = float(previous_grades[i])
+            if grade < 0 or grade > 100:
+                flash(f"Validation failed: Grade % for '{name}' must be between 0 and 100.", "danger")
+                return redirect(url_for('student.schedule'))
+        except (TypeError, ValueError, IndexError):
+            flash(f"Validation failed: Invalid Grade % value for '{name}'.", "danger")
+            return redirect(url_for('student.schedule'))
+
+        try:
+            att = float(attendances[i])
+            if att < 0 or att > 100:
+                flash(f"Validation failed: Attendance % for '{name}' must be between 0 and 100.", "danger")
+                return redirect(url_for('student.schedule'))
+        except (TypeError, ValueError, IndexError):
+            flash(f"Validation failed: Invalid Attendance % value for '{name}'.", "danger")
+            return redirect(url_for('student.schedule'))
+
+        try:
+            hrs = float(study_hours[i])
+            if hrs < 0 or hrs > 168:
+                flash(f"Validation failed: Study hrs/wk for '{name}' must be between 0 and 168.", "danger")
+                return redirect(url_for('student.schedule'))
+        except (TypeError, ValueError, IndexError):
+            flash(f"Validation failed: Invalid Study hrs/wk value for '{name}'.", "danger")
+            return redirect(url_for('student.schedule'))
 
     # ── 1. Snapshot previous week actual hours for feedback loop ──────────────
     today_local = local_today_for_user(current_user.id)
@@ -1228,6 +1352,10 @@ def generate_schedule():
             'risk_score': risk_score,
             'score': risk_score * diff,
             'allocated_hours': allocated,
+            # raw inputs retained for contextual advice text
+            'grade': grade,
+            'attendance': att,
+            'difficulty': diff,
         })
 
     logger.info(
@@ -1293,53 +1421,68 @@ def generate_schedule():
 
     has_any_slots = any(len(hrs) > 0 for hrs in day_study_hours.values())
 
+    # ── 5. Session Length block-partitioning allocation ───────────────────────
+    try:
+        session_len = int(request.form.get("session_length", 60))
+    except ValueError:
+        session_len = 60
+    session_hours = session_len / 60.0
+
+    import math
+
     if has_any_slots:
-        # ── 5. Round-Robin daily-capacity allocator ───────────────────────────
         # Sort subjects: highest risk_score first
         sorted_subjects = sorted(subject_data, key=lambda x: x['risk_score'], reverse=True)
 
-        # Per-subject remaining hours to schedule
-        remaining = {sd['name']: max(1, int(round(sd['allocated_hours']))) for sd in sorted_subjects}
+        # Calculate number of session blocks needed per subject
+        remaining_blocks = {sd['name']: max(1, int(round(sd['allocated_hours'] / session_hours))) for sd in sorted_subjects}
+        blocks_per_session = int(math.ceil(session_len / 60.0))
         MAX_DAILY_CAP = 3.0  # max hours per subject per day
 
-        scheduled_slots = []  # list of (day_idx, hour, subject_dict)
+        scheduled_slots = []  # list of (day_idx, start_time, end_time, subject_dict)
 
-        # Round-robin: cycle through days, then subjects
-        # We keep iterating until all hours are allocated or we exhaust slots
+        # Cycle through days, then subjects
         days_with_slots = [d for d in range(7) if day_study_hours[d]]
         day_hour_pointer = {d: 0 for d in days_with_slots}  # index into sorted hour list
         day_subject_hours_today = {d: {} for d in range(7)}  # track hours per subject per day
 
         subject_cursor = 0
-        total_target_slots = min(
-            sum(remaining.values()),
-            sum(len(hours) for hours in day_study_hours.values())
+        total_target_sessions = min(
+            sum(remaining_blocks.values()),
+            sum(len(hours) for hours in day_study_hours.values()) // blocks_per_session
         )
         max_passes = max(1, len(days_with_slots) * max(1, len(sorted_subjects)) * 4)
         passes = 0
-        while len(scheduled_slots) < total_target_slots and passes < max_passes:
+        while len(scheduled_slots) < total_target_sessions and passes < max_passes:
             passes += 1
             progress = False
             for day_idx in days_with_slots:
-                if len(scheduled_slots) >= total_target_slots:
+                if len(scheduled_slots) >= total_target_sessions:
                     break
                 ptr = day_hour_pointer[day_idx]
-                if ptr >= len(day_study_hours[day_idx]):
+                if ptr + blocks_per_session > len(day_study_hours[day_idx]):
                     continue
                 for offset in range(len(sorted_subjects)):
                     subj_idx = (subject_cursor + offset) % len(sorted_subjects)
                     sd = sorted_subjects[subj_idx]
                     name = sd['name']
-                    if remaining[name] <= 0:
+                    if remaining_blocks[name] <= 0:
                         continue
                     already_today = day_subject_hours_today[day_idx].get(name, 0.0)
-                    if already_today >= MAX_DAILY_CAP:
+                    if already_today + session_hours > MAX_DAILY_CAP:
                         continue
+                    
                     hour = day_study_hours[day_idx][ptr]
-                    scheduled_slots.append((day_idx, hour, sd))
-                    day_hour_pointer[day_idx] += 1
-                    day_subject_hours_today[day_idx][name] = already_today + 1.0
-                    remaining[name] -= 1
+                    
+                    start_t = time(hour, 0)
+                    end_hour = (hour + int(session_len // 60)) % 24
+                    end_min = int(session_len % 60)
+                    end_t = time(end_hour, end_min)
+                    
+                    scheduled_slots.append((day_idx, start_t, end_t, sd))
+                    day_hour_pointer[day_idx] += blocks_per_session
+                    day_subject_hours_today[day_idx][name] = already_today + session_hours
+                    remaining_blocks[name] -= 1
                     subject_cursor = (subj_idx + 1) % len(sorted_subjects)
                     progress = True
                     break
@@ -1348,30 +1491,30 @@ def generate_schedule():
 
         # ── 6. Validation check ───────────────────────────────────────────────
         total_available = sum(len(h) for h in day_study_hours.values())
-        subjects_in_plan = set(s[2]['name'] for s in scheduled_slots)
+        subjects_in_plan = set(s[3]['name'] for s in scheduled_slots)
         all_subjects_present = all(sd['name'] in subjects_in_plan for sd in subject_data)
         total_planned = len(scheduled_slots)
-        within_tolerance = abs(total_planned - total_recommended_hours) <= (total_recommended_hours * 0.25 + 1)
+        within_tolerance = abs((total_planned * session_hours) - total_recommended_hours) <= (total_recommended_hours * 0.25 + 1)
 
         logger.info(
-            "Schedule generation allocation summary user=%s target_slots=%s planned_slots=%s all_subjects_present=%s within_tolerance=%s remaining=%s per_day_subject_hours=%s",
+            "Schedule generation allocation summary user=%s target_sessions=%s planned_sessions=%s all_subjects_present=%s within_tolerance=%s remaining_blocks=%s per_day_subject_hours=%s",
             current_user.id,
-            total_target_slots,
+            total_target_sessions,
             total_planned,
             all_subjects_present,
             within_tolerance,
-            remaining,
+            remaining_blocks,
             day_subject_hours_today,
         )
 
         # ── 7. Write schedule to DB ───────────────────────────────────────────
-        for (day_idx, hour, sd) in scheduled_slots:
-            tip = "Focus on intense practice & review" if sd['risk'] == 2 else "Maintain current study habits"
+        for (day_idx, start_t, end_t, sd) in scheduled_slots:
+            tip = _build_planner_advice(sd)
             new_schedule = Schedule(
                 user_id=current_user.id,
                 day_of_week=day_idx,
-                start_time=time(hour, 0),
-                end_time=time((hour + 1) % 24, 0),
+                start_time=start_t,
+                end_time=end_t,
                 subject_id=sd['id'],
                 description=f"[{sd['risk_label']}] - {tip}"
             )
@@ -1379,8 +1522,8 @@ def generate_schedule():
 
         # Update planned hours in performance history
         planned_by_subject = {}
-        for (_, __, sd) in scheduled_slots:
-            planned_by_subject[sd['name']] = planned_by_subject.get(sd['name'], 0) + 1.0
+        for (_, __, ___, sd) in scheduled_slots:
+            planned_by_subject[sd['name']] = planned_by_subject.get(sd['name'], 0.0) + session_hours
         for h_rec in SubjectPerformanceHistory.query.filter_by(
             user_id=current_user.id, week_start=week_start
         ).all():
@@ -1391,32 +1534,36 @@ def generate_schedule():
         # Fallback: sequential scheduling when no availability grid was provided
         current_day  = 0
         current_hour = 17
+        
+        sorted_subjects = sorted(subject_data, key=lambda x: x['risk_score'], reverse=True)
+        remaining_blocks = {sd['name']: max(1, int(round(sd['allocated_hours'] / session_hours))) for sd in sorted_subjects}
+        blocks_per_session = int(math.ceil(session_len / 60.0))
 
-        for sd in subject_data:
-            assigned_hours = max(1, int(round(sd['allocated_hours'])))
-            tip = "Focus on intense practice & review" if sd['risk'] == 2 else "Maintain current study habits"
+        for sd in sorted_subjects:
+            assigned = remaining_blocks[sd['name']]
+            tip = _build_planner_advice(sd)
 
-            while assigned_hours > 0:
-                if current_hour >= 23:
+            while assigned > 0:
+                if current_hour + blocks_per_session > 23:
                     current_day  = (current_day + 1) % 7
                     current_hour = 17 if current_day < 5 else 10
 
-                slot_duration   = min(2, assigned_hours)
-                end_hour        = current_hour + slot_duration
-                actual_end_hour = min(end_hour, 23)
-                actual_end_min  = 59 if end_hour >= 24 else 0
+                start_t = time(current_hour, 0)
+                end_hour = (current_hour + int(session_len // 60)) % 24
+                end_min = int(session_len % 60)
+                end_t = time(end_hour, end_min)
 
                 new_schedule = Schedule(
                     user_id=current_user.id,
                     day_of_week=current_day,
-                    start_time=time(current_hour, 0),
-                    end_time=time(actual_end_hour, actual_end_min),
+                    start_time=start_t,
+                    end_time=end_t,
                     subject_id=sd['id'],
                     description=f"[{sd['risk_label']}] - {tip}"
                 )
                 db.session.add(new_schedule)
-                current_hour   = end_hour + 1
-                assigned_hours -= slot_duration
+                current_hour += blocks_per_session
+                assigned -= 1
 
     db.session.commit()
     flash("Adaptive Study Plan generated successfully based on ML predictions!", "success")
@@ -1552,20 +1699,29 @@ def generate_assessment_questions_for_subject(subject_id, student_id=None):
 
     questions_data = None
     try:
-        response_text = ai_service.generate_content(
+        questions_data = ai_service.call_gemini_reusable(
             prompt,
             feature=FEATURE_MCQ,
+            is_json=True,
+            context=f"assessment_mcq:subject:{subject_id}",
             system_instruction=system_instruction,
             response_mime_type="application/json",
             response_schema=response_schema,
         )
-        questions_data = parse_json_safely(response_text)
-        _gen_logger.debug(
-            "Structured Gemini response parsed: %d items",
-            len(questions_data) if isinstance(questions_data, list) else -1,
-        )
+        if isinstance(questions_data, list) and len(questions_data) < 12:
+            _gen_logger.warning(
+                "Structured Gemini response has fewer than 12 questions (%d). "
+                "Invalidating cache for retry.",
+                len(questions_data)
+            )
+            ai_service.invalidate_cache(prompt)
+            questions_data = None
+        else:
+            _gen_logger.debug(
+                "Structured Gemini response parsed: %d items",
+                len(questions_data) if isinstance(questions_data, list) else -1,
+            )
     except QuotaExceededError:
-        # Daily cap reached — re-raise so the calling route can show a friendly message.
         raise
     except Exception as e:
         _gen_logger.warning(
@@ -1577,19 +1733,28 @@ def generate_assessment_questions_for_subject(subject_id, student_id=None):
     # ── Attempt 2: Plain-text fallback (no response_schema) ─────────────────
     if not isinstance(questions_data, list) or len(questions_data) == 0:
         try:
-            response_text2 = ai_service.generate_content(
+            questions_data = ai_service.call_gemini_reusable(
                 prompt,
                 feature=FEATURE_MCQ,
+                is_json=True,
+                context=f"assessment_mcq_fallback:subject:{subject_id}",
                 system_instruction=system_instruction,
             )
-            questions_data = parse_json_safely(response_text2)
-            _gen_logger.info(
-                "Plain-text fallback parsed: %d items for subject_id=%s",
-                len(questions_data) if isinstance(questions_data, list) else -1,
-                subject_id,
-            )
+            if isinstance(questions_data, list) and len(questions_data) < 12:
+                _gen_logger.warning(
+                    "Plain-text fallback has fewer than 12 questions (%d). "
+                    "Invalidating cache.",
+                    len(questions_data)
+                )
+                ai_service.invalidate_cache(prompt)
+                questions_data = None
+            else:
+                _gen_logger.info(
+                    "Plain-text fallback parsed: %d items for subject_id=%s",
+                    len(questions_data) if isinstance(questions_data, list) else -1,
+                    subject_id,
+                )
         except QuotaExceededError:
-            # Daily cap reached — re-raise so the calling route can show a friendly message.
             raise
         except Exception as e2:
             _gen_logger.error(
@@ -1766,6 +1931,18 @@ def assessment_question(subject_id, q_num):
     if q_num > 12:
         # Show subject summary before moving to next subject
         return redirect(url_for('student.assessment_subject_summary', subject_id=subject_id))
+
+    # Ensure a healthy question pool exists for this subject
+    total_existing = AssessmentQuestion.query.filter_by(subject_id=subject_id).count()
+    if total_existing < 12:
+        _gen_logger.info(
+            "Fewer than 12 questions exist for subject_id=%s (found %d). Triggering generation/topup.",
+            subject_id, total_existing
+        )
+        try:
+            generate_assessment_questions_for_subject(subject_id)
+        except Exception as e:
+            _gen_logger.error("Failed to generate assessment questions on-demand: %s", e)
             
     # Adaptive logic
     history = session.get('assessment_history', {}).get(str(subject_id), [])
@@ -1843,13 +2020,24 @@ def assessment_question(subject_id, q_num):
 @student_bp.route("/assessment/answer", methods=["POST"])
 @login_required
 def assessment_answer():
-    q_id = int(request.form.get("question_id"))
-    sub_id = int(request.form.get("subject_id"))
-    q_num = int(request.form.get("q_num"))
+    # ── Guard: validate required fields before casting ────────────────────────
+    raw_qid  = request.form.get("question_id")
+    raw_sid  = request.form.get("subject_id")
+    raw_qnum = request.form.get("q_num")
+    if not raw_qid or not raw_sid or not raw_qnum:
+        return jsonify({"status": "error", "message": "Missing required field(s): question_id, subject_id, q_num."}), 400
+    try:
+        q_id  = int(raw_qid)
+        sub_id = int(raw_sid)
+        q_num  = int(raw_qnum)
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "question_id, subject_id, and q_num must be integers."}), 400
     answer = request.form.get("answer")
-    time_taken = int(request.form.get("time_taken", 0))
-    
+    time_taken = int(request.form.get("time_taken", 0) or 0)
+
     q = AssessmentQuestion.query.get(q_id)
+    if q is None:
+        return jsonify({"status": "error", "message": f"Question {q_id} not found."}), 400
     is_correct = (answer == q.correct_answer)
     
     # Log to StudentSeenQuestion
@@ -2062,7 +2250,25 @@ def assessment_detail(sa_id):
 @student_bp.route("/assessment/results")
 @login_required
 def assessment_results():
+    # ── Session first, DB fallback if session is missing or empty ────────────
     sa_ids = session.get('assessment_ids_by_subject', {})
+    if not sa_ids:
+        # Session was lost (e.g. browser restart mid-quiz). Reconstruct from DB:
+        # fetch all StudentAssessment records for today that have at least one response.
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        todays_sa = (
+            StudentAssessment.query
+            .filter(
+                StudentAssessment.student_id == current_user.id,
+                StudentAssessment.completed_at >= today_start,
+            )
+            .all()
+        )
+        sa_ids = {str(sa.subject_id): sa.id for sa in todays_sa}
+        logger.info(
+            "[Assessment Results] Session key missing; reconstructed sa_ids from DB: %s",
+            sa_ids
+        )
 
     # ── Context: finalize SA stub scores + profile flag ─────────────────────────
     ctx = get_learning_context(current_user.id)
@@ -2201,19 +2407,19 @@ def assessment_results():
 def upload_document():
     if 'document_file' not in request.files:
         flash("No file part", "danger")
-        return redirect(url_for('student.evaluation'))
+        return redirect(url_for('student.predict'))
         
     file = request.files['document_file']
     if file.filename == '':
         flash("No selected file", "danger")
-        return redirect(url_for('student.evaluation'))
+        return redirect(url_for('student.predict'))
         
     if file:
         filename = secure_filename(file.filename)
         ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
         if ext not in ['pdf', 'jpg', 'jpeg', 'png']:
             flash("Invalid file type. Only PDF and Images allowed.", "danger")
-            return redirect(url_for('student.evaluation'))
+            return redirect(url_for('student.predict'))
 
         flash("Please use ML Predictor > Upload Marksheet to review and confirm OCR results before saving.", "warning")
         return redirect(url_for('student.predict'))
@@ -2243,7 +2449,7 @@ def upload_document():
             db.session.add(doc)
             db.session.commit()
             flash(f"Processing failed: {str(e)}", "danger")
-            return redirect(url_for('student.evaluation'))
+            return redirect(url_for('student.predict'))
         
         doc = AcademicDocument(
             student_id=current_user.id, document_type=doc_type, document_name=filename,
@@ -2290,14 +2496,14 @@ def upload_document():
             
         db.session.commit()
         flash(f"Document uploaded! Extracted {count} subjects.", "success")
-        return redirect(url_for('student.evaluation'))
+        return redirect(url_for('student.predict'))
 
 @student_bp.route("/documents/<int:doc_id>")
 @login_required
 def document_detail(doc_id):
     doc = AcademicDocument.query.get_or_404(doc_id)
     if doc.student_id != current_user.id:
-        return redirect(url_for('student.evaluation'))
+        return redirect(url_for('student.predict'))
     marks = ExtractedMark.query.filter_by(document_id=doc.id).all()
     return render_template("student/document_detail.html", document=doc, marks=marks)
 
@@ -2315,7 +2521,7 @@ def delete_document(doc_id):
         except Exception as e:
             flash("Error deleting document.", "danger")
         flash("Document deleted.", "success")
-    return redirect(url_for('student.evaluation'))
+    return redirect(url_for('student.predict'))
 
 
 # --- NEW OCR & PREDICTION ROUTES ---
@@ -2913,6 +3119,12 @@ def study_subject(subject_id):
 
     # Retrieve all chapters for this subject
     chapters = Chapter.query.filter_by(subject_id=subject.id).order_by(Chapter.chapter_number).all()
+    if not chapters:
+        try:
+            chapters = ai_service.generate_chapters_for_subject(subject.id)
+        except Exception as e:
+            flash(f"Failed to generate chapter outline: {str(e)}", "danger")
+            chapters = []
 
     # Fetch user progress for topics of this subject — read from context
     completed_topic_ids = ctx.completed_topic_ids
@@ -2924,6 +3136,14 @@ def study_subject(subject_id):
     # Retrieve flashcards
     flashcards = Flashcard.query.filter_by(subject_id=subject.id).all()
 
+    # Retrieve active topic and chapter if passed in URL
+    topic_id = request.args.get("topic_id", type=int)
+    active_chapter_id = None
+    if topic_id:
+        topic = Topic.query.get(topic_id)
+        if topic and topic.chapter.subject_id == subject.id:
+            active_chapter_id = topic.chapter_id
+
     return render_template(
         "student/study.html",
         subject=subject,
@@ -2932,18 +3152,63 @@ def study_subject(subject_id):
         notes_content=notes_content,
         flashcards=flashcards,
         profile=ctx.profile,
+        active_chapter_id=active_chapter_id,
+        active_topic_id=topic_id,
     )
+
+
+@student_bp.route("/study/api/chapter/<int:chapter_id>/topics", methods=["GET"])
+@login_required
+def get_chapter_topics(chapter_id):
+    chapter = Chapter.query.get_or_404(chapter_id)
+    topics = Topic.query.filter_by(chapter_id=chapter.id).order_by(Topic.topic_number).all()
+
+    if not topics:
+        try:
+            topics = ai_service.generate_topics_for_chapter(chapter.id)
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"Failed to generate topics: {str(e)}"}), 500
+
+    ctx = get_learning_context(current_user.id)
+    completed_topic_ids = ctx.completed_topic_ids
+
+    topics_list = []
+    for t in topics:
+        # Check if topic has learning material
+        has_material = LearningMaterial.query.filter_by(topic_id=t.id).first() is not None
+        topics_list.append({
+            "id": t.id,
+            "name": t.name,
+            "topic_number": t.topic_number,
+            "completed": t.id in completed_topic_ids,
+            "has_material": has_material
+        })
+
+    return jsonify({
+        "status": "success",
+        "topics": topics_list
+    })
 
 
 @student_bp.route("/study/api/topic/<int:topic_id>", methods=["GET"])
 @login_required
 def get_topic_material(topic_id):
+    route_name = "/study/api/topic/<int:topic_id>"
+    logger.info("[STUDY ROOM] Accessing topic material. Route: %s, Topic ID: %d, User ID: %d", route_name, topic_id, current_user.id)
+    
     topic = Topic.query.get_or_404(topic_id)
+    chapter_id = topic.chapter_id
+    subject_id = topic.chapter.subject_id if topic.chapter else None
+    
     material = LearningMaterial.query.filter_by(topic_id=topic.id).first()
     
     if not material:
+        logger.info("[STUDY ROOM] No learning material found in DB for Topic ID: %d. Returning not_found.", topic_id)
         return jsonify({"status": "not_found", "message": "No learning materials found for this topic."})
         
+    logger.info("[STUDY ROOM] Material successfully retrieved. Material ID: %d, Topic ID: %d, Content length: %d", 
+                material.id, topic_id, len(material.detailed_explanation or ""))
+                
     flashcards = Flashcard.query.filter_by(chapter_id=topic.chapter_id).all()
     flashcards_list = [{"front": f.front, "back": f.back} for f in flashcards]
     
@@ -2991,16 +3256,29 @@ def get_topic_material(topic_id):
 @student_bp.route("/study/api/topic/<int:topic_id>/generate-ai", methods=["POST"])
 @login_required
 def generate_ai_topic_material(topic_id):
+    route_name = "/study/api/topic/<int:topic_id>/generate-ai"
+    logger.info("[STUDY ROOM] Triggered AI generation request. Route: %s, Topic ID: %d, User ID: %d", route_name, topic_id, current_user.id)
+    
     topic = Topic.query.get_or_404(topic_id)
+    chapter_id = topic.chapter_id
+    subject_id = topic.chapter.subject_id if topic.chapter else None
+    
     material = LearningMaterial.query.filter_by(topic_id=topic.id).first()
     
     if not material:
+        logger.info("[STUDY ROOM] No existing material found for Topic ID: %d. Calling AI generation pipeline.", topic_id)
         try:
             material = ai_service.generate_lesson_material(topic_id)
+            logger.info("[STUDY ROOM] AI Generation and DB save successful. Material ID: %d, Topic ID: %d, Subject ID: %s, Chapter ID: %s", 
+                        material.id, topic_id, subject_id, chapter_id)
         except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            logger.error("[STUDY ROOM] AI Generation failed. Topic ID: %d, Error: %s, Traceback: %s", topic_id, e, tb)
             return jsonify({"status": "error", "message": f"Failed to generate lesson: {str(e)}"}), 500
             
     if not material:
+        logger.error("[STUDY ROOM] AI Generation returned null material without raising exception. Topic ID: %d", topic_id)
         return jsonify({"status": "error", "message": "Failed to create lesson material record."}), 500
         
     flashcards = Flashcard.query.filter_by(chapter_id=topic.chapter_id).all()
@@ -3153,8 +3431,21 @@ def planner_adapt_regenerate():
             adapted_daily_hours = original_daily_hours
             msg = "Study plan updated to align with log performance."
             
+        # ── DB fallback for prediction (mirrors the pattern at line 2834) ──────
+        adapt_prediction = session.get('last_prediction')
+        if not adapt_prediction:
+            latest_pred = (
+                Prediction.query
+                .filter_by(student_id=current_user.id)
+                .order_by(Prediction.created_at.desc())
+                .first()
+            )
+            if latest_pred:
+                adapt_prediction = ["Pass", "At Risk", "Fail"][{"low": 0, "medium": 1, "high": 2}.get(latest_pred.predicted_risk_level, 1)]
+            else:
+                adapt_prediction = 'At Risk'
         planner_data = generate_study_planner(
-            prediction_result=session.get('last_prediction', 'At Risk'),
+            prediction_result=adapt_prediction,
             subjects=subjects,
             marks=marks,
             study_hours_per_day=adapted_daily_hours,
@@ -3383,6 +3674,7 @@ def availability_summary():
 
 @student_bp.route("/api/curriculum-data", methods=["GET"])
 def get_curriculum_data():
+    from app.models import EducationLevel, Faculty, CurriculumProgram
     country = request.args.get("country")
     curriculum = request.args.get("curriculum")
     level = request.args.get("level")
@@ -3391,17 +3683,24 @@ def get_curriculum_data():
     
     if not country:
         countries = [r[0] for r in db.session.query(Subject.country).distinct().all() if r[0]]
+        # also check active universities/levels countries
+        for el in EducationLevel.query.filter_by(is_active=True).distinct(EducationLevel.country).all():
+            if el.country not in countries:
+                countries.append(el.country)
         if not countries:
             countries = ["Nepal"]
-        return jsonify({"countries": sorted(countries)})
+        return jsonify({"countries": sorted(list(set(countries)))})
         
     if not curriculum:
         curricula = [r[0] for r in db.session.query(Subject.curriculum).filter_by(country=country).distinct().all() if r[0]]
         if country == "Nepal" and "NEB/CTEVT" not in curricula:
             curricula.append("NEB/CTEVT")
-        return jsonify({"curricula": sorted(curricula)})
+        return jsonify({"curricula": sorted(list(set(curricula)))})
         
     if not level:
+        levels_db = EducationLevel.query.filter_by(country=country, is_active=True).order_by(EducationLevel.sort_order.asc()).all()
+        if levels_db:
+            return jsonify({"levels": [l.name for l in levels_db]})
         if country == "Nepal":
             return jsonify({"levels": nepal_levels})
         levels = [r[0] for r in db.session.query(Subject.level_of_study).filter(
@@ -3413,11 +3712,20 @@ def get_curriculum_data():
     if not program:
         if country == "Nepal":
             if level in ("Class 11", "Class 12"):
+                facs_db = Faculty.query.filter_by(country="Nepal", is_active=True).filter((Faculty.level_name == level) | (Faculty.level_name == None)).order_by(Faculty.sort_order.asc()).all()
+                if facs_db:
+                    return jsonify({"programs": [f.name for f in facs_db]})
                 programs = sorted(set(NEPAL_FACULTY_SUBJECT_MAP.keys()) | set(NEPAL_FACULTY_SUBJECT_MAP_C12.keys()))
                 return jsonify({"programs": programs})
             if level == "Bachelors":
+                progs_db = CurriculumProgram.query.filter_by(level_name="Bachelors", country="Nepal", is_active=True).order_by(CurriculumProgram.sort_order.asc()).all()
+                if progs_db:
+                    return jsonify({"programs": [p.name for p in progs_db]})
                 return jsonify({"programs": ["BBA", "BCA", "BE Computer", "BE Civil", "BIT", "BSc CSIT", "BSc Nursing", "BTech", "MBBS"]})
             if level == "Masters":
+                progs_db = CurriculumProgram.query.filter_by(level_name="Masters", country="Nepal", is_active=True).order_by(CurriculumProgram.sort_order.asc()).all()
+                if progs_db:
+                    return jsonify({"programs": [p.name for p in progs_db]})
                 return jsonify({"programs": ["MBA", "MCA", "MIT", "MSc Computer Science"]})
             return jsonify({"programs": []})
         programs = [r[0] for r in db.session.query(Subject.program).filter(
@@ -3439,64 +3747,6 @@ def get_curriculum_data():
         semesters = [f"Semester {i}" for i in range(1, 5)]
     return jsonify({"semesters": sorted(semesters)})
 
-
-@student_bp.route("/subjects", methods=["GET", "POST"])
-@login_required
-def manage_subjects():
-    profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
-    if not profile:
-        flash("Please complete your profile configuration first", "warning")
-        return redirect(url_for("student.dashboard"))
-        
-    from app.models import StudentSubject
-    valid_subjects = get_valid_subjects_for_profile(profile) if profile.study_level else []
-    valid_by_id = {s.id: s for s in valid_subjects}
-    
-    if request.method == "POST":
-        selected_ids = []
-        seen_subject_names = set()
-        for raw_id in request.form.getlist("subjects"):
-            try:
-                sub_id = int(raw_id)
-            except ValueError:
-                continue
-            subject = valid_by_id.get(sub_id)
-            if not subject:
-                continue
-            key = normalize_subject_name(subject.name)
-            if key not in seen_subject_names:
-                selected_ids.append(subject.id)
-                seen_subject_names.add(key)
-        # Clear existing selections
-        StudentSubject.query.filter_by(user_id=current_user.id).delete()
-        
-        # Save new selections
-        for sub_id in selected_ids:
-            db.session.add(StudentSubject(user_id=current_user.id, subject_id=sub_id))
-        db.session.commit()
-        flash("Subjects updated successfully!", "success")
-        return redirect(url_for("student.manage_subjects"))
-        
-    # GET method
-    selected_subjects = get_profile_subjects(profile)
-    selected_ids = [s.id for s in selected_subjects]
-    
-    if profile.study_level:
-        all_valid = valid_subjects or get_valid_subjects_for_profile(profile)
-        available_subjects = [s for s in all_valid if s.id not in selected_ids]
-    else:
-        available_subjects = []
-        
-    recently_used_ids = [r[0] for r in db.session.query(StudyLog.subject_id).filter_by(user_id=current_user.id).distinct().limit(5).all() if r[0]]
-    recently_used = Subject.query.filter(Subject.id.in_(recently_used_ids)).all() if recently_used_ids else []
-    
-    return render_template(
-        "student/subjects.html",
-        profile=profile,
-        selected_subjects=selected_subjects,
-        available_subjects=available_subjects,
-        recently_used=recently_used
-    )
 
 
 @student_bp.route("/profile", methods=["GET", "POST"])
@@ -3555,6 +3805,12 @@ def profile():
             else:
                 raw_university = sel_univ
         
+        # Programs with explicit duration selection (frontend PROGRAMS_WITH_DURATION mirrors this).
+        # BSc CSIT excluded intentionally: implicit 4-year TU standard, no duration field shown.
+        DURATION_PROGRAMS = {"BSc IT"}
+        raw_program_duration = request.form.get("program_duration", "").strip() \
+            if raw_program in DURATION_PROGRAMS else ""
+
         profile_data = {
             "country":           raw_country,
             "timezone":          raw_timezone,
@@ -3562,6 +3818,7 @@ def profile():
             "level_of_study":    raw_study_lvl,
             "study_level":       raw_study_lvl,
             "program":           raw_program,
+            "program_duration":  raw_program_duration,
             "semester":          raw_semester,
             "university":        raw_university,
             "cumulative_gpa":    request.form.get("cumulative_gpa", 0.0),
@@ -3570,7 +3827,6 @@ def profile():
             "explanation_level": request.form.get("explanation_level", "Intermediate"),
             "study_goal":        request.form.get("study_goal", "Improve Grades"),
             "preferred_language":request.form.get("preferred_language", "English"),
-            "target_score_goal": float(request.form.get("target_score_goal") or 70.0),
             "peak_focus_time":   request.form.get("peak_focus_time") or "Morning",
         }
 
@@ -3607,6 +3863,8 @@ def profile():
     weak_topics = analytics.weak_topics(limit=3)
     academic = analytics.academic_summary()
 
+    from app.models import University
+    active_unis = University.query.filter_by(is_active=True).order_by(University.sort_order).all()
     return render_template(
         "student/profile.html",
         edit_mode=edit_mode,
@@ -3633,6 +3891,7 @@ def profile():
         improvement_trend=academic["improvement_trend"],
         overall_mastery=academic["overall_mastery"],
         subjects=ctx.subjects,
+        active_universities=active_unis,
     )
 
 
@@ -3754,7 +4013,45 @@ def future_learning():
     )
 
     profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
-    current_lvl = getattr(profile, "study_level", None) or "University Year 1"
+    
+    # Normalize custom study level to canonical key in SUBJECT_MAP / BOOK_LIST
+    raw_lvl = (getattr(profile, "study_level", None) or "University Year 1").strip()
+    prog = (getattr(profile, "program", None) or "").strip().lower()
+    sem = (getattr(profile, "semester", None) or "").strip()
+
+    if raw_lvl == "Class 8":
+        current_lvl = "Class 8"
+    elif raw_lvl == "Class 9":
+        current_lvl = "Class 9"
+    elif raw_lvl in ("Class 10", "Class 10 (SEE)"):
+        current_lvl = "Class 10 (SEE)"
+    elif raw_lvl == "Class 11":
+        if "science" in prog:
+            current_lvl = "Class 11 - Science Stream"
+        elif "management" in prog or "commerce" in prog:
+            current_lvl = "Class 11 - Management Stream"
+        else:
+            current_lvl = "Class 11 - Humanities Stream"
+    elif raw_lvl == "Class 12":
+        if "science" in prog:
+            current_lvl = "Class 12 - Science Stream"
+        elif "management" in prog or "commerce" in prog:
+            current_lvl = "Class 12 - Management Stream"
+        else:
+            current_lvl = "Class 12 - Humanities Stream"
+    elif raw_lvl == "Bachelors":
+        if "Year 4" in sem or "Semester 7" in sem or "Semester 8" in sem:
+            current_lvl = "University Year 4"
+        elif "Year 3" in sem or "Semester 5" in sem or "Semester 6" in sem:
+            current_lvl = "University Year 3"
+        elif "Year 2" in sem or "Semester 3" in sem or "Semester 4" in sem:
+            current_lvl = "University Year 2"
+        else:
+            current_lvl = "University Year 1"
+    elif raw_lvl == "Masters":
+        current_lvl = "Master's Level"
+    else:
+        current_lvl = raw_lvl
 
     # ── Next level ────────────────────────────────────────────────────────────
     next_lvl = NEXT_LEVEL_MAP.get(current_lvl)
@@ -3798,117 +4095,407 @@ def future_learning():
 
 
 def parse_json_safely(response_text):
-    cleaned = response_text.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        cleaned = "\n".join(lines).strip()
-    
-    # Quick fix for trailing commas in arrays/objects which standard json decoder rejects
-    # e.g., [1, 2, ] or {"a": 1, }
-    cleaned_no_trailing = re.sub(r',\s*([\]}])', r'\1', cleaned)
-    
-    try:
-        return json.loads(cleaned_no_trailing)
-    except Exception as e:
-        # Try finding array block first
-        match_arr = re.search(r'\[.*\]', cleaned, re.DOTALL)
-        if match_arr:
-            try:
-                # clean trailing commas inside the extracted array
-                arr_str = re.sub(r',\s*([\]}])', r'\1', match_arr.group(0))
-                return json.loads(arr_str)
-            except Exception:
-                pass
-        
-        # Try finding object block
-        match_obj = re.search(r'\{.*\}', cleaned, re.DOTALL)
-        if match_obj:
-            try:
-                obj_str = re.sub(r',\s*([\]}])', r'\1', match_obj.group(0))
-                return json.loads(obj_str)
-            except Exception:
-                pass
-                
-        # Last ditch effort: try parsing using a regex to extract JSON objects one by one
-        # If it's a list of objects, we can build the list manually
-        objs = []
-        for obj_match in re.finditer(r'\{\s*"q"\s*:\s*.*?\s*\}', cleaned, re.DOTALL | re.IGNORECASE):
-            try:
-                clean_obj = re.sub(r',\s*([\]}])', r'\1', obj_match.group(0))
-                objs.append(json.loads(clean_obj))
-            except Exception:
-                pass
-        if objs:
-            return objs
+    """
+    Delegates to ai_service._parse_json — single, hardened JSON parsing
+    implementation used across the entire application.
+    """
+    from app.services.ai_service import ai_service
+    return ai_service._parse_json(response_text, context="mcq_generation")
 
-        # Final fallback: use json_repair to handle truncated/malformed AI responses
-        # This commonly occurs when max_output_tokens is exceeded mid-string
+
+
+
+def extract_text_from_file(file_path, file_type):
+    extracted_text = ""
+    if file_type == "pdf":
         try:
-            import json_repair
-            repaired = json_repair.repair_json(cleaned, return_objects=True)
-            if repaired:
-                return repaired
+            import fitz  # PyMuPDF
+            doc = fitz.open(file_path)
+            for page in doc:
+                extracted_text += page.get_text()
+            doc.close()
         except Exception:
             pass
             
-        raise e
+        if not extracted_text.strip():
+            try:
+                import pdfplumber
+                with pdfplumber.open(file_path) as pdf:
+                    for page in pdf.pages:
+                        text = page.extract_text()
+                        if text:
+                            extracted_text += text
+            except Exception:
+                pass
+    elif file_type in ["png", "jpg", "jpeg"]:
+        try:
+            from PIL import Image
+            import pytesseract
+            img = Image.open(file_path)
+            extracted_text = pytesseract.image_to_string(img)
+        except Exception:
+            pass
+    elif file_type in ["txt"]:
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                extracted_text = f.read()
+        except Exception:
+            pass
+            
+    return extracted_text.strip()
 
 
 @student_bp.route("/study-material", methods=["GET"])
 @login_required
 def study_material():
+    from app.models import UploadedMaterial, Subject, LearningMaterial, Topic, Chapter
     profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
     if not profile or not profile.study_level:
         flash("Please complete your profile configuration first (set your Class Level).", "warning")
         return redirect(url_for("student.profile"))
 
-    from app.models import Subject
     active_subjects = get_profile_subjects(profile)
-
     if not active_subjects:
-        flash("Please configure your Active Subjects first to view study material.", "warning")
-        return redirect(url_for("student.manage_subjects"))
+        flash("No subjects found. Please complete your profile to auto-assign your subjects.", "warning")
+        return redirect(url_for("student.profile"))
 
+    # Filters and sorting params
+    q = request.args.get("q", "").strip()
     subject_id = request.args.get("subject_id", type=int)
-    selected_subject = None
-    if subject_id:
-        selected_subject = Subject.query.filter(Subject.id == subject_id, Subject.id.in_([s.id for s in active_subjects])).first()
+    source = request.args.get("source", "all")
+    sort_by = request.args.get("sort_by", "newest")
 
-    if not selected_subject:
-        session_sub_id = session.get("last_study_material_subject_id")
-        if session_sub_id:
-            selected_subject = Subject.query.filter(Subject.id == session_sub_id, Subject.id.in_([s.id for s in active_subjects])).first()
+    active_subject_ids = [s.id for s in active_subjects]
+    
+    unified_list = []
 
-    if not selected_subject:
-        selected_subject = active_subjects[0]
+    # 1. Fetch AI Generated LearningMaterials
+    if source in ["all", "ai"]:
+        lm_query = (
+            db.session.query(LearningMaterial, Topic, Chapter, Subject)
+            .join(Topic, LearningMaterial.topic_id == Topic.id)
+            .join(Chapter, Topic.chapter_id == Chapter.id)
+            .join(Subject, Chapter.subject_id == Subject.id)
+        )
+        if subject_id:
+            lm_query = lm_query.filter(Subject.id == subject_id)
+        else:
+            lm_query = lm_query.filter(Subject.id.in_(active_subject_ids))
 
-    session["last_study_material_subject_id"] = selected_subject.id
+        if q:
+            lm_query = lm_query.filter(
+                db.or_(
+                    LearningMaterial.title.ilike(f"%{q}%"),
+                    Topic.name.ilike(f"%{q}%"),
+                    Chapter.name.ilike(f"%{q}%")
+                )
+            )
+        
+        lm_results = lm_query.all()
+        for lm, topic, chapter, subject in lm_results:
+            unified_list.append({
+                "type": "ai",
+                "id": lm.id,
+                "title": lm.title,
+                "subject_name": subject.name,
+                "chapter_name": chapter.name,
+                "topic_name": topic.name,
+                "topic_id": topic.id,
+                "date": datetime.utcnow(),
+                "details_url": url_for("student.study_subject", subject_id=subject.id) + f"?topic_id={topic.id}",
+                "badge_class": "bg-primary bg-opacity-20 text-primary",
+                "badge_text": "AI Notes"
+            })
 
-    saved_material = AIStudyMaterial.query.filter_by(
-        user_id=current_user.id,
-        subject_id=selected_subject.id,
-        class_level=profile.study_level
-    ).first()
+    # 2. Fetch User Uploaded Materials
+    if source in ["all", "uploaded"]:
+        um_query = (
+            db.session.query(UploadedMaterial, Subject)
+            .join(Subject, UploadedMaterial.subject_id == Subject.id)
+            .filter(UploadedMaterial.user_id == current_user.id)
+        )
+        if subject_id:
+            um_query = um_query.filter(UploadedMaterial.subject_id == subject_id)
+        else:
+            um_query = um_query.filter(UploadedMaterial.subject_id.in_(active_subject_ids))
 
-    material_data = None
-    if saved_material:
-        try:
-            material_data = json.loads(saved_material.content_json)
-        except Exception:
-            pass
+        if q:
+            um_query = um_query.filter(
+                db.or_(
+                    UploadedMaterial.filename.ilike(f"%{q}%"),
+                    UploadedMaterial.extracted_text.ilike(f"%{q}%"),
+                    UploadedMaterial.summary.ilike(f"%{q}%")
+                )
+            )
+
+        um_results = um_query.all()
+        for um, subject in um_results:
+            unified_list.append({
+                "type": "uploaded",
+                "id": um.id,
+                "title": um.filename,
+                "subject_name": subject.name,
+                "chapter_name": um.chapter.name if um.chapter else "N/A",
+                "topic_name": um.topic.name if um.topic else "N/A",
+                "topic_id": um.topic_id,
+                "date": um.uploaded_at or datetime.utcnow(),
+                "details_url": url_for("student.uploaded_material_detail", material_id=um.id),
+                "badge_class": "bg-success bg-opacity-20 text-success",
+                "badge_text": "Uploaded Document"
+            })
+
+    # Sort unified list
+    is_reverse = (sort_by == "newest")
+    unified_list.sort(key=lambda x: x["date"], reverse=is_reverse)
 
     return render_template(
         "student/study_material.html",
         profile=profile,
         active_subjects=active_subjects,
-        selected_subject=selected_subject,
-        material=material_data,
-        saved_material_obj=saved_material
+        selected_subject_id=subject_id,
+        selected_source=source,
+        selected_sort=sort_by,
+        search_query=q,
+        materials=unified_list
     )
+
+
+@student_bp.route("/study/api/subject/<int:subject_id>/chapters", methods=["GET"])
+@login_required
+def get_subject_chapters(subject_id):
+    from app.models import Chapter
+    chapters = Chapter.query.filter_by(subject_id=subject_id).order_by(Chapter.chapter_number).all()
+    chapters_list = [{"id": c.id, "name": f"Chapter {c.chapter_number}: {c.name}"} for c in chapters]
+    return jsonify({"status": "success", "chapters": chapters_list})
+
+
+@student_bp.route("/study-material/upload", methods=["POST"])
+@login_required
+def upload_study_material():
+    subject_id = request.form.get("subject_id", type=int)
+    chapter_id = request.form.get("chapter_id", type=int)
+    topic_id = request.form.get("topic_id", type=int)
+    
+    if not subject_id:
+        return jsonify({"status": "error", "message": "Subject is required."}), 400
+        
+    if 'file' not in request.files:
+        return jsonify({"status": "error", "message": "No file uploaded."}), 400
+        
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"status": "error", "message": "No selected file."}), 400
+        
+    filename = secure_filename(file.filename)
+    file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+    
+    if file_ext not in ['pdf', 'txt', 'png', 'jpg', 'jpeg']:
+        return jsonify({"status": "error", "message": "Unsupported file format. Please upload PDF, TXT, or Image."}), 400
+        
+    upload_dir = os.path.join(current_app.root_path, "static", "uploads", f"user_{current_user.id}")
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    file_path = os.path.join(upload_dir, filename)
+    file.save(file_path)
+    
+    db_file_path = f"uploads/user_{current_user.id}/{filename}"
+    extracted_text = extract_text_from_file(file_path, file_ext)
+    
+    if not extracted_text:
+        return jsonify({"status": "error", "message": "Could not extract text from the document. Please ensure it contains readable text."}), 400
+        
+    prompt = (
+        f"Analyze the following document text extracted from '{filename}'.\n"
+        f"Generate a detailed, premium academic summary and key revision notes (bullet points) in HTML format.\n\n"
+        f"Document Text:\n{extracted_text[:12000]}\n\n"
+        "Return the output in valid JSON format. The format MUST be:\n"
+        "{\n"
+        '  "summary": "Detailed HTML summary here...",\n'
+        '  "revision_notes": "<ul><li>Revision note 1</li><li>Revision note 2</li></ul>"\n'
+        "}"
+    )
+    
+    system_instruction = (
+        "You are an expert academic research assistant. "
+        "You must analyze the document and output a valid JSON containing 'summary' and 'revision_notes'. "
+        "Do not include any preamble, explanations, or markdown outside the JSON."
+    )
+    
+    try:
+        response_text = ai_service.generate_content(
+            prompt,
+            feature=FEATURE_ASSISTANT,
+            system_instruction=system_instruction
+        )
+        data = ai_service._parse_json(response_text)
+    except Exception as e:
+        data = {
+            "summary": "<p>A summary could not be generated at this time.</p>",
+            "revision_notes": "<p>Revision notes could not be generated at this time.</p>"
+        }
+        
+    from app.models import UploadedMaterial
+    material = UploadedMaterial(
+        user_id=current_user.id,
+        subject_id=subject_id,
+        chapter_id=chapter_id if chapter_id else None,
+        topic_id=topic_id if topic_id else None,
+        filename=filename,
+        file_path=db_file_path,
+        file_type=file_ext,
+        extracted_text=extracted_text,
+        summary=data.get("summary"),
+        revision_notes=data.get("revision_notes")
+    )
+    db.session.add(material)
+    
+    profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+    if profile:
+        profile.documents_uploaded = (profile.documents_uploaded or 0) + 1
+        
+    db.session.commit()
+    
+    return jsonify({
+        "status": "success",
+        "message": "Document uploaded and parsed successfully!",
+        "material_id": material.id
+    })
+
+
+@student_bp.route("/study-material/uploaded/<int:material_id>", methods=["GET"])
+@login_required
+def uploaded_material_detail(material_id):
+    from app.models import UploadedMaterial, Subject
+    material = UploadedMaterial.query.get_or_404(material_id)
+    
+    if material.user_id != current_user.id:
+        flash("You are not authorized to access this document.", "danger")
+        return redirect(url_for("student.study_material"))
+        
+    subject = Subject.query.get(material.subject_id)
+    material.last_opened = datetime.utcnow()
+    db.session.commit()
+    
+    return render_template(
+        "student/uploaded_material_detail.html",
+        material=material,
+        subject=subject
+    )
+
+
+@student_bp.route("/study-material/uploaded/<int:material_id>/ai-action", methods=["POST"])
+@login_required
+def uploaded_material_ai_action(material_id):
+    from app.models import UploadedMaterial
+    material = UploadedMaterial.query.get_or_404(material_id)
+    
+    if material.user_id != current_user.id:
+        return jsonify({"status": "error", "message": "Unauthorized"}), 403
+        
+    action = request.json.get("action")
+    user_query = request.json.get("query", "").strip()
+    
+    if not action:
+        return jsonify({"status": "error", "message": "Action is required."}), 400
+        
+    if action == "mcqs":
+        if material.mcqs_json:
+            return jsonify({"status": "success", "mcqs": json.loads(material.mcqs_json)})
+            
+        prompt = (
+            f"Based on the following document text, generate 5 relevant multiple-choice questions (MCQs) for practice.\n\n"
+            f"Document Text:\n{material.extracted_text[:12000]}\n\n"
+            "Return the list strictly in valid JSON format matching the schema:\n"
+            "[\n"
+            "  {\n"
+            '    "q": "Question text?",\n'
+            '    "a": "Option A",\n'
+            '    "b": "Option B",\n'
+            '    "c": "Option C",\n'
+            '    "d": "Option D",\n'
+            '    "ans": "A",\n'
+            '    "exp": "Detailed explanation."\n'
+            "  },\n"
+            "  ...\n"
+            "]"
+        )
+        
+        system_instruction = (
+            "You are an elite academic examiner. Generate 5 high-quality MCQs based on the text. "
+            "Output strictly valid JSON array of objects. Do not include markdown code block formatting."
+        )
+        
+        try:
+            response_text = ai_service.generate_content(
+                prompt,
+                feature=FEATURE_ASSISTANT,
+                system_instruction=system_instruction
+            )
+            mcqs_data = ai_service._parse_json(response_text)
+            material.mcqs_json = json.dumps(mcqs_data)
+            db.session.commit()
+            return jsonify({"status": "success", "mcqs": mcqs_data})
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"Failed to generate MCQs: {str(e)}"}), 500
+            
+    elif action == "flashcards":
+        if material.flashcards_json:
+            return jsonify({"status": "success", "flashcards": json.loads(material.flashcards_json)})
+            
+        prompt = (
+            f"Based on the following document text, generate 5 interactive flashcards for studying.\n\n"
+            f"Document Text:\n{material.extracted_text[:12000]}\n\n"
+            "Return the list strictly in valid JSON format matching the schema:\n"
+            "[\n"
+            "  {\n"
+            '    "front": "Term / Question",\n'
+            '    "back": "Definition / Answer"\n'
+            "  },\n"
+            "  ...\n"
+            "]"
+        )
+        
+        system_instruction = (
+            "You are an academic advisor. Generate 5 active recall flashcards. "
+            "Output strictly valid JSON array of objects. Do not include markdown code block formatting."
+        )
+        
+        try:
+            response_text = ai_service.generate_content(
+                prompt,
+                feature=FEATURE_ASSISTANT,
+                system_instruction=system_instruction
+            )
+            fc_data = ai_service._parse_json(response_text)
+            material.flashcards_json = json.dumps(fc_data)
+            db.session.commit()
+            return jsonify({"status": "success", "flashcards": fc_data})
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"Failed to generate flashcards: {str(e)}"}), 500
+            
+    elif action == "chat":
+        if not user_query:
+            return jsonify({"status": "error", "message": "Query is required for chat."}), 400
+            
+        prompt = (
+            f"You are tutoring a student based on a document they uploaded. Answer their question using only "
+            f"the context provided from the document.\n\n"
+            f"Document Title: {material.filename}\n"
+            f"Document Context:\n{material.extracted_text[:12000]}\n\n"
+            f"Student's Question: {user_query}\n\n"
+            "Tutor Answer:"
+        )
+        
+        try:
+            response_text = ai_service.generate_content(
+                prompt,
+                feature=FEATURE_ASSISTANT,
+            )
+            return jsonify({"status": "success", "response": response_text})
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"Failed to process chat query: {str(e)}"}), 500
+            
+    return jsonify({"status": "error", "message": "Invalid action."}), 400
 
 
 @student_bp.route("/study-material/generate", methods=["POST"])
@@ -4341,61 +4928,196 @@ def get_tts_audio(topic_id):
 @student_bp.route("/study/api/topic/<int:topic_id>/pdf", methods=["GET"])
 @login_required
 def get_chapter_pdf(topic_id):
-    import time
+    import html as html_module
+    import traceback
     import fitz
-    import re
-    topic = Topic.query.get_or_404(topic_id)
-    material = LearningMaterial.query.filter_by(topic_id=topic.id).first()
+
+    route_name = "/study/api/topic/<int:topic_id>/pdf"
+    logger.info(
+        "[PDF PIPELINE] Initiating download request. Route: %s, Topic ID: %d, User ID: %d",
+        route_name, topic_id, current_user.id
+    )
+
+    topic = Topic.query.get(topic_id)
+    if not topic:
+        logger.error("[PDF PIPELINE] Topic ID %d not found in database.", topic_id)
+        return jsonify({"status": "error", "message": "Topic not found."}), 404
+
+    chapter = topic.chapter
+    subject = chapter.subject if chapter else None
+    subject_id = subject.id if subject else None
+    chapter_id = chapter.id if chapter else None
+
+    # Retrieve learning material
+    try:
+        material = LearningMaterial.query.filter_by(topic_id=topic.id).first()
+        db_retrieved = "success" if material else "not_found"
+        logger.info(
+            "[PDF PIPELINE] Database retrieval of material. Status: %s, Topic ID: %d, Subject ID: %s, Chapter ID: %s",
+            db_retrieved, topic.id, subject_id, chapter_id
+        )
+    except Exception as db_err:
+        logger.error(
+            "[PDF PIPELINE] Database query error for material. Topic ID: %d, Exception: %s",
+            topic_id, db_err
+        )
+        return jsonify({"status": "error", "message": "Database query failed."}), 500
+
     if not material:
+        logger.warning(
+            "[PDF PIPELINE] Material not found in DB for Topic ID %d. Download rejected.",
+            topic_id
+        )
         return jsonify({"status": "error", "message": "Material not found. Generate lesson first."}), 404
-        
+
+    # content length logging
+    content_len = len(material.detailed_explanation or "") + len(material.introduction or "")
+    logger.info(
+        "[PDF PIPELINE] Material verified. Material ID: %d, Total content length: %d characters.",
+        material.id, content_len
+    )
+
     cache_dir = os.path.join(current_app.root_path, "static", "cache", "pdfs")
     os.makedirs(cache_dir, exist_ok=True)
     pdf_filename = f"chapter_{topic_id}.pdf"
     pdf_path = os.path.join(cache_dir, pdf_filename)
-    
-    is_first_time = not os.path.exists(pdf_path)
-    if is_first_time:
-        time.sleep(2)
-        
-        doc = fitz.open()
-        content = f"SUBJECT: {topic.chapter.subject.name}\n"
-        content += f"CHAPTER {topic.chapter.chapter_number}: {topic.chapter.name}\n"
-        content += f"TOPIC: {topic.name}\n\n"
-        
-        if material.learning_objectives:
-            content += "LEARNING OBJECTIVES:\n"
-            content += re.sub('<[^<]+?>', '', material.learning_objectives) + "\n\n"
-        if material.introduction:
-            content += "INTRODUCTION:\n"
-            content += re.sub('<[^<]+?>', '', material.introduction) + "\n\n"
-        if material.detailed_explanation:
-            content += "DETAILED EXPLANATION:\n"
-            content += re.sub('<[^<]+?>', '', material.detailed_explanation) + "\n\n"
-        if material.concepts:
-            content += "CORE CONCEPTS:\n"
-            content += re.sub('<[^<]+?>', '', material.concepts) + "\n\n"
-        if material.summary:
-            content += "SUMMARY:\n"
-            content += re.sub('<[^<]+?>', '', material.summary) + "\n\n"
+
+    # If the PDF file exists, is not empty (0-bytes), and is not a corrupted blank page (< 5KB), we can serve it. 
+    # Otherwise, generate/regenerate it robustly.
+    pdf_valid = os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 5000
+
+    if not pdf_valid:
+        logger.info(
+            "[PDF PIPELINE] PDF cache invalid, too small, or missing. Starting fitz PDF generation. Path: %s",
+            pdf_path
+        )
+        try:
+            import re
             
-        text = content
-        while text:
-            page = doc.new_page()
-            rect = fitz.Rect(50, 50, 550, 750)
-            rc = page.insert_textbox(rect, text, fontsize=10, fontname="helv")
-            if rc < 0:
-                break
-            text = text[rc:]
+            # Create HTML content for the Story
+            html_content = f"""
+            <html>
+            <head>
+            <style>
+                body {{
+                    font-family: Helvetica, sans-serif;
+                    font-size: 10pt;
+                    line-height: 1.4;
+                    color: #333333;
+                }}
+                h1 {{
+                    font-size: 16pt;
+                    color: #1a365d;
+                    border-bottom: 1px solid #1a365d;
+                    padding-bottom: 5px;
+                    margin-top: 20px;
+                }}
+                h2 {{
+                    font-size: 12pt;
+                    color: #2b6cb0;
+                    margin-top: 15px;
+                    margin-bottom: 5px;
+                }}
+                p {{
+                    margin-bottom: 10px;
+                    text-align: justify;
+                }}
+                ul, ol {{
+                    margin-bottom: 10px;
+                    padding-left: 20px;
+                }}
+                li {{
+                    margin-bottom: 5px;
+                }}
+                .header {{
+                    font-size: 9pt;
+                    color: #718096;
+                    margin-bottom: 20px;
+                    border-bottom: 1px solid #e2e8f0;
+                    padding-bottom: 5px;
+                }}
+            </style>
+            </head>
+            <body>
+                <div class="header">
+                    SUBJECT: {html_module.escape(subject.name if subject else "Unknown")} | 
+                    CHAPTER {chapter.chapter_number if chapter else 0}: {html_module.escape(chapter.name if chapter else "Unknown")}
+                </div>
+                <h1>{html_module.escape(topic.name)}</h1>
+            """
+
+            if material.learning_objectives:
+                html_content += f"<h2>Learning Objectives</h2>{material.learning_objectives}"
+            if material.introduction:
+                html_content += f"<h2>Introduction</h2>{material.introduction}"
+            if material.detailed_explanation:
+                html_content += f"<h2>Detailed Explanation</h2>{material.detailed_explanation}"
+            if material.concepts:
+                html_content += f"<h2>Core Concepts</h2>{material.concepts}"
+            if material.summary:
+                html_content += f"<h2>Summary</h2>{material.summary}"
+                
+            html_content += """
+            </body>
+            </html>
+            """
             
-        doc.save(pdf_path)
-        doc.close()
-        
-    progress = ReviewedChapter.query.filter_by(student_id=current_user.id, topic_id=topic.id).first()
-    if not progress:
-        progress = ReviewedChapter(student_id=current_user.id, topic_id=topic.id, status="in progress")
-        db.session.add(progress)
+            writer = fitz.DocumentWriter(pdf_path)
+            mediabox = fitz.paper_rect("a4")
+            rect = mediabox + (50, 50, -50, -50)  # margins
+            story = fitz.Story(html=html_content)
+            
+            more = 1
+            while more:
+                device = writer.begin_page(mediabox)
+                more, _ = story.place(rect)
+                story.draw(device)
+                writer.end_page()
+                
+            writer.close()
+            logger.info(
+                "[PDF PIPELINE] fitz PDF generated and saved successfully. Material ID: %d, Topic ID: %d, Path: %s",
+                material.id, topic_id, pdf_path
+            )
+        except Exception as pdf_err:
+            logger.error(
+                "[PDF PIPELINE] fitz PDF generation failed. Material ID: %d, Topic ID: %d, Error: %s, Traceback: %s",
+                material.id, topic_id, pdf_err, traceback.format_exc()
+            )
+            # Remove partial/failed PDF file if it was created
+            if os.path.exists(pdf_path):
+                try:
+                    os.remove(pdf_path)
+                except Exception:
+                    pass
+            return jsonify({"status": "error", "message": "Failed to generate PDF document."}), 500
+    else:
+        logger.info(
+            "[PDF PIPELINE] Serving PDF from cache. Material ID: %d, Topic ID: %d, Path: %s",
+            material.id, topic_id, pdf_path
+        )
+
+    # Track reviewed chapter in user progress history
+    try:
+        progress = ReviewedChapter.query.filter_by(student_id=current_user.id, topic_id=topic.id).first()
+        if not progress:
+            progress = ReviewedChapter(student_id=current_user.id, topic_id=topic.id, status="in progress")
+            db.session.add(progress)
+        else:
+            progress.last_accessed_at = datetime.utcnow()
         db.session.commit()
+        db_save_status = "success"
+    except Exception as db_err:
+        db_save_status = "failed"
+        logger.warning(
+            "[PDF PIPELINE] Could not commit ReviewedChapter progress record to database: %s",
+            db_err
+        )
+
+    logger.info(
+        "[PDF PIPELINE] PDF dispatch complete. Material ID: %d, Topic ID: %d, DB Progress Log: %s",
+        material.id, topic_id, db_save_status
+    )
 
     from flask import send_from_directory
     return send_from_directory(cache_dir, pdf_filename, as_attachment=True)

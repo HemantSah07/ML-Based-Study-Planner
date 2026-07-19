@@ -55,6 +55,76 @@ class StudentProfile(db.Model):
     attendance_pct = db.Column(db.Float, default=85.0)  # Student's actual attendance percentage (0–100)
     target_score_goal = db.Column(db.Float, default=70.0)   # Desired academic percentage (contextual only)
     peak_focus_time = db.Column(db.String(20), default="Morning")  # Morning/Afternoon/Evening/Night
+    program_duration = db.Column(db.String(20), nullable=True)     # e.g. "3 Years", "4 Years" (Bachelors only)
+
+
+# ── Curriculum Taxonomy (Section 1: Admin Curriculum Management) ─────────────
+
+class EducationLevel(db.Model):
+    """
+    Canonical education levels (Class 6 … Class 12, Bachelors, Masters).
+    Replaces the hardcoded LEVEL_OPTIONS in profile-fields.js.
+    """
+    __tablename__ = "education_levels"
+    id          = db.Column(db.Integer, primary_key=True)
+    name        = db.Column(db.String(50), nullable=False)   # e.g. "Class 10", "Bachelors"
+    country     = db.Column(db.String(100), nullable=False, default="Nepal")
+    sort_order  = db.Column(db.Integer, nullable=False, default=0)
+    is_active   = db.Column(db.Boolean, nullable=False, default=True)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint("name", "country", name="uq_education_level_name_country"),)
+
+
+class University(db.Model):
+    """
+    Universities shown in profile / registration for Bachelors / Masters.
+    Replaces the hardcoded university list in templates.
+    """
+    __tablename__ = "universities"
+    id           = db.Column(db.Integer, primary_key=True)
+    name         = db.Column(db.String(150), nullable=False)
+    abbreviation = db.Column(db.String(30), nullable=True)
+    country      = db.Column(db.String(100), nullable=False, default="Nepal")
+    is_active    = db.Column(db.Boolean, nullable=False, default=True)
+    sort_order   = db.Column(db.Integer, nullable=False, default=0)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint("name", "country", name="uq_university_name_country"),)
+
+
+class Faculty(db.Model):
+    """
+    Faculties / streams shown for Class 11, Class 12 (NEB).
+    Replaces NEB_GENERAL_FACULTIES and NEB_TECHNICAL_STREAMS in profile-fields.js.
+    """
+    __tablename__ = "faculties"
+    id          = db.Column(db.Integer, primary_key=True)
+    name        = db.Column(db.String(150), nullable=False)
+    country     = db.Column(db.String(100), nullable=False, default="Nepal")
+    level_name  = db.Column(db.String(50), nullable=True)   # e.g. "Class 11", "Class 12"; NULL = all
+    is_active   = db.Column(db.Boolean, nullable=False, default=True)
+    sort_order  = db.Column(db.Integer, nullable=False, default=0)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class CurriculumProgram(db.Model):
+    """
+    Bachelors / Masters programs (BBA, BCA, BSc IT …).
+    Replaces NEPAL_BACHELORS_PROGRAMS / NEPAL_MASTERS_PROGRAMS in profile-fields.js.
+    has_duration = True means the Program Duration dropdown should appear.
+    duration_options_json = JSON list of {value, label} objects.
+    """
+    __tablename__ = "curriculum_programs"
+    id                   = db.Column(db.Integer, primary_key=True)
+    name                 = db.Column(db.String(150), nullable=False)
+    level_name           = db.Column(db.String(50), nullable=False)  # "Bachelors" or "Masters"
+    country              = db.Column(db.String(100), nullable=False, default="Nepal")
+    has_duration         = db.Column(db.Boolean, nullable=False, default=False)
+    duration_options_json= db.Column(db.Text, nullable=True)  # JSON: [{"value":"3 Years","label":"..."}]
+    is_active            = db.Column(db.Boolean, nullable=False, default=True)
+    sort_order           = db.Column(db.Integer, nullable=False, default=0)
+    created_at           = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint("name", "level_name", "country", name="uq_program_name_level_country"),)
+
 
 class StudentSubject(db.Model):
     __tablename__ = "student_subjects"
@@ -77,6 +147,7 @@ class Subject(db.Model):
     semester = db.Column(db.String(50))
     country = db.Column(db.String(100), default="Nepal")
     curriculum = db.Column(db.String(100), default="National")
+    is_active = db.Column(db.Boolean, nullable=False, default=True)  # Deactivate instead of deleting
 
 class Prediction(db.Model):
     __tablename__ = "predictions"
@@ -266,6 +337,23 @@ class AuditLog(db.Model):
     status = db.Column(db.String(20)) # success or failed
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
+
+class AdminActivityLog(db.Model):
+    """
+    Records every admin action that changes data.
+    Used by Section 6 (Access Control) and visible via /admin/activity-log.
+    """
+    __tablename__ = "admin_activity_logs"
+    id           = db.Column(db.Integer, primary_key=True)
+    admin_user_id= db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    action       = db.Column(db.String(100), nullable=False)  # e.g. "deactivate_university"
+    entity_type  = db.Column(db.String(50), nullable=True)    # e.g. "University"
+    entity_id    = db.Column(db.Integer, nullable=True)
+    detail       = db.Column(db.Text, nullable=True)           # Human-readable summary
+    timestamp    = db.Column(db.DateTime, default=datetime.utcnow)
+
+    admin_user   = db.relationship('User', foreign_keys=[admin_user_id])
+
 class StudyPlan(db.Model):
     __tablename__ = "study_plans"
     id = db.Column(db.Integer, primary_key=True)
@@ -280,12 +368,16 @@ class Chapter(db.Model):
     name = db.Column(db.String(150), nullable=False)
     chapter_number = db.Column(db.Integer, nullable=False)
 
+    subject = db.relationship('Subject')
+
 class Topic(db.Model):
     __tablename__ = "topics"
     id = db.Column(db.Integer, primary_key=True)
     chapter_id = db.Column(db.Integer, db.ForeignKey('chapters.id'), nullable=False)
     name = db.Column(db.String(150), nullable=False)
     topic_number = db.Column(db.Integer, nullable=False)
+
+    chapter = db.relationship('Chapter')
 
 class Subtopic(db.Model):
     __tablename__ = "subtopics"
@@ -539,4 +631,30 @@ class PastQuestion(db.Model):
 
     # Relationships
     topic = db.relationship('Topic')
+
+
+class UploadedMaterial(db.Model):
+    __tablename__ = "uploaded_materials"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
+    chapter_id = db.Column(db.Integer, db.ForeignKey('chapters.id'), nullable=True)
+    topic_id = db.Column(db.Integer, db.ForeignKey('topics.id'), nullable=True)
+    filename = db.Column(db.String(255), nullable=False)
+    file_path = db.Column(db.String(500), nullable=False)
+    file_type = db.Column(db.String(10), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    extracted_text = db.Column(db.Text, nullable=True)
+    summary = db.Column(db.Text, nullable=True)
+    revision_notes = db.Column(db.Text, nullable=True)
+    flashcards_json = db.Column(db.Text, nullable=True)
+    mcqs_json = db.Column(db.Text, nullable=True)
+    last_opened = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('uploaded_materials', lazy=True))
+    subject = db.relationship('Subject', backref=db.backref('uploaded_materials', lazy=True))
+    chapter = db.relationship('Chapter', backref=db.backref('uploaded_materials', lazy=True))
+    topic = db.relationship('Topic', backref=db.backref('uploaded_materials', lazy=True))
+
 

@@ -1,0 +1,236 @@
+{% extends 'base.html' %}
+{% block title %}Subjects — Admin{% endblock %}
+
+{% block content %}
+<div class="hero-banner mb-4">
+    <h1 class="page-title mb-2"><i class="fas fa-atlas me-2 text-gradient"></i> Curriculum Taxonomy</h1>
+    <p class="page-subtitle mb-0">Manage education levels, universities, programs, and subjects.</p>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <ul class="nav nav-pills gap-2">
+            <li class="nav-item"><a class="nav-link text-white fw-semibold" href="{{ url_for('admin.curriculum_levels') }}"><i class="fas fa-layer-group me-1"></i> Levels</a></li>
+            <li class="nav-item"><a class="nav-link text-white fw-semibold" href="{{ url_for('admin.curriculum_universities') }}"><i class="fas fa-university me-1"></i> Universities</a></li>
+            <li class="nav-item"><a class="nav-link text-white fw-semibold" href="{{ url_for('admin.curriculum_faculties') }}"><i class="fas fa-scroll me-1"></i> Faculties</a></li>
+            <li class="nav-item"><a class="nav-link text-white fw-semibold" href="{{ url_for('admin.curriculum_programs') }}"><i class="fas fa-graduation-cap me-1"></i> Programs</a></li>
+            <li class="nav-item"><a class="nav-link active fw-bold" href="{{ url_for('admin.curriculum_subjects') }}"><i class="fas fa-book me-1"></i> Subjects</a></li>
+        </ul>
+    </div>
+</div>
+
+<div class="card card-flat p-4 mb-4">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+        <h5 class="fw-bold text-white mb-0"><i class="fas fa-filter text-primary me-2"></i> Filter Subjects</h5>
+        <form method="GET" action="{{ url_for('admin.curriculum_subjects') }}" class="d-flex align-items-center gap-2">
+            <select name="level" class="form-select bg-dark border-secondary text-white style-select" style="min-width: 200px;">
+                <option value="">-- All Levels --</option>
+                {% for lvl in levels %}
+                <option value="{{ lvl.name }}" {% if selected_level == lvl.name %}selected{% endif %}>{{ lvl.name }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+            {% if selected_level %}
+            <a href="{{ url_for('admin.curriculum_subjects') }}" class="btn btn-outline-secondary btn-sm">Clear</a>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- List subjects -->
+    <div class="col-lg-8">
+        <div class="card card-flat p-4">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h5 class="fw-bold text-white mb-0"><i class="fas fa-list text-primary me-2"></i> Subjects ({{ subjects|length }} found)</h5>
+            </div>
+            
+            {% if not subjects %}
+            <div class="text-center py-5 text-muted">
+                <i class="fas fa-book-open fa-3x mb-3 text-dim"></i>
+                <p>No subjects found matching the criteria.</p>
+            </div>
+            {% else %}
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle border-secondary">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Subject Name</th>
+                            <th>Level / Program</th>
+                            <th>Term</th>
+                            <th>Status</th>
+                            <th>In Use By</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in subjects %}
+                        <tr>
+                            <td class="text-muted">{{ item.code or '-' }}</td>
+                            <td class="fw-bold text-white">{{ item.name }}</td>
+                            <td>
+                                <span class="badge bg-secondary">{{ item.level_of_study }}</span>
+                                {% if item.program %}
+                                <span class="badge bg-primary">{{ item.program }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ item.semester or '-' }}</td>
+                            <td>
+                                {% if item.is_active %}
+                                <span class="badge bg-success">Active</span>
+                                {% else %}
+                                <span class="badge bg-danger">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% set count = usage_counts.get(item.id, 0) %}
+                                {% if count > 0 %}
+                                <span class="badge bg-warning text-dark">{{ count }} students</span>
+                                {% else %}
+                                <span class="text-muted">0 students</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ item.id }}">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <form action="{{ url_for('admin.curriculum_subjects_toggle', subject_id=item.id) }}" method="POST" class="d-inline">
+                                        <input type="hidden" name="level_filter" value="{{ selected_level or '' }}">
+                                        {% if item.is_active %}
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirmDeactivate('{{ item.name }}', {{ count }})">
+                                            Deactivate
+                                        </button>
+                                        {% else %}
+                                        <button type="submit" class="btn btn-sm btn-outline-success">
+                                            Activate
+                                        </button>
+                                        {% endif %}
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+
+                        <!-- Edit Modal -->
+                        <div class="modal fade" id="editModal{{ item.id }}" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog modal-dialog-centered modal-lg">
+                                <div class="modal-content bg-dark border-secondary text-white">
+                                    <form action="{{ url_for('admin.curriculum_subjects_edit', subject_id=item.id) }}" method="POST">
+                                        <input type="hidden" name="level_filter" value="{{ selected_level or '' }}">
+                                        <div class="modal-header border-secondary">
+                                            <h5 class="modal-title fw-bold text-gradient"><i class="fas fa-edit me-2"></i> Edit Subject</h5>
+                                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            <div class="row g-3">
+                                                <div class="col-md-6">
+                                                    <label class="form-label text-muted small">Subject Name</label>
+                                                    <input type="text" name="name" class="form-control bg-dark border-secondary text-white" value="{{ item.name }}" required>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label class="form-label text-muted small">Subject Code</label>
+                                                    <input type="text" name="code" class="form-control bg-dark border-secondary text-white" value="{{ item.code or '' }}">
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label class="form-label text-muted small">Education Level</label>
+                                                    <select name="level_of_study" class="form-select bg-dark border-secondary text-white" required>
+                                                        {% for lvl in levels %}
+                                                        <option value="{{ lvl.name }}" {% if item.level_of_study == lvl.name %}selected{% endif %}>{{ lvl.name }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label class="form-label text-muted small">Program / Specialization</label>
+                                                    <input type="text" name="program" class="form-control bg-dark border-secondary text-white" value="{{ item.program or '' }}" placeholder="e.g. BSc CSIT or Science Stream">
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label class="form-label text-muted small">Semester / Year Term</label>
+                                                    <input type="text" name="semester" class="form-control bg-dark border-secondary text-white" value="{{ item.semester or '' }}" placeholder="e.g. Semester 1 or Year 1">
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <label class="form-label text-muted small">Credit Hours</label>
+                                                    <input type="number" name="credit_hours" class="form-control bg-dark border-secondary text-white" value="{{ item.credit_hours or 3 }}" required>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <label class="form-label text-muted small">Difficulty (1-5)</label>
+                                                    <input type="number" name="difficulty_level" class="form-control bg-dark border-secondary text-white" min="1" max="5" value="{{ item.difficulty_level or 3 }}" required>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer border-secondary">
+                                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                                            <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Add Subject -->
+    <div class="col-lg-4">
+        <div class="card card-flat p-4">
+            <h5 class="fw-bold text-white mb-3"><i class="fas fa-plus text-primary me-2"></i> Add Subject</h5>
+            <form action="{{ url_for('admin.curriculum_subjects_add') }}" method="POST">
+                <input type="hidden" name="level_filter" value="{{ selected_level or '' }}">
+                <div class="mb-3">
+                    <label class="form-label text-muted small">Subject Name</label>
+                    <input type="text" name="name" class="form-control bg-dark border-secondary text-white" placeholder="e.g. Introduction to IT" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted small">Subject Code</label>
+                    <input type="text" name="code" class="form-control bg-dark border-secondary text-white" placeholder="e.g. IIT-101">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted small">Education Level</label>
+                    <select name="level_of_study" class="form-select bg-dark border-secondary text-white" required>
+                        <option value="">-- Select Level --</option>
+                        {% for lvl in levels %}
+                        <option value="{{ lvl.name }}">{{ lvl.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted small">Program / Specialization</label>
+                    <input type="text" name="program" class="form-control bg-dark border-secondary text-white" placeholder="e.g. BSc IT (Optional)">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted small">Semester / Year Term</label>
+                    <input type="text" name="semester" class="form-control bg-dark border-secondary text-white" placeholder="e.g. Semester 1 (Optional)">
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label text-muted small">Credit Hours</label>
+                        <input type="number" name="credit_hours" class="form-control bg-dark border-secondary text-white" value="3" required>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label text-muted small">Difficulty (1-5)</label>
+                        <input type="number" name="difficulty_level" class="form-control bg-dark border-secondary text-white" min="1" max="5" value="3" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm w-100 mt-2">
+                    <i class="fas fa-plus-circle me-1"></i> Add Subject
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function confirmDeactivate(name, studentCount) {
+        if (studentCount > 0) {
+            return confirm(`WARNING: "${name}" is currently selected by ${studentCount} students. Deactivating it will prevent new students from selecting it, but will leave it on existing profiles.\n\nAre you sure you want to proceed?`);
+        }
+        return confirm(`Are you sure you want to deactivate "${name}"?`);
+    }
+</script>
+{% endblock %}
