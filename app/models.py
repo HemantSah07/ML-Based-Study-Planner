@@ -7,15 +7,20 @@ def load_user(user_id):
     from flask import session, request
     try:
         impersonate_id = session.get('impersonating_student_id')
+        print(f"[DEBUG load_user] path={request.path} user_id={user_id} impersonate_id={impersonate_id}")
         if impersonate_id:
             # Only load the student when accessing non-admin endpoints
             if not request.path.startswith('/admin'):
                 student = User.query.get(int(impersonate_id))
                 if student:
+                    print(f"[DEBUG load_user] IMPERSONATING returned student {student.id}")
                     return student
-    except Exception:
+    except Exception as e:
+        print("[DEBUG load_user] exception:", e)
         pass
-    return User.query.get(int(user_id))
+    u = User.query.get(int(user_id))
+    print(f"[DEBUG load_user] returned user {u.id if u else None} (role={u.role if u else None})")
+    return u
 
 class User(db.Model, UserMixin):
     __tablename__ = "users"
