@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block title %}Chapters &amp; Topics — Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <div>
+        <a href="{{ url_for('admin.content_stats') }}" class="text-muted small text-decoration-none"><i class="fas fa-arrow-left me-1"></i> Content Overview</a>
+        <h1 class="page-title mt-1 mb-0"><i class="fas fa-layer-group me-2 text-gradient"></i> {{ subject.name }}</h1>
+        <p class="page-subtitle mb-0">Chapters and topics catalog for {{ subject.level_of_study }} ({{ subject.program or 'All Programs' }}).</p>
+    </div>
+</div>
+
+{% if chapters %}
+<div class="row g-4">
+    {% for ch in chapters %}
+    <div class="col-md-6">
+        <div class="card card-flat p-4 h-100">
+            <div class="d-flex align-items-center justify-content-between mb-3 pb-2 border-bottom border-secondary">
+                <h5 class="fw-bold text-white mb-0">
+                    <span class="badge bg-primary me-2">CH {{ ch.chapter_number }}</span>{{ ch.name }}
+                </h5>
+                <span class="badge bg-secondary">{{ topics_by_chapter.get(ch.id, [])|length }} Topics</span>
+            </div>
+            
+            {% set topics = topics_by_chapter.get(ch.id, []) %}
+            {% if topics %}
+            <ul class="list-group list-group-flush bg-transparent">
+                {% for t in topics %}
+                <li class="list-group-item bg-transparent text-white-50 small border-secondary d-flex justify-content-between align-items-center px-0">
+                    <div>
+                        <span class="text-primary fw-semibold me-2">{{ ch.chapter_number }}.{{ t.topic_number }}</span>
+                        {{ t.name }}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-muted small mb-0">No topics added under this chapter.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card card-flat p-5 text-center">
+    <i class="fas fa-folder-open fa-3x mb-3 text-muted"></i>
+    <h5 class="text-white fw-bold">No Chapters Found</h5>
+    <p class="text-muted small mb-0">There are no chapters or syllabus details configured for this subject yet.</p>
+</div>
+{% endif %}
+{% endblock %}

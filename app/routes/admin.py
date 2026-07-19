@@ -592,11 +592,29 @@ def health():
             break
         elif v.get("status") in ("missing", "unconfigured") and overall != "degraded":
             overall = "warning"
+
+    # Today's API usage (Section 4 requirement)
+    api_usage = _get_daily_api_usage()
+
+    # Count subjects with zero assessment questions
+    from app.models import AssessmentQuestion
+    from app.models import Subject as _Subj
+    subjects_zero_q = 0
+    try:
+        all_subjects = _Subj.query.filter_by(is_active=True).all()
+        for s in all_subjects:
+            if AssessmentQuestion.query.filter_by(subject_id=s.id).count() == 0:
+                subjects_zero_q += 1
+    except Exception:
+        subjects_zero_q = 0
+
     return render_template(
         "admin/health.html",
         checks=checks, disk=disk, python_info=python_info,
         model_config=model_config, overall=overall,
+        api_usage=api_usage, subjects_zero_q=subjects_zero_q,
     )
+
 
 
 # ── SECTION 2 STUB: CONTENT ──────────────────────────────────────────────────
@@ -1044,18 +1062,500 @@ def content_chapters():
 
 @admin_bp.route("/content/stats")
 def content_stats():
-    """Content overview stats: subject/chapter/question counts."""
-    from app.models import Chapter, AssessmentQuestion
+    """Content overview stats: subject/chapter/question counts + difficulty breakdown + broken PDFs check."""
+    import os
+    from app.models import Chapter, AssessmentQuestion, Topic
     from sqlalchemy import func
     subjects = SubjectModel.query.order_by(SubjectModel.name).all()
     rows = []
     for s in subjects:
         ch_count = Chapter.query.filter_by(subject_id=s.id).count()
         q_count = AssessmentQuestion.query.filter_by(subject_id=s.id).count()
-        rows.append({"subject": s, "chapters": ch_count, "questions": q_count})
+        # Difficulty breakdown
+        diff_counts = {}
+        for diff in ("beginner", "intermediate", "advanced"):
+            diff_counts[diff] = AssessmentQuestion.query.filter_by(
+                subject_id=s.id, difficulty=diff
+            ).count()
+        rows.append({
+            "subject": s, "chapters": ch_count, "questions": q_count,
+            "diff_counts": diff_counts,
+        })
     total_questions = AssessmentQuestion.query.count()
+    subjects_zero_q = sum(1 for r in rows if r["questions"] == 0)
+
+    # Broken/Blank PDFs scan (< 5KB check)
+    broken_pdfs = []
+    cache_dir = os.path.join(current_app.root_path, "static", "cache", "pdfs")
+    if os.path.exists(cache_dir):
+        for f in os.listdir(cache_dir):
+            if f.startswith("chapter_") and f.endswith(".pdf"):
+                path = os.path.join(cache_dir, f)
+                size = os.path.getsize(path)
+                if size < 5000:
+                    try:
+                        tid = int(f.replace("chapter_", "").replace(".pdf", ""))
+                        topic = Topic.query.get(tid)
+                        broken_pdfs.append({
+                            "filename": f,
+                            "topic_id": tid,
+                            "topic_name": topic.name if topic else "Unknown Topic",
+                            "subject_name": topic.chapter.subject.name if topic and topic.chapter and topic.chapter.subject else "Unknown Subject",
+                            "size": size
+                        })
+                    except Exception:
+                        pass
+
     return render_template(
         "admin/content/stats.html",
         rows=rows, total_questions=total_questions,
+        subjects_zero_q=subjects_zero_q,
+        broken_pdfs=broken_pdfs,
     )
 
+
+@admin_bp.route("/content/pdfs/regenerate/<int:topic_id>", methods=["POST"])
+def content_regenerate_pdf(topic_id):
+    """Delete a cached PDF so it will be regenerated on the next download request."""
+    import os
+    pdf_filename = f"chapter_{topic_id}.pdf"
+    cache_dir = os.path.join(current_app.root_path, "static", "cache", "pdfs")
+    pdf_path = os.path.join(cache_dir, pdf_filename)
+    if os.path.exists(pdf_path):
+        try:
+            os.remove(pdf_path)
+            log_admin_action("delete_cached_pdf", "Topic", topic_id, f"Deleted broken cached PDF '{pdf_filename}' for regeneration")
+            flash(f"Deleted cached PDF '{pdf_filename}'. It will be generated fresh upon the next download attempt.", "success")
+        except Exception as e:
+            flash(f"Error removing cached PDF: {e}", "danger")
+    else:
+        flash("Cached PDF not found.", "warning")
+    return redirect(url_for("admin.content_stats"))
+
+
+
+
+# ── SECTION 2: QUESTION BANK REGENERATION ─────────────────────────────────────
+
+@admin_bp.route("/content/questions/regenerate/<int:subject_id>", methods=["POST"])
+def content_regenerate_questions(subject_id):
+    """Trigger MCQ regeneration for a subject (respects daily quota)."""
+    from app.models import AssessmentQuestion
+    from app.services.ai_service import AIService
+    subj = SubjectModel.query.get_or_404(subject_id)
+    try:
+        existing = AssessmentQuestion.query.filter_by(subject_id=subject_id).count()
+        ai = AIService()
+        ai.generate_assessment_questions(
+            subject_name=subj.name,
+            level_of_study=subj.level_of_study or "Class 10",
+            subject_id=subject_id,
+            force_regenerate=False,
+        )
+        new_count = AssessmentQuestion.query.filter_by(subject_id=subject_id).count()
+        added = new_count - existing
+        log_admin_action("regenerate_question_bank", "Subject", subject_id,
+                         f"Regenerated MCQ bank for '{subj.name}': +{added} questions")
+        flash(f"MCQ regeneration done for '{subj.name}'. +{added} new questions.", "success")
+    except Exception as e:
+        flash(f"Regeneration failed: {e}", "danger")
+    return redirect(url_for("admin.content_stats"))
+
+
+@admin_bp.route("/content/chapters/<int:subject_id>/topics")
+def content_chapter_topics(subject_id):
+    """List chapters and topics for a subject."""
+    from app.models import Chapter, Topic
+    subj = SubjectModel.query.get_or_404(subject_id)
+    chapters = Chapter.query.filter_by(subject_id=subject_id).order_by(Chapter.chapter_number).all()
+    topics_by_chapter = {
+        ch.id: Topic.query.filter_by(chapter_id=ch.id).order_by(Topic.topic_number).all()
+        for ch in chapters
+    }
+    return render_template("admin/content/topics.html",
+                           subject=subj, chapters=chapters, topics_by_chapter=topics_by_chapter)
+
+
+# ── SECTION 3: STUDENT SCHEDULE REGENERATE ────────────────────────────────────
+
+@admin_bp.route("/students/<int:student_id>/regenerate-schedule", methods=["POST"])
+def student_regenerate_schedule(student_id):
+    """Clear study plan so next Planner visit regenerates it."""
+    from app.models import StudyPlan, StudentProfile
+    student = User.query.get_or_404(student_id)
+    profile = StudentProfile.query.filter_by(user_id=student_id).first()
+    if not profile:
+        flash("Student has no profile.", "warning")
+        return redirect(url_for("admin.student_detail", student_id=student_id))
+    try:
+        StudyPlan.query.filter_by(student_id=student_id).delete()
+        db.session.commit()
+        log_admin_action("regenerate_schedule", "User", student_id,
+                         f"Cleared study plan for {student.email}")
+        flash(f"Study plan cleared for {student.full_name or student.email}. "
+              "Next Planner visit will regenerate it.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Could not clear schedule: {e}", "danger")
+    return redirect(url_for("admin.student_detail", student_id=student_id))
+
+
+# ── SECTION 4: HEALTH — API USAGE DATA ────────────────────────────────────────
+
+def _get_daily_api_usage():
+    from app.models import DailyAPIUsage
+    from datetime import date as _date
+    today = _date.today()
+    rows = DailyAPIUsage.query.filter_by(usage_date=today).all()
+    cfg = current_app.config
+    limits = {
+        "mcq": cfg.get("GEMINI_DAILY_LIMIT_MCQ", 450),
+        "assistant": cfg.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", 45),
+    }
+    result = []
+    for r in rows:
+        limit = limits.get(r.feature)
+        pct = round(r.call_count / limit * 100, 1) if limit and limit > 0 else None
+        result.append({
+            "feature": r.feature, "model": r.model_name or "—",
+            "count": r.call_count, "limit": limit or "—", "pct": pct,
+        })
+    return result
+
+
+# ── SECTION 5: ANALYTICS DETAIL ───────────────────────────────────────────────
+
+@admin_bp.route("/analytics/detail")
+def analytics_detail():
+    from app.models import StudentProfile, StudyLog, StudentAssessment
+    from sqlalchemy import func
+
+    rf_importances = []
+    try:
+        from app.routes.student import load_ml_model
+        model = load_ml_model("random_forest")
+        if model and hasattr(model, "feature_importances_"):
+            feature_names = [
+                "Attendance %", "Assignment Completion %", "Weekly Study Hours",
+                "Total Study Hours", "Study Days (240d)", "Subject Difficulty",
+                "Avg Exam Score %", "Midterm Score %", "Final Score %",
+                "Assignment Avg %", "Year of Study", "Cumulative GPA",
+            ]
+            combined = sorted(zip(feature_names, model.feature_importances_),
+                              key=lambda x: x[1], reverse=True)
+            rf_importances = [{"name": n, "importance": round(v * 100, 2)} for n, v in combined]
+    except Exception:
+        rf_importances = []
+
+    try:
+        total_students = User.query.filter_by(role="student", is_active=True).count()
+        students_with_logs = db.session.query(StudyLog.user_id).distinct().count()
+        adherence_rate = round(students_with_logs / total_students * 100, 1) if total_students else 0.0
+    except Exception:
+        adherence_rate = 0.0
+
+    try:
+        subjects_all = SubjectModel.query.filter_by(is_active=True).order_by(SubjectModel.name).all()
+        total_assessed = StudentProfile.query.filter_by(has_completed_assessment=True).count()
+        assessment_by_subject = sorted(
+            [{"subject": s.name,
+              "count": StudentAssessment.query.filter_by(subject_id=s.id).count()}
+             for s in subjects_all[:20]],
+            key=lambda x: x["count"], reverse=True,
+        )
+    except Exception:
+        assessment_by_subject, total_assessed = [], 0
+
+    missed_topics = []
+    try:
+        from app.models import AssessmentResponse, AssessmentQuestion
+        wrong_counts = (
+            db.session.query(
+                AssessmentResponse.question_id,
+                func.count(AssessmentResponse.id).label("wc"),
+            )
+            .filter_by(is_correct=False)
+            .group_by(AssessmentResponse.question_id)
+            .order_by(func.count(AssessmentResponse.id).desc())
+            .limit(10)
+            .all()
+        )
+        for qid, cnt in wrong_counts:
+            q = AssessmentQuestion.query.get(qid)
+            if q:
+                missed_topics.append({
+                    "question": q.question_text[:100],
+                    "subject": q.subject.name if q.subject else "—",
+                    "wrong_count": cnt,
+                })
+    except Exception:
+        missed_topics = []
+
+    return render_template(
+        "admin/analytics_detail.html",
+        rf_importances=rf_importances,
+        adherence_rate=adherence_rate,
+        assessment_by_subject=assessment_by_subject,
+        total_assessed=total_assessed,
+        missed_topics=missed_topics,
+    )
+
+
+# ── SECTION 7: CONFIG — STUDY PLANNER SETTINGS ────────────────────────────────
+
+@admin_bp.route("/config/planner", methods=["POST"])
+def config_planner():
+    from app.models import AppSetting
+    for k in ["PLANNER_SESSION_MINUTES", "PLANNER_BREAK_MINUTES", "PLANNER_SESSIONS_PER_DAY"]:
+        val = request.form.get(k, "").strip()
+        if not val:
+            continue
+        s = AppSetting.query.get(k)
+        if s:
+            s.value = val
+        else:
+            db.session.add(AppSetting(key=k, value=val))
+    db.session.commit()
+    from app.live_config import load_live_config
+    load_live_config(current_app._get_current_object(), force=True)
+    log_admin_action("update_planner_config", "AppSetting", None, "Updated Study Planner defaults")
+    flash("Study Planner defaults saved.", "success")
+    return redirect(url_for("admin.config"))
+
+
+# ── SECTION 8: BULK-SEED QUESTION BANKS (QUEUED / RATE-LIMITED) ───────────────
+
+import threading as _threading
+_bulk_seed_state = {"running": False, "done": 0, "total": 0, "errors": [], "log": []}
+_bulk_seed_lock = _threading.Lock()
+
+
+@admin_bp.route("/bulk/seed-questions", methods=["GET", "POST"])
+def bulk_seed_questions():
+    from app.models import AssessmentQuestion
+    subjects = SubjectModel.query.filter_by(is_active=True).order_by(SubjectModel.name).all()
+
+    if request.method == "POST":
+        subject_ids = request.form.getlist("subject_ids", type=int)
+        if not subject_ids:
+            flash("Select at least one subject.", "warning")
+            return redirect(url_for("admin.bulk_seed_questions"))
+        with _bulk_seed_lock:
+            if _bulk_seed_state["running"]:
+                flash("A bulk-seed job is already running.", "warning")
+                return redirect(url_for("admin.bulk_seed_questions"))
+            _bulk_seed_state.update({
+                "running": True, "done": 0, "total": len(subject_ids), "errors": [], "log": [],
+            })
+
+        from flask import current_app as _ca
+        _app = _ca._get_current_object()
+
+        def _seed_worker(app, ids):
+            import time as _time
+            with app.app_context():
+                from app.models import DailyAPIUsage, AppSetting
+                from app.services.ai_service import AIService, QuotaExceededError
+                from datetime import date as _d
+                ai = AIService()
+                for sid in ids:
+                    with _bulk_seed_lock:
+                        if not _bulk_seed_state["running"]:
+                            break
+                    subj = SubjectModel.query.get(sid)
+                    if not subj:
+                        with _bulk_seed_lock:
+                            _bulk_seed_state["done"] += 1
+                            _bulk_seed_state["errors"].append(f"Subject id={sid} not found")
+                        continue
+                    try:
+                        today = _d.today()
+                        used_row = DailyAPIUsage.query.filter_by(
+                            feature="mcq", usage_date=today).first()
+                        used = used_row.call_count if used_row else 0
+                        limit_s = AppSetting.query.get("GEMINI_DAILY_LIMIT_MCQ")
+                        limit = int(limit_s.value) if limit_s else app.config.get(
+                            "GEMINI_DAILY_LIMIT_MCQ", 450)
+                        if used >= limit:
+                            msg = f"Daily MCQ quota exhausted ({used}/{limit}). Stopping."
+                            with _bulk_seed_lock:
+                                _bulk_seed_state["log"].append(msg)
+                                _bulk_seed_state["running"] = False
+                            break
+                        existing = AssessmentQuestion.query.filter_by(subject_id=sid).count()
+                        ai.generate_assessment_questions(
+                            subject_name=subj.name,
+                            level_of_study=subj.level_of_study or "Class 10",
+                            subject_id=sid,
+                            force_regenerate=False,
+                        )
+                        new_count = AssessmentQuestion.query.filter_by(subject_id=sid).count()
+                        msg = f"+ {subj.name}: +{new_count - existing} questions"
+                    except QuotaExceededError:
+                        msg = f"- {subj.name}: daily quota hit, stopping"
+                        with _bulk_seed_lock:
+                            _bulk_seed_state["log"].append(msg)
+                            _bulk_seed_state["running"] = False
+                        break
+                    except Exception as exc:
+                        msg = f"- {subj.name}: {str(exc)[:80]}"
+                        with _bulk_seed_lock:
+                            _bulk_seed_state["errors"].append(msg)
+                    with _bulk_seed_lock:
+                        _bulk_seed_state["done"] += 1
+                        _bulk_seed_state["log"].append(msg)
+                    _time.sleep(2)
+                with _bulk_seed_lock:
+                    _bulk_seed_state["running"] = False
+
+        _threading.Thread(target=_seed_worker, args=(_app, subject_ids), daemon=True).start()
+        log_admin_action("bulk_seed_questions", "Subject", None,
+                         f"Bulk MCQ seed: {len(subject_ids)} subjects queued")
+        flash(f"Bulk seed started for {len(subject_ids)} subjects. Monitor progress below.", "info")
+        return redirect(url_for("admin.bulk_seed_questions"))
+
+    with _bulk_seed_lock:
+        state = dict(_bulk_seed_state)
+    q_counts = {
+        s.id: AssessmentQuestion.query.filter_by(subject_id=s.id).count() for s in subjects
+    }
+    return render_template("admin/bulk_seed.html", subjects=subjects, state=state, q_counts=q_counts)
+
+
+@admin_bp.route("/bulk/seed-questions/status")
+def bulk_seed_status():
+    with _bulk_seed_lock:
+        return jsonify(dict(_bulk_seed_state))
+
+
+@admin_bp.route("/bulk/seed-questions/stop", methods=["POST"])
+def bulk_seed_stop():
+    with _bulk_seed_lock:
+        _bulk_seed_state["running"] = False
+    flash("Bulk-seed stopped.", "warning")
+    return redirect(url_for("admin.bulk_seed_questions"))
+
+
+# ── SECTION 8: STUDENT DATA EXPORT ────────────────────────────────────────────
+
+@admin_bp.route("/bulk/export-students")
+def bulk_export_students():
+    import csv
+    import io
+    from app.models import StudentProfile, StudentAssessment, StudyLog
+    from flask import Response
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "user_id", "email", "full_name", "is_active", "date_registered",
+        "study_level", "country", "program", "semester", "university",
+        "cumulative_gpa", "attendance_pct", "has_completed_assessment",
+        "target_weekly_hours", "assessment_count", "study_log_hours",
+    ])
+    students = User.query.filter_by(role="student").order_by(User.id).all()
+    for u in students:
+        p = StudentProfile.query.filter_by(user_id=u.id).first()
+        a_count = StudentAssessment.query.filter_by(student_id=u.id).count()
+        log_hrs = (
+            db.session.query(db.func.sum(StudyLog.duration_hours))
+            .filter_by(user_id=u.id).scalar() or 0.0
+        )
+        writer.writerow([
+            u.id, u.email, u.full_name or "", u.is_active,
+            u.date_registered.strftime("%Y-%m-%d") if u.date_registered else "",
+            p.study_level if p else "", p.country if p else "",
+            p.program if p else "", p.semester if p else "",
+            p.university if p else "",
+            p.cumulative_gpa if p else "", p.attendance_pct if p else "",
+            p.has_completed_assessment if p else False,
+            p.target_weekly_hours if p else "",
+            a_count, round(float(log_hrs), 2),
+        ])
+    log_admin_action("export_students_csv", "User", None,
+                     f"Exported {len(students)} students to CSV")
+    output.seek(0)
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=students_export.csv"},
+    )
+
+
+@admin_bp.route("/bulk/export-students-json")
+def bulk_export_students_json():
+    from app.models import StudentProfile, StudentAssessment, StudyLog
+    students = User.query.filter_by(role="student").order_by(User.id).all()
+    data = []
+    for u in students:
+        p = StudentProfile.query.filter_by(user_id=u.id).first()
+        a_count = StudentAssessment.query.filter_by(student_id=u.id).count()
+        log_hrs = (
+            db.session.query(db.func.sum(StudyLog.duration_hours))
+            .filter_by(user_id=u.id).scalar() or 0.0
+        )
+        data.append({
+            "user_id": u.id, "email": u.email, "full_name": u.full_name,
+            "is_active": u.is_active,
+            "date_registered": u.date_registered.isoformat() if u.date_registered else None,
+            "profile": {
+                "study_level": p.study_level, "country": p.country,
+                "program": p.program, "semester": p.semester,
+                "university": p.university, "cumulative_gpa": p.cumulative_gpa,
+                "attendance_pct": p.attendance_pct,
+                "has_completed_assessment": p.has_completed_assessment,
+                "target_weekly_hours": p.target_weekly_hours,
+            } if p else None,
+            "assessment_count": a_count,
+            "total_study_hours": round(float(log_hrs), 2),
+        })
+    log_admin_action("export_students_json", "User", None,
+                     f"Exported {len(students)} students to JSON")
+    return jsonify(data)
+
+
+# ── SECTION 8: CURRICULUM IMPORT FROM CSV ─────────────────────────────────────
+
+@admin_bp.route("/bulk/import-curriculum", methods=["GET", "POST"])
+def bulk_import_curriculum():
+    import csv
+    import io
+    results = []
+    if request.method == "POST":
+        f = request.files.get("csv_file")
+        if not f or not f.filename.lower().endswith(".csv"):
+            flash("Please upload a .csv file.", "danger")
+            return redirect(url_for("admin.bulk_import_curriculum"))
+        stream = io.StringIO(f.stream.read().decode("utf-8-sig"), newline=None)
+        reader = csv.DictReader(stream)
+        added = skipped = 0
+        for row in reader:
+            name = (row.get("name") or "").strip()
+            if not name:
+                continue
+            code = (row.get("code") or "").strip() or None
+            level = (row.get("level_of_study") or "").strip()
+            program = (row.get("program") or "").strip() or None
+            semester = (row.get("semester") or "").strip() or None
+            try:
+                credit_hours = int(row.get("credit_hours") or 3)
+                difficulty = int(row.get("difficulty_level") or 3)
+            except ValueError:
+                credit_hours, difficulty = 3, 3
+            exists = SubjectModel.query.filter_by(name=name, level_of_study=level).first()
+            if exists:
+                results.append({"name": name, "status": "skipped (duplicate)"})
+                skipped += 1
+                continue
+            db.session.add(SubjectModel(
+                name=name, code=code, level_of_study=level,
+                program=program, semester=semester,
+                credit_hours=credit_hours, difficulty_level=difficulty,
+                country="Nepal", curriculum="National", is_active=True,
+            ))
+            results.append({"name": name, "status": "added"})
+            added += 1
+        db.session.commit()
+        log_admin_action("import_curriculum_csv", "Subject", None,
+                         f"CSV import: {added} added, {skipped} skipped")
+        flash(f"Import complete: {added} subjects added, {skipped} skipped.", "success")
+    return render_template("admin/bulk_import.html", results=results)
