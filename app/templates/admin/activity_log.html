@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}Activity Logs — Admin{% endblock %}
+
+{% block content %}
+<div class="hero-banner mb-4">
+    <h1 class="page-title mb-2"><i class="fas fa-history me-2 text-gradient"></i> Admin Activity Logs</h1>
+    <p class="page-subtitle mb-0">Audit trail of all administrative actions modifying system state.</p>
+</div>
+
+<div class="card card-flat p-4">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <h5 class="fw-bold text-white mb-0"><i class="fas fa-list text-primary me-2"></i> Action Log</h5>
+        <div class="text-muted small">Total Logs: {{ total }}</div>
+    </div>
+
+    {% if not logs %}
+    <div class="text-center py-5 text-muted">
+        <i class="fas fa-clipboard-list fa-3x mb-3 text-dim"></i>
+        <p>No activity logs found.</p>
+    </div>
+    {% else %}
+    <div class="table-responsive">
+        <table class="table table-dark table-hover align-middle border-secondary">
+            <thead>
+                <tr>
+                    <th>Timestamp (UTC)</th>
+                    <th>Admin User</th>
+                    <th>Action</th>
+                    <th>Affected Entity</th>
+                    <th>Entity ID</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td class="text-muted small">{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="fw-semibold text-white">
+                        {{ log.admin_user.full_name or log.admin_user.email }}
+                        <span class="text-muted small d-block">ID: {{ log.admin_user_id }}</span>
+                    </td>
+                    <td>
+                        <span class="badge {% if 'deactivate' in log.action or 'delete' in log.action %}bg-danger{% elif 'add' in log.action or 'create' in log.action %}bg-success{% else %}bg-primary{% endif %}">
+                            {{ log.action }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if log.entity_type %}
+                        <span class="text-info">{{ log.entity_type }}</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ log.entity_id or '-' }}</td>
+                    <td class="text-white-50" style="max-width: 300px; word-wrap: break-word;">{{ log.detail or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if pages > 1 %}
+    <nav class="mt-4">
+        <ul class="pagination justify-content-center">
+            <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                <a class="page-link bg-dark border-secondary text-white" href="{{ url_for('admin.activity_log', page=page-1) }}">Previous</a>
+            </li>
+            {% for p in range(1, pages + 1) %}
+            <li class="page-item {% if page == p %}active{% endif %}">
+                <a class="page-link {% if page == p %}bg-primary border-primary text-white{% else %}bg-dark border-secondary text-white{% endif %}" href="{{ url_for('admin.activity_log', page=p) }}">{{ p }}</a>
+            </li>
+            {% endfor %}
+            <li class="page-item {% if page == pages %}disabled{% endif %}">
+                <a class="page-link bg-dark border-secondary text-white" href="{{ url_for('admin.activity_log', page=page+1) }}">Next</a>
+            </li>
+        </ul>
+    </nav>
+    {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

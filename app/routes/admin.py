@@ -354,3 +354,23 @@ def curriculum_subjects_toggle(subject_id):
     log_admin_action(f"{action_str}_subject", "Subject", subj.id, f"Set is_active={subj.is_active} for '{subj.name}'")
     flash(f"Subject '{subj.name}' {action_str} successfully!", "success")
     return redirect(url_for("admin.curriculum_subjects", level=lvl_filter))
+
+
+# ── SECTION 6: ACTIVITY LOG VIEW ──────────────────────────────────────────────
+
+@admin_bp.route("/activity-log")
+def activity_log():
+    page = request.args.get("page", 1, type=int)
+    per_page = 20
+    
+    pagination = AdminActivityLog.query.order_by(AdminActivityLog.timestamp.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    
+    return render_template(
+        "admin/activity_log.html",
+        logs=pagination.items,
+        page=page,
+        pages=pagination.pages,
+        total=pagination.total
+    )
