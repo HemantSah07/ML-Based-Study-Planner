@@ -146,8 +146,15 @@
                             <li><a class="dropdown-item" href="{{ url_for('admin.curriculum_subjects') }}">Subjects</a></li>
                         </ul>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if 'content' in request.path %}active fw-semibold text-white{% endif %}" href="{{ url_for('admin.content_subjects') }}"><i class="fas fa-book-open me-1 text-primary"></i> Content</a>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle {% if 'content' in request.path %}active fw-semibold text-white{% endif %}" href="#" id="contentDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-book-open me-1 text-primary"></i> Content
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="contentDropdown">
+                            <li><a class="dropdown-item" href="{{ url_for('admin.content_stats') }}">Overview</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.content_questions') }}">MCQ Questions</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin.content_chapters') }}">Chapters</a></li>
+                        </ul>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if 'students' in request.path %}active fw-semibold text-white{% endif %}" href="{{ url_for('admin.students') }}"><i class="fas fa-user-graduate me-1 text-primary"></i> Students</a>

@@ -281,6 +281,7 @@ class AssessmentQuestion(db.Model):
     # Relationships
     topic = db.relationship('Topic')
     chapter = db.relationship('Chapter')
+    subject = db.relationship('Subject')
 
 class StudentAssessment(db.Model):
     __tablename__ = "student_assessments"

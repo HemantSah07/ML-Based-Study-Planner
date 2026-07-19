@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+{% block title %}MCQ Questions — Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <div>
+        <a href="{{ url_for('admin.content_stats') }}" class="text-muted small text-decoration-none"><i class="fas fa-arrow-left me-1"></i> Content Overview</a>
+        <h1 class="page-title mt-1 mb-0"><i class="fas fa-question-circle me-2 text-gradient"></i> MCQ Questions</h1>
+    </div>
+    <div class="text-muted small">{{ total }} total questions</div>
+</div>
+
+<!-- Filters -->
+<div class="card card-flat p-3 mb-4">
+    <form method="GET" action="{{ url_for('admin.content_questions') }}" class="d-flex flex-wrap gap-2 align-items-center">
+        <select name="subject_id" class="form-select bg-dark border-secondary text-white" style="max-width:220px;">
+            <option value="">All Subjects</option>
+            {% for s in subjects %}
+            <option value="{{ s.id }}" {% if s.id == subject_id %}selected{% endif %}>{{ s.name }}</option>
+            {% endfor %}
+        </select>
+        <select name="difficulty" class="form-select bg-dark border-secondary text-white" style="max-width:140px;">
+            <option value="">All Difficulty</option>
+            <option value="easy" {% if difficulty == 'easy' %}selected{% endif %}>Easy</option>
+            <option value="medium" {% if difficulty == 'medium' %}selected{% endif %}>Medium</option>
+            <option value="hard" {% if difficulty == 'hard' %}selected{% endif %}>Hard</option>
+        </select>
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="{{ url_for('admin.content_questions') }}" class="btn btn-outline-secondary btn-sm">Clear</a>
+    </form>
+</div>
+
+<div class="card card-flat p-0">
+    <div class="table-responsive">
+        <table class="table table-dark table-hover align-middle border-0 mb-0">
+            <thead class="border-bottom border-secondary">
+                <tr class="text-muted small">
+                    <th class="px-4">Question</th>
+                    <th>Subject</th>
+                    <th>Difficulty</th>
+                    <th>Type</th>
+                    <th>Source</th>
+                    <th>Generated</th>
+                    <th class="pe-4">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for q in questions %}
+                <tr>
+                    <td class="px-4" style="max-width:380px;">
+                        <div class="text-white small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ q.question_text }}">
+                            {{ q.question_text[:120] }}{% if q.question_text|length > 120 %}...{% endif %}
+                        </div>
+                        <div class="text-muted x-small mt-1">
+                            A: {{ q.option_a[:40] }} | B: {{ q.option_b[:40] }}
+                        </div>
+                    </td>
+                    <td>
+                        <span class="text-white small">{{ q.subject.name if q.subject else '—' }}</span>
+                    </td>
+                    <td>
+                        <span class="badge {% if q.difficulty == 'hard' %}bg-danger{% elif q.difficulty == 'medium' %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                            {{ q.difficulty | title }}
+                        </span>
+                    </td>
+                    <td><span class="badge bg-secondary small">{{ q.question_type or 'MCQ' }}</span></td>
+                    <td><span class="text-muted small">{{ q.source or 'AI' }}</span></td>
+                    <td class="text-muted small">{{ q.generated_at.strftime('%Y-%m-%d') if q.generated_at else '—' }}</td>
+                    <td class="pe-4">
+                        <form action="{{ url_for('admin.content_delete_question', q_id=q.id) }}" method="POST" onsubmit="return confirm('Delete this question?')">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"><i class="fas fa-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center py-5 text-muted">No questions found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if pages > 1 %}
+    <div class="p-4">
+        <nav>
+            <ul class="pagination justify-content-center mb-0">
+                <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                    <a class="page-link bg-dark border-secondary text-white" href="{{ url_for('admin.content_questions', page=page-1, subject_id=subject_id, difficulty=difficulty) }}">Prev</a>
+                </li>
+                {% for p in range([1, page-2]|max, [pages+1, page+3]|min) %}
+                <li class="page-item {% if page == p %}active{% endif %}">
+                    <a class="page-link {% if page == p %}bg-primary border-primary text-white{% else %}bg-dark border-secondary text-white{% endif %}" href="{{ url_for('admin.content_questions', page=p, subject_id=subject_id, difficulty=difficulty) }}">{{ p }}</a>
+                </li>
+                {% endfor %}
+                <li class="page-item {% if page == pages %}disabled{% endif %}">
+                    <a class="page-link bg-dark border-secondary text-white" href="{{ url_for('admin.content_questions', page=page+1, subject_id=subject_id, difficulty=difficulty) }}">Next</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
