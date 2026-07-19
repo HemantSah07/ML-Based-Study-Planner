@@ -7,7 +7,8 @@
         <h1 class="page-title mb-1"><i class="fas fa-chart-bar me-2 text-gradient"></i> Analytics &amp; Risk Reporting</h1>
         <p class="page-subtitle mb-0">Cohort progress, risk distribution, and study engagement across academic levels.</p>
     </div>
-    <div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('admin.analytics_detail') }}" class="btn btn-primary btn-sm"><i class="fas fa-microscope me-1"></i> Advanced Analytics</a>
         <a href="{{ url_for('admin.analytics') }}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-sync me-1"></i> Refresh Data</a>
     </div>
 </div>
