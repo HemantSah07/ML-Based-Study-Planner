@@ -1,8 +1,168 @@
 {% extends 'base.html' %}
 {% block title %}System Health — Admin{% endblock %}
+
 {% block content %}
-<div class="hero-banner mb-4">
-    <h1 class="page-title mb-2"><i class="fas fa-heartbeat me-2 text-gradient"></i> System Health</h1>
-    <p class="page-subtitle">Monitor API status, ML models, and background jobs. <span class="badge bg-warning text-dark">Building...</span></p>
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <div>
+        <h1 class="page-title mb-1"><i class="fas fa-heartbeat me-2 text-gradient"></i> System Health</h1>
+        <p class="page-subtitle mb-0">Live status of all services, APIs, and ML models.</p>
+    </div>
+    <div>
+        {% if overall == 'ok' %}
+        <span class="badge fs-6 bg-success px-3 py-2"><i class="fas fa-check-circle me-1"></i> All Systems Operational</span>
+        {% elif overall == 'warning' %}
+        <span class="badge fs-6 bg-warning text-dark px-3 py-2"><i class="fas fa-exclamation-triangle me-1"></i> Degraded</span>
+        {% else %}
+        <span class="badge fs-6 bg-danger px-3 py-2"><i class="fas fa-times-circle me-1"></i> Issues Detected</span>
+        {% endif %}
+        <a href="{{ url_for('admin.health') }}" class="btn btn-outline-secondary btn-sm ms-2"><i class="fas fa-sync me-1"></i> Refresh</a>
+    </div>
+</div>
+
+<!-- Service Checks -->
+<div class="row g-3 mb-4">
+    <!-- DB -->
+    <div class="col-md-4">
+        <div class="card card-flat p-4 h-100">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;background:rgba(79,209,197,0.12);">
+                    <i class="fas fa-database text-info"></i>
+                </div>
+                <div>
+                    <div class="fw-bold text-white">Database (SQLite)</div>
+                    <div class="small text-muted">Core data store</div>
+                </div>
+            </div>
+            {% set db = checks.db %}
+            {% if db.status == 'ok' %}
+            <span class="badge bg-success mb-2"><i class="fas fa-check me-1"></i> OK — {{ db.latency_ms }}ms</span>
+            {% elif db.status == 'error' %}
+            <span class="badge bg-danger mb-2"><i class="fas fa-times me-1"></i> Error</span>
+            {% endif %}
+            <div class="small text-muted">{{ db.detail }}</div>
+        </div>
+    </div>
+
+    <!-- Gemini API -->
+    <div class="col-md-4">
+        <div class="card card-flat p-4 h-100">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;background:rgba(139,92,246,0.12);">
+                    <i class="fas fa-robot text-primary"></i>
+                </div>
+                <div>
+                    <div class="fw-bold text-white">Gemini API</div>
+                    <div class="small text-muted">AI / MCQ service</div>
+                </div>
+            </div>
+            {% set g = checks.gemini %}
+            {% if g.status == 'ok' %}
+            <span class="badge bg-success mb-2"><i class="fas fa-check me-1"></i> OK — {{ g.latency_ms }}ms</span>
+            {% elif g.status == 'unconfigured' %}
+            <span class="badge bg-secondary mb-2"><i class="fas fa-minus me-1"></i> Unconfigured</span>
+            {% else %}
+            <span class="badge bg-danger mb-2"><i class="fas fa-times me-1"></i> Error</span>
+            {% endif %}
+            <div class="small text-muted text-truncate">{{ g.detail }}</div>
+        </div>
+    </div>
+
+    <!-- ML Model -->
+    <div class="col-md-4">
+        <div class="card card-flat p-4 h-100">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;background:rgba(245,158,11,0.12);">
+                    <i class="fas fa-brain text-warning"></i>
+                </div>
+                <div>
+                    <div class="fw-bold text-white">ML Model (Random Forest)</div>
+                    <div class="small text-muted">Risk prediction</div>
+                </div>
+            </div>
+            {% set ml = checks.ml %}
+            {% if ml.status == 'ok' %}
+            <span class="badge bg-success mb-2"><i class="fas fa-check me-1"></i> Loaded</span>
+            {% elif ml.status == 'missing' %}
+            <span class="badge bg-warning text-dark mb-2"><i class="fas fa-exclamation-triangle me-1"></i> Not Trained</span>
+            {% else %}
+            <span class="badge bg-danger mb-2"><i class="fas fa-times me-1"></i> Error</span>
+            {% endif %}
+            <div class="small text-muted">{{ ml.detail }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Model Config Table -->
+<div class="card card-flat p-4 mb-4">
+    <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-cogs me-2"></i> Configured Gemini Models</h6>
+    <div class="table-responsive">
+        <table class="table table-dark align-middle border-0">
+            <thead class="border-bottom border-secondary">
+                <tr class="text-muted small">
+                    <th>Role</th>
+                    <th>Model</th>
+                    <th>Daily Limit</th>
+                    <th>RPM Limit</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in model_config %}
+                <tr>
+                    <td class="text-white fw-semibold">{{ m.label }}</td>
+                    <td><code class="text-info">{{ m.model }}</code></td>
+                    <td>{{ m.daily_limit }}</td>
+                    <td>{{ m.rpm }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Disk Info -->
+    <div class="col-md-6">
+        <div class="card card-flat p-4">
+            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-hdd me-2"></i> Disk Usage</h6>
+            {% if disk %}
+            <div class="mb-2">
+                <div class="d-flex justify-content-between small mb-1">
+                    <span class="text-white">{{ disk.used_gb }} GB / {{ disk.total_gb }} GB used</span>
+                    <span class="{% if disk.pct_used > 85 %}text-danger{% elif disk.pct_used > 65 %}text-warning{% else %}text-success{% endif %}">{{ disk.pct_used }}%</span>
+                </div>
+                <div class="progress" style="height:8px;background:#1e293b;">
+                    <div class="progress-bar {% if disk.pct_used > 85 %}bg-danger{% elif disk.pct_used > 65 %}bg-warning{% else %}bg-success{% endif %}"
+                         style="width:{{ disk.pct_used }}%"></div>
+                </div>
+            </div>
+            <div class="small text-muted mt-2">Free: {{ disk.free_gb }} GB</div>
+            {% else %}
+            <p class="text-muted small">Disk info unavailable.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Python / Runtime -->
+    <div class="col-md-6">
+        <div class="card card-flat p-4">
+            <h6 class="fw-bold text-gradient mb-3"><i class="fab fa-python me-2"></i> Python Runtime</h6>
+            {% if python_info %}
+            <div class="small">
+                <div class="d-flex justify-content-between py-2 border-bottom border-secondary">
+                    <span class="text-muted">Python Version</span>
+                    <code class="text-info">{{ python_info.version }}</code>
+                </div>
+                <div class="d-flex justify-content-between py-2 border-bottom border-secondary">
+                    <span class="text-muted">Platform</span>
+                    <code class="text-info">{{ python_info.platform }}</code>
+                </div>
+                <div class="py-2">
+                    <span class="text-muted">Executable</span><br>
+                    <code class="text-info small" style="word-break:break-all;">{{ python_info.executable }}</code>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
 </div>
 {% endblock %}
