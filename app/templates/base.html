@@ -109,6 +109,15 @@
                     <i class="fas fa-magic me-1"></i> Plan
                 </a>
             </header>
+            {% if session.get('impersonating_student_id') %}
+            <div style="background:#78350f;color:#fef3c7;border-bottom:2px solid #f59e0b;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:12px;font-size:0.88rem;font-weight:600;z-index:1040;position:sticky;top:0;">
+                <i class="fas fa-user-secret"></i>
+                <span>ADMIN VIEW: You are viewing as student <strong class="text-white">{{ current_user.full_name or current_user.email }}</strong></span>
+                <a href="{{ url_for('admin.exit_impersonate') }}" style="background:#fbbf24;color:#1c1917;padding:3px 12px;border-radius:6px;text-decoration:none;font-weight:700;font-size:0.82rem;">
+                    <i class="fas fa-times-circle me-1"></i> Exit Impersonation
+                </a>
+            </div>
+            {% endif %}
 {% else %}
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark admin-navbar mb-4 border-bottom border-secondary">
         <div class="container-fluid px-4">

@@ -374,3 +374,230 @@ def activity_log():
         pages=pagination.pages,
         total=pagination.total
     )
+
+
+# ── SECTION 3: STUDENT MANAGEMENT ─────────────────────────────────────────────
+
+from math import ceil
+
+@admin_bp.route("/students")
+def students():
+    from app.models import StudyPlan, StudentAssessment
+    page = request.args.get("page", 1, type=int)
+    per_page = 25
+    search_q = request.args.get("q", "").strip()
+    selected_level = request.args.get("level", "").strip()
+    selected_status = request.args.get("status", "").strip()
+
+    from app.models import EducationLevel
+    levels = EducationLevel.query.filter_by(is_active=True).order_by(EducationLevel.sort_order).all()
+
+    query = User.query.filter_by(role="student")
+    if search_q:
+        from sqlalchemy import or_
+        query = query.filter(or_(
+            User.full_name.ilike(f"%{search_q}%"),
+            User.email.ilike(f"%{search_q}%")
+        ))
+    if selected_status == "active":
+        query = query.filter_by(is_active=True)
+    elif selected_status == "inactive":
+        query = query.filter_by(is_active=False)
+
+    total = query.count()
+    pages = ceil(total / per_page) if total else 1
+    users = query.order_by(User.date_registered.desc()).offset((page - 1) * per_page).limit(per_page).all()
+
+    rows = []
+    for u in users:
+        prof = u.profile
+        profile_complete = bool(prof and prof.country and prof.study_level)
+        assessed = bool(prof and prof.has_completed_assessment)
+        has_subjects = StudentSubject.query.filter_by(user_id=u.id).count() > 0
+        has_planner = StudyPlan.query.filter_by(student_id=u.id).count() > 0
+        rows.append({
+            "user": u, "profile": prof,
+            "profile_complete": profile_complete,
+            "assessed": assessed, "has_subjects": has_subjects, "has_planner": has_planner,
+        })
+
+    stats = {
+        "total": User.query.filter_by(role="student").count(),
+        "complete_profile": StudentProfile.query.filter(StudentProfile.country != None, StudentProfile.study_level != None).count(),
+        "assessed": StudentProfile.query.filter_by(has_completed_assessment=True).count(),
+        "active": User.query.filter_by(role="student", is_active=True).count(),
+    }
+
+    return render_template(
+        "admin/students/list.html",
+        students=rows, page=page, pages=pages,
+        stats=stats, levels=levels,
+        search_q=search_q, selected_level=selected_level, selected_status=selected_status,
+    )
+
+
+@admin_bp.route("/students/<int:student_id>")
+def student_detail(student_id):
+    from app.models import Prediction, StudentAssessment, Subject as SubjectModel, StudyPlan
+    student = User.query.get_or_404(student_id)
+    profile = student.profile
+    subjects = StudentSubject.query.filter_by(user_id=student_id).all()
+    latest_prediction = Prediction.query.filter_by(user_id=student_id).order_by(Prediction.date.desc()).first()
+    assessments = StudentAssessment.query.filter_by(student_id=student_id).order_by(StudentAssessment.completed_at.desc()).limit(10).all()
+    # attach subject name
+    for a in assessments:
+        a.subject = SubjectModel.query.get(a.subject_id) if a.subject_id else None
+    study_plan = StudyPlan.query.filter_by(student_id=student_id).order_by(StudyPlan.generated_at.desc()).first()
+    return render_template(
+        "admin/students/detail.html",
+        student=student, profile=profile, subjects=subjects,
+        latest_prediction=latest_prediction,
+        assessments=assessments,
+        study_plan=study_plan,
+    )
+
+
+@admin_bp.route("/students/<int:student_id>/impersonate", methods=["POST"])
+def impersonate(student_id):
+    student = User.query.get_or_404(student_id)
+    if student.role != "student":
+        flash("You can only impersonate student accounts.", "warning")
+        return redirect(url_for("admin.student_detail", student_id=student_id))
+    from flask import session as flask_session
+    flask_session["impersonating_student_id"] = student_id
+    log_admin_action("impersonate_student", "User", student_id, f"Started impersonating student '{student.email}'")
+    flash(f"Now viewing as student: {student.full_name or student.email}", "info")
+    from flask import redirect, url_for
+    return redirect("/student/dashboard")
+
+
+@admin_bp.route("/impersonate/exit")
+def exit_impersonate():
+    from flask import session as flask_session
+    impersonate_id = flask_session.pop("impersonating_student_id", None)
+    if impersonate_id:
+        student = User.query.get(impersonate_id)
+        log_admin_action("exit_impersonation", "User", impersonate_id, f"Exited impersonation of student ID {impersonate_id}")
+        flash(f"Exited impersonation mode.", "success")
+        return redirect(url_for("admin.student_detail", student_id=impersonate_id))
+    return redirect(url_for("admin.students"))
+
+
+@admin_bp.route("/students/<int:student_id>/run-ml", methods=["POST"])
+def student_run_ml(student_id):
+    student = User.query.get_or_404(student_id)
+    try:
+        from app.routes.student import (
+            get_profile_subjects, get_subject_performance_snapshot,
+            get_subject_features, load_ml_model,
+        )
+        import numpy as np
+        profile = StudentProfile.query.filter_by(user_id=student_id).first()
+        student_subjects = get_profile_subjects(profile)
+        if not student_subjects:
+            flash("Student has no subjects configured. Cannot run ML.", "warning")
+            return redirect(url_for("admin.student_detail", student_id=student_id))
+
+        raw_gpa = float(profile.cumulative_gpa or profile.prior_academic_score or 0.0)
+        profile_grade = raw_gpa * 25 if raw_gpa <= 4.0 else raw_gpa
+        attendance = float(profile.attendance_pct or 85.0)
+        target_weekly_hours = float(profile.target_weekly_hours or 14.0)
+        per_subject_weekly_hours = max(1.0, target_weekly_hours / max(1, len(student_subjects)))
+        model = load_ml_model("random_forest")
+        scaler = load_ml_model("scaler")
+
+        prediction_rank = {"low": 0, "medium": 1, "high": 2}
+        overall_risk = "low"
+
+        for subject in student_subjects:
+            snapshot = get_subject_performance_snapshot(student_id, subject.id)
+            if snapshot["source"] == "missing" or snapshot["score"] is None:
+                continue
+            performance_score = snapshot["score"]
+            difficulty = float(subject.difficulty_level or 3.0)
+            features = get_subject_features(
+                student_id, subject.name, performance_score,
+                attendance, per_subject_weekly_hours, difficulty, 30, None,
+            )
+            if model and scaler:
+                f_scaled = scaler.transform(np.array([features]))
+                if hasattr(model, "predict_proba"):
+                    probs = model.predict_proba(f_scaled)[0]
+                    risk_pred = int(np.argmax(probs))
+                else:
+                    risk_pred = min(2, max(0, int(model.predict(f_scaled)[0])))
+            else:
+                risk_pred = 1
+            risk_lvl = ["low", "medium", "high"][risk_pred]
+            if prediction_rank.get(risk_lvl, 0) > prediction_rank.get(overall_risk, 0):
+                overall_risk = risk_lvl
+
+        # Store/update the overall prediction
+        existing = Prediction.query.filter_by(user_id=student_id).order_by(Prediction.date.desc()).first()
+        if existing:
+            existing.predicted_risk_level = overall_risk
+            existing.date = datetime.utcnow()
+        else:
+            new_pred = Prediction(user_id=student_id, predicted_risk_level=overall_risk, date=datetime.utcnow())
+            db.session.add(new_pred)
+        db.session.commit()
+
+        log_admin_action("run_ml_prediction", "User", student_id, f"ML re-run: risk={overall_risk} for {student.email}")
+        flash(f"ML prediction updated for {student.full_name or student.email} — Risk: {overall_risk.upper()}", "success")
+    except Exception as e:
+        flash(f"Could not run ML prediction: {e}", "danger")
+    return redirect(url_for("admin.student_detail", student_id=student_id))
+
+
+@admin_bp.route("/students/<int:student_id>/reset-assessment", methods=["POST"])
+def student_reset_assessment(student_id):
+    from app.models import StudentProfile
+    profile = StudentProfile.query.filter_by(user_id=student_id).first()
+    if profile:
+        profile.has_completed_assessment = False
+        db.session.commit()
+    # Clear any session state for that student
+    log_admin_action("reset_assessment", "User", student_id, f"Reset assessment session for student ID {student_id}")
+    flash("Assessment session reset. Student can now start fresh.", "success")
+    return redirect(url_for("admin.student_detail", student_id=student_id))
+
+
+@admin_bp.route("/students/<int:student_id>/toggle-active", methods=["POST"])
+def student_toggle_active(student_id):
+    student = User.query.get_or_404(student_id)
+    student.is_active = not student.is_active
+    db.session.commit()
+    action_str = "activated" if student.is_active else "suspended"
+    log_admin_action(f"{action_str}_student_account", "User", student_id, f"Account {action_str} for student {student.email}")
+    flash(f"Account {action_str} for {student.full_name or student.email}.", "success")
+    return redirect(url_for("admin.student_detail", student_id=student_id))
+
+
+# ── SECTION 4 STUB: HEALTH ────────────────────────────────────────────────────
+@admin_bp.route("/health")
+def health():
+    return render_template("admin/health.html")
+
+
+# ── SECTION 2 STUB: CONTENT ──────────────────────────────────────────────────
+@admin_bp.route("/content")
+def content_subjects():
+    return render_template("admin/content/subjects.html")
+
+
+# ── SECTION 5 STUB: ANALYTICS ────────────────────────────────────────────────
+@admin_bp.route("/analytics")
+def analytics():
+    return render_template("admin/analytics.html")
+
+
+# ── SECTION 7 STUB: CONFIG ───────────────────────────────────────────────────
+@admin_bp.route("/config")
+def config():
+    return render_template("admin/config.html")
+
+
+# ── SECTION 8 STUB: BULK OPS ─────────────────────────────────────────────────
+@admin_bp.route("/bulk")
+def bulk():
+    return render_template("admin/bulk.html")

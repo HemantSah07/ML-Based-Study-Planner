@@ -40,31 +40,6 @@
         sync();
     }
 
-    function initSubjectRows() {
-        const container = document.getElementById('subjects-container');
-        const addBtn = document.getElementById('add-subject-btn');
-        if (!container || !addBtn) return;
-
-        const template = document.getElementById('subject-row-template');
-        if (!template) return;
-
-        addBtn.addEventListener('click', () => {
-            const clone = template.content.cloneNode(true);
-            container.appendChild(clone);
-            const rows = container.querySelectorAll('.subject-row');
-            const lastRow = rows[rows.length - 1];
-            const removeBtn = lastRow.querySelector('.remove-btn');
-            if (removeBtn) {
-                removeBtn.addEventListener('click', () => lastRow.remove());
-            }
-        });
-
-        container.querySelectorAll('.remove-btn').forEach((btn) => {
-            btn.addEventListener('click', function () {
-                this.closest('.subject-row')?.remove();
-            });
-        });
-    }
 
     function initPlannerForm() {
         const form = document.getElementById('planner-form');
@@ -139,7 +114,6 @@
     document.addEventListener('DOMContentLoaded', () => {
         initSidebar();
         initHoursSlider();
-        initSubjectRows();
         initPlannerForm();
         initAutoDismissAlerts();
         initUploadDropzone();

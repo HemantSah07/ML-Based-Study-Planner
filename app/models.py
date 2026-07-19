@@ -4,6 +4,17 @@ from app import db, login_manager
 
 @login_manager.user_loader
 def load_user(user_id):
+    from flask import session, request
+    try:
+        impersonate_id = session.get('impersonating_student_id')
+        if impersonate_id:
+            # Only load the student when accessing non-admin endpoints
+            if not request.path.startswith('/admin'):
+                student = User.query.get(int(impersonate_id))
+                if student:
+                    return student
+    except Exception:
+        pass
     return User.query.get(int(user_id))
 
 class User(db.Model, UserMixin):

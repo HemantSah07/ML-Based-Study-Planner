@@ -40,7 +40,7 @@
                                 <span class="text-muted small ms-2" style="font-size: 0.75rem;">Opened: {{ d.last_accessed_at.strftime('%Y-%m-%d') }}</span>
                             </div>
                         </div>
-                        <a href="{{ url_for('student.study_subject', subject_id=d.topic.chapter.subject_id) }}" class="btn btn-outline-primary btn-sm mt-1">
+                        <a href="{{ url_for('student.study_subject', subject_id=d.topic.chapter.subject_id) }}?topic_id={{ d.topic_id }}" class="btn btn-outline-primary btn-sm mt-1">
                             <i class="fas fa-external-link-alt"></i> Open
                         </a>
                     </div>

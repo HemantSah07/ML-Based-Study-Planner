@@ -119,28 +119,17 @@
     <div class="col-md-4 col-lg-3 study-sidebar py-3">
         <h6 class="text-white fw-bold mb-3"><i class="fas fa-book-open me-2 text-primary"></i> Curriculum Index</h6>
         {% for ch in chapters %}
-        <div class="mb-4">
-            <div class="fw-bold text-white small mb-2 text-uppercase" style="letter-spacing: 0.5px;">Chapter {{ ch.chapter_number }}: {{ ch.name }}</div>
-            <div class="d-flex flex-column gap-1">
-                {% for topic in ch.topics %}
-                <div class="d-flex align-items-center justify-content-between">
-                    <a href="javascript:void(0)" class="topic-link flex-grow-1" id="topic-link-{{ topic.id }}" onclick="loadTopic({{ topic.id }})">
-                        <i class="far fa-file-alt me-2"></i> {{ topic.name }}
-                        {% if topic.materials %}
-                        <span class="text-muted small ms-1" style="font-size: 0.7rem;">(~{{ topic.materials[0].estimated_reading_time }}m read)</span>
-                        {% endif %}
-                    </a>
-                    <div class="form-check me-2">
-                        <input class="form-check-input" type="checkbox" id="chk-topic-{{ topic.id }}" 
-                               {% if topic.id in completed_topic_ids %}checked{% endif %} 
-                               onclick="toggleTopicCompletion({{ topic.id }}, this)">
-                    </div>
-                </div>
-                {% endfor %}
+        <div class="mb-3 border rounded-3 p-2" style="background: rgba(255,255,255,0.01); border-color: rgba(255,255,255,0.05) !important;">
+            <div class="fw-bold text-white small d-flex justify-content-between align-items-center cursor-pointer" style="letter-spacing: 0.5px; cursor: pointer;" onclick="toggleChapter({{ ch.id }})">
+                <span><i class="fas fa-folder me-2 text-warning" id="chapter-icon-{{ ch.id }}"></i> Ch {{ ch.chapter_number }}: {{ ch.name }}</span>
+                <i class="fas fa-chevron-down text-muted small ms-2" id="chapter-chevron-{{ ch.id }}"></i>
+            </div>
+            <div class="d-none mt-2 d-flex flex-column gap-1" id="chapter-topics-{{ ch.id }}" data-loaded="false">
+                <!-- Topics will be loaded dynamically via AJAX -->
             </div>
         </div>
         {% else %}
-        <p class="text-muted small">No chapters or topics added yet for this subject.</p>
+        <p class="text-muted small">No chapters outline added yet for this subject.</p>
         {% endfor %}
     </div>
 
@@ -291,21 +280,141 @@
         ];
     {% endif %}
 
+    function toggleChapter(chapterId, forceExpand = false) {
+        const container = document.getElementById("chapter-topics-" + chapterId);
+        const chevron = document.getElementById("chapter-chevron-" + chapterId);
+        const folderIcon = document.getElementById("chapter-icon-" + chapterId);
+        
+        const isCollapsed = container.classList.contains("d-none");
+        
+        if (isCollapsed || forceExpand) {
+            // Expand
+            container.classList.remove("d-none");
+            chevron.className = "fas fa-chevron-up text-muted small ms-2";
+            folderIcon.className = "fas fa-folder-open me-2 text-warning";
+            
+            // Load topics if not loaded
+            if (container.getAttribute("data-loaded") === "false") {
+                loadChapterTopics(chapterId);
+            }
+
+            // Save to StateManager
+            let expanded = StateManager.get("expanded_chapters") || [];
+            if (!expanded.includes(chapterId)) {
+                expanded.push(chapterId);
+                StateManager.save("expanded_chapters", expanded);
+            }
+        } else {
+            // Collapse
+            container.classList.add("d-none");
+            chevron.className = "fas fa-chevron-down text-muted small ms-2";
+            folderIcon.className = "fas fa-folder me-2 text-warning";
+
+            // Remove from StateManager
+            let expanded = StateManager.get("expanded_chapters") || [];
+            expanded = expanded.filter(id => id !== chapterId);
+            StateManager.save("expanded_chapters", expanded);
+        }
+    }
+
+    function loadChapterTopics(chapterId) {
+        const container = document.getElementById("chapter-topics-" + chapterId);
+        container.innerHTML = `
+            <div class="text-center py-2">
+                <span class="spinner-border spinner-border-sm text-primary" role="status"></span>
+                <span class="text-muted small ms-1" style="font-size: 0.75rem;">Loading topics...</span>
+            </div>
+        `;
+        
+        fetch(`/student/study/api/chapter/${chapterId}/topics`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                container.setAttribute("data-loaded", "true");
+                if (data.topics.length === 0) {
+                    container.innerHTML = `<p class="text-muted small ps-3">No topics found.</p>`;
+                    return;
+                }
+                
+                let html = "";
+                data.topics.forEach(topic => {
+                    html += `
+                        <div class="d-flex align-items-center justify-content-between">
+                            <a href="javascript:void(0)" class="topic-link flex-grow-1" id="topic-link-${topic.id}" onclick="loadTopic(${topic.id})">
+                                <i class="far fa-file-alt me-2 text-primary"></i> ${topic.name}
+                            </a>
+                            <div class="form-check me-2">
+                                <input class="form-check-input" type="checkbox" id="chk-topic-${topic.id}" 
+                                       ${topic.completed ? 'checked' : ''} 
+                                       onclick="toggleTopicCompletion(${topic.id}, this)">
+                            </div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+                
+                // If the active topic link matches one in this chapter, mark it active
+                if (activeTopicId) {
+                    const activeLink = document.getElementById("topic-link-" + activeTopicId);
+                    if (activeLink) {
+                        activeLink.classList.add("active");
+                    }
+                } else if (data.topics.length > 0) {
+                    loadTopic(data.topics[0].id);
+                }
+            } else {
+                container.innerHTML = `<p class="text-danger small ps-3">Failed to load: ${data.message}</p>`;
+            }
+        })
+        .catch(err => {
+            container.innerHTML = `<p class="text-danger small ps-3">Error: ${err}</p>`;
+        });
+    }
+
     // Switch study room tabs
     function switchStudyTab(tab) {
         document.querySelectorAll(".study-tab-btn").forEach(btn => btn.classList.remove("active"));
         document.querySelectorAll(".tab-content-item").forEach(item => item.classList.add("d-none"));
         
-        event.currentTarget.classList.add("active");
+        // Find button that matches this tab or use current target if click event
+        let btn = null;
+        if (event && event.currentTarget && event.currentTarget.classList.contains("study-tab-btn")) {
+            btn = event.currentTarget;
+        } else {
+            btn = Array.from(document.querySelectorAll(".study-tab-btn")).find(b => b.getAttribute("onclick").includes(tab));
+        }
+
+        if (btn) {
+            btn.classList.add("active");
+        }
         document.getElementById("tab-" + tab).classList.remove("d-none");
+
+        // Save to StateManager
+        StateManager.save("active_tab", tab);
     }
 
     // AJAX load topic content
     function loadTopic(topicId) {
         activeTopicId = topicId;
+        StateManager.save("active_topic_id", topicId);
+        
+        // Find parent chapter ID and save it
+        setTimeout(() => {
+            const link = document.getElementById("topic-link-" + topicId);
+            if (link) {
+                const parentContainer = link.closest("[id^='chapter-topics-']");
+                if (parentContainer) {
+                    const chapterId = parseInt(parentContainer.id.replace("chapter-topics-", ""));
+                    StateManager.save("active_chapter_id", chapterId);
+                }
+            }
+        }, 100);
         
         document.querySelectorAll(".topic-link").forEach(link => link.classList.remove("active"));
-        document.getElementById("topic-link-" + topicId).classList.add("active");
+        const activeLink = document.getElementById("topic-link-" + topicId);
+        if (activeLink) {
+            activeLink.classList.add("active");
+        }
         
         const textbook = document.getElementById("material-textbook");
         textbook.innerHTML = `
@@ -396,6 +505,7 @@
     }
 
     function renderTopicContent(data, topicId) {
+        topicId = topicId || activeTopicId;
         const textbook = document.getElementById("material-textbook");
         const m = data.material;
         let diagram_html = "";
@@ -1043,12 +1153,39 @@
         });
     }
 
-    // Page Load: auto-load first topic
+    // Page Load: auto-load first topic or restore state
     document.addEventListener("DOMContentLoaded", function() {
-        const firstTopic = document.querySelector(".topic-link");
-        if (firstTopic) {
-            const topicId = firstTopic.id.replace("topic-link-", "");
-            loadTopic(parseInt(topicId));
+        // Restore active tab
+        const savedTab = StateManager.get("active_tab");
+        if (savedTab) {
+            switchStudyTab(savedTab);
+        }
+
+        // Restore expanded chapters
+        const savedChapters = StateManager.get("expanded_chapters") || [];
+        savedChapters.forEach(chId => {
+            toggleChapter(parseInt(chId), true);
+        });
+
+        // Restore active topic / chapter
+        const savedTopicId = StateManager.get("active_topic_id");
+        const savedChapterId = StateManager.get("active_chapter_id");
+        
+        const initialTopicId = savedTopicId || "{{ active_topic_id or '' }}";
+        const initialChapterId = savedChapterId || "{{ active_chapter_id or '' }}";
+        
+        if (initialTopicId && initialChapterId) {
+            toggleChapter(parseInt(initialChapterId), true);
+            loadTopic(parseInt(initialTopicId));
+        } else {
+            // Auto-expand first chapter in list
+            const firstChapter = document.querySelector("[onclick^='toggleChapter']");
+            if (firstChapter) {
+                const match = firstChapter.getAttribute("onclick").match(/\d+/);
+                if (match) {
+                    toggleChapter(parseInt(match[0]));
+                }
+            }
         }
         renderFlashcard();
     });

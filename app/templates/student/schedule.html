@@ -41,17 +41,7 @@
             <p class="text-muted small mb-4">Add subjects and let the model predict risk levels for smart hour allocation.</p>
 
             <form action="{{ url_for('student.generate_schedule') }}" method="POST" id="planner-form">
-                <div class="mb-4">
-                    <label class="form-label">Weekly study target</label>
-                    <div class="d-flex align-items-center gap-3">
-                        <span class="hours-display" id="totalHoursDisplay">20</span>
-                        <span class="text-muted">hours / week</span>
-                    </div>
-                    <div class="hours-slider-wrap mt-2">
-                        <input type="range" class="hours-slider" id="totalHoursSlider" min="5" max="60" value="20" step="1">
-                    </div>
-                    <input type="hidden" name="total_hours" id="totalHoursInput" value="20">
-                </div>
+
 
                 <!-- Session length presets -->
                 <div class="mb-4">
@@ -83,55 +73,25 @@
                     </div>
                 </div>
 
-                <div id="subjects-container">
-                    <!-- Subject rows: first row shown for manual entry -->
-                    <div class="subject-row">
-                        <div class="row g-2">
-                            <div class="col-12">
-                                <label class="form-label text-muted small">Subject</label>
-                                <input type="text" name="subject_name[]" class="form-control form-control-sm" required
-                                       placeholder="e.g. Machine Learning" list="subject-suggestions">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label text-muted small">Grade %</label>
-                                <input type="number" name="previous_grade[]" class="form-control form-control-sm" required min="0" max="100" value="70">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label text-muted small">Attendance %</label>
-                                <input type="number" name="attendance[]" class="form-control form-control-sm" required min="0" max="100" value="85">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label text-muted small">Study hrs/wk</label>
-                                <input type="number" name="study_hours[]" class="form-control form-control-sm" required min="0" max="40" value="6">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label text-muted small">Difficulty</label>
-                                <select name="difficulty[]" class="form-select form-select-sm" required>
-                                    <option value="1">1 · Easy</option>
-                                    <option value="2">2 · Light</option>
-                                    <option value="3" selected>3 · Moderate</option>
-                                    <option value="4">4 · Hard</option>
-                                    <option value="5">5 · Very Hard</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Subject data for auto-fill -->
+                <!-- Subject data must be defined BEFORE subjects-container is populated by JS -->
                 <script>
-                const PROFILE_SUBJECTS = [
+                var PROFILE_SUBJECTS = [
                     {% for s in subjects %}
                     { name: "{{ s.name }}", difficulty: {{ s.difficulty_level or 3 }} },
                     {% endfor %}
                 ];
+                var ALL_SUBJECT_NAMES = PROFILE_SUBJECTS.map(s => s.name);
                 </script>
 
-                <datalist id="subject-suggestions">
-                    {% for s in subjects %}
-                    <option value="{{ s.name }}">{{ s.code }}</option>
-                    {% endfor %}
-                </datalist>
+                <!-- Inline validation error banner -->
+                <div id="subject-validation-error" class="alert alert-danger py-2 px-3 mb-2 d-none" role="alert">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    <span id="subject-validation-msg">Please correct the highlighted fields.</span>
+                </div>
+
+                <!-- subjects-container: all rows built by buildNewRow() in JS -->
+                <div id="subjects-container"></div>
+
                 <style>
                     /* Visual Timeline styles */
                     .timeline-container {
@@ -411,28 +371,35 @@
 </div>
 
 <template id="subject-row-template">
-    <div class="subject-row">
-        <button type="button" class="btn btn-danger remove-btn"><i class="fas fa-times"></i></button>
+    <div class="subject-row border rounded p-2 mb-2 position-relative">
+        <button type="button" class="btn btn-sm btn-outline-danger remove-btn position-absolute" style="top:8px;right:8px;z-index:1;" title="Remove row"><i class="fas fa-times"></i></button>
         <div class="row g-2">
             <div class="col-12">
                 <label class="form-label text-muted small">Subject</label>
-                <input type="text" name="subject_name[]" class="form-control form-control-sm" required list="subject-suggestions">
+                <select name="subject_name[]" class="form-select form-select-sm subject-select" required>
+                    <option value="">-- Select subject --</option>
+                </select>
+                <div class="invalid-feedback">Please select a subject.</div>
             </div>
             <div class="col-6">
                 <label class="form-label text-muted small">Grade %</label>
-                <input type="number" name="previous_grade[]" class="form-control form-control-sm" required min="0" max="100" value="70">
+                <input type="number" name="previous_grade[]" class="form-control form-control-sm grade-input" required min="0" max="100" step="0.1" value="70" placeholder="0–100">
+                <div class="invalid-feedback">Must be 0–100.</div>
             </div>
             <div class="col-6">
                 <label class="form-label text-muted small">Attendance %</label>
-                <input type="number" name="attendance[]" class="form-control form-control-sm" required min="0" max="100" value="85">
+                <input type="number" name="attendance[]" class="form-control form-control-sm att-input" required min="0" max="100" step="0.1" value="85" placeholder="0–100">
+                <div class="invalid-feedback">Must be 0–100.</div>
             </div>
             <div class="col-6">
                 <label class="form-label text-muted small">Study hrs/wk</label>
-                <input type="number" name="study_hours[]" class="form-control form-control-sm" required min="0" max="40" value="6">
+                <input type="number" name="study_hours[]" class="form-control form-control-sm hours-input" required min="0" max="168" step="0.5" value="6" placeholder="0–168">
+                <div class="invalid-feedback">Must be 0–168.</div>
             </div>
             <div class="col-6">
                 <label class="form-label text-muted small">Days until Exam</label>
                 <input type="number" name="days_until_exam[]" class="form-control form-control-sm" required min="0" max="365" value="30" placeholder="e.g. 30">
+                <div class="invalid-feedback">Must be 0–365.</div>
             </div>
             <div class="col-12">
                 <label class="form-label text-muted small">Difficulty</label>
@@ -459,15 +426,106 @@
         if (document.getElementById("timeline-preview-body")) {
             initSlotTabs();
             loadSlotsFromServer();
+
+            // Seed the initial subject row (same as Add click) so first row = dropdown with remove btn
+            const container = document.getElementById("subjects-container");
+            if (container && container.children.length === 0) {
+                const firstRow = buildNewRow();
+                container.appendChild(firstRow);
+                refreshAllSelects();
+            }
             
             const form = document.getElementById("planner-form");
             if (form) {
                 form.addEventListener("submit", function(e) {
+                    // Clear previous inline errors
+                    document.querySelectorAll('#subjects-container .is-invalid').forEach(el => el.classList.remove('is-invalid'));
+                    const errBanner = document.getElementById('subject-validation-error');
+                    const errMsg   = document.getElementById('subject-validation-msg');
+                    errBanner.classList.add('d-none');
+
+                    const rows = document.querySelectorAll('#subjects-container .subject-row');
+                    let isValid = true;
+                    const errors = [];
+
+                    rows.forEach((row, idx) => {
+                        const nameSel    = row.querySelector('select.subject-select');
+                        const gradeInput = row.querySelector('.grade-input');
+                        const attInput   = row.querySelector('.att-input');
+                        const hoursInput = row.querySelector('.hours-input');
+                        const rowNum     = idx + 1;
+
+                        if (nameSel && !nameSel.value) {
+                            nameSel.classList.add('is-invalid');
+                            errors.push(`Row ${rowNum}: select a subject.`);
+                            isValid = false;
+                        }
+                        if (gradeInput) {
+                            const val = parseFloat(gradeInput.value);
+                            if (isNaN(val) || val < 0 || val > 100) {
+                                gradeInput.classList.add('is-invalid');
+                                errors.push(`Row ${rowNum}: Grade % must be 0–100.`);
+                                isValid = false;
+                            }
+                        }
+                        if (attInput) {
+                            const val = parseFloat(attInput.value);
+                            if (isNaN(val) || val < 0 || val > 100) {
+                                attInput.classList.add('is-invalid');
+                                errors.push(`Row ${rowNum}: Attendance % must be 0–100.`);
+                                isValid = false;
+                            }
+                        }
+                        if (hoursInput) {
+                            const val = parseFloat(hoursInput.value);
+                            if (isNaN(val) || val < 0 || val > 168) {
+                                hoursInput.classList.add('is-invalid');
+                                errors.push(`Row ${rowNum}: Study hrs/wk must be 0–168.`);
+                                isValid = false;
+                            }
+                        }
+                    });
+
+                    if (!isValid) {
+                        e.preventDefault();
+                        errMsg.textContent = errors.join(' ');
+                        errBanner.classList.remove('d-none');
+                        errBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        return;
+                    }
+
                     const gridMap = serializeSlotsToGrid();
                     document.getElementById("free-slots-json").value = JSON.stringify(gridMap);
                 });
             }
-            
+
+            // Clear is-invalid on user correction
+            document.getElementById('subjects-container').addEventListener('input', function(e) {
+                if (e.target.classList.contains('is-invalid')) {
+                    const tgt = e.target;
+                    if (tgt.tagName === 'SELECT' && tgt.value) tgt.classList.remove('is-invalid');
+                    if (tgt.tagName === 'INPUT') {
+                        const val = parseFloat(tgt.value);
+                        const min = parseFloat(tgt.min);
+                        const max = parseFloat(tgt.max);
+                        if (!isNaN(val) && val >= min && val <= max) tgt.classList.remove('is-invalid');
+                    }
+                    // Hide banner if no errors remain
+                    if (!document.querySelector('#subjects-container .is-invalid')) {
+                        document.getElementById('subject-validation-error').classList.add('d-none');
+                    }
+                }
+            });
+
+            const addBtn = document.getElementById("add-subject-btn");
+            if (addBtn) {
+                addBtn.addEventListener("click", function() {
+                    const row = buildNewRow();
+                    container.appendChild(row);
+                    refreshAllSelects();
+                });
+            }
+
             // Add listeners to level-specific inputs to dynamically trigger target calculation
             document.body.addEventListener("input", function(e) {
                 if (e.target.name === "weekly_study_hours" || e.target.name === "study_hours" || e.target.name === "daily_study_hours") {
@@ -497,6 +555,53 @@
         document.getElementById("session-length-input").value = btn.dataset.mins;
     });
 
+    // ── Subject exclusivity helpers ────────────────────────────────────────
+    function getUsedSubjects(excludeRow) {
+        const used = new Set();
+        document.querySelectorAll('#subjects-container .subject-row').forEach(row => {
+            if (row === excludeRow) return;
+            const sel = row.querySelector('select.subject-select');
+            if (sel && sel.value) used.add(sel.value);
+        });
+        return used;
+    }
+
+    function refreshAllSelects() {
+        const rows = document.querySelectorAll('#subjects-container .subject-row');
+        rows.forEach(row => {
+            const sel = row.querySelector('select.subject-select');
+            if (!sel) return;
+            const current = sel.value;
+            const used = getUsedSubjects(row);
+            Array.from(sel.options).forEach(opt => {
+                if (!opt.value) return; // keep placeholder
+                const shouldHide = used.has(opt.value) && opt.value !== current;
+                opt.disabled = shouldHide;
+                opt.hidden = shouldHide;
+                if (shouldHide) {
+                    opt.style.display = 'none';
+                } else {
+                    opt.style.display = '';
+                }
+            });
+        });
+    }
+
+    function wireSubjectSelect(sel) {
+        sel.addEventListener('change', function() {
+            // Auto-set difficulty from data attribute
+            const opt = this.options[this.selectedIndex];
+            const diff = opt ? opt.dataset.difficulty : null;
+            if (diff) {
+                const diffSel = this.closest('.subject-row').querySelector('select[name="difficulty[]"]');
+                if (diffSel) diffSel.value = Math.min(Math.max(parseInt(diff) || 3, 1), 5);
+            }
+            refreshAllSelects();
+        });
+    }
+
+    // First row is now built by buildNewRow() on DOMContentLoaded — no static wiring needed here.
+
     // ── Auto-fill subject rows from profile ──────────────────────────────────
     function autoFillSubjects() {
         if (!window.PROFILE_SUBJECTS || PROFILE_SUBJECTS.length === 0) {
@@ -507,22 +612,45 @@
         container.innerHTML = "";
 
         PROFILE_SUBJECTS.forEach(s => {
-            const row = document.getElementById("subject-row-template").content.cloneNode(true);
-            row.querySelector("input[name='subject_name[]']").value = s.name;
+            const row = buildNewRow();
+            const sel = row.querySelector('select.subject-select');
+            if (sel) sel.value = s.name;
             const diffSel = row.querySelector("select[name='difficulty[]']");
-            if (diffSel) {
-                diffSel.value = Math.min(Math.max(parseInt(s.difficulty) || 3, 1), 5);
-            }
-            // Wire up remove button
-            const removeBtn = row.querySelector(".remove-btn");
-            if (removeBtn) {
-                removeBtn.addEventListener("click", function() {
-                    this.closest(".subject-row").remove();
-                });
-            }
+            if (diffSel) diffSel.value = Math.min(Math.max(parseInt(s.difficulty) || 3, 1), 5);
             container.appendChild(row);
         });
+        refreshAllSelects();
     }
+
+    function buildNewRow() {
+        const frag = document.getElementById("subject-row-template").content.cloneNode(true);
+        const row = frag.querySelector('.subject-row');
+
+        // Populate subject options from global list
+        const sel = row.querySelector('select.subject-select');
+        if (sel && window.ALL_SUBJECT_NAMES) {
+            ALL_SUBJECT_NAMES.forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                opt.dataset.difficulty = (PROFILE_SUBJECTS.find(s => s.name === name) || {}).difficulty || 3;
+                sel.appendChild(opt);
+            });
+        }
+
+        // Wire remove button
+        const removeBtn = row.querySelector(".remove-btn");
+        if (removeBtn) {
+            removeBtn.addEventListener("click", function() {
+                this.closest(".subject-row").remove();
+                refreshAllSelects();
+            });
+        }
+        // Wire subject change
+        if (sel) wireSubjectSelect(sel);
+        return row;
+    }
+
 
     // ── Quick day slot fill presets ───────────────────────────────────────────
     const QUICK_SLOT_HOURS = {
@@ -1139,9 +1267,12 @@
         
         // Clear previous validations
         document.querySelectorAll('#subjects-container .is-invalid').forEach(el => el.classList.remove('is-invalid'));
+        const errBanner = document.getElementById('subject-validation-error');
+        const errMsg   = document.getElementById('subject-validation-msg');
+        if (errBanner) errBanner.classList.add('d-none');
         
         rows.forEach((row, index) => {
-            const nameInput = row.querySelector('input[name="subject_name[]"]');
+            const nameInput = row.querySelector('[name="subject_name[]"]');
             const gradeInput = row.querySelector('input[name="previous_grade[]"]');
             const attInput = row.querySelector('input[name="attendance[]"]');
             const hoursInput = row.querySelector('input[name="study_hours[]"]');
@@ -1177,7 +1308,7 @@
                 }
                 
                 const hours = parseFloat(hoursVal);
-                if (hoursVal === "" || isNaN(hours) || hours <= 0 || hours > 168) {
+                if (hoursVal === "" || isNaN(hours) || hours < 0 || hours > 168) {
                     hoursInput.classList.add('is-invalid');
                     isValid = false;
                 }
@@ -1198,12 +1329,24 @@
         });
         
         if (!isValid) {
-            alert("Validation failed: Please ensure all subject fields (Subject Name, Grade %, Attendance %, Study hrs/wk, and Difficulty) are filled with valid ranges (0-100 for percentage inputs, and positive values for study hours).");
+            if (errBanner && errMsg) {
+                errMsg.textContent = "Validation failed: Please ensure all subject fields (Subject Name, Grade %, Attendance %, Study hrs/wk, and Difficulty) are filled with valid ranges (0-100 for percentage inputs, and 0-168 for study hours).";
+                errBanner.classList.remove('d-none');
+                errBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                alert("Validation failed: Please ensure all subject fields (Subject Name, Grade %, Attendance %, Study hrs/wk, and Difficulty) are filled with valid ranges (0-100 for percentage inputs, and 0-168 for study hours).");
+            }
             return;
         }
         
         if (subjects.length === 0) {
-            alert("Please enter at least one active subject first.");
+            if (errBanner && errMsg) {
+                errMsg.textContent = "Please enter at least one active subject first.";
+                errBanner.classList.remove('d-none');
+                errBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                alert("Please enter at least one active subject first.");
+            }
             return;
         }
         
@@ -1212,7 +1355,14 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ subjects: subjects })
         })
-        .then(res => res.json())
+        .then(res => {
+            return res.json().then(data => {
+                if (!res.ok || data.status !== "success") {
+                    throw new Error(data.message || "Error running analysis");
+                }
+                return data;
+            });
+        })
         .then(data => {
             if (data.status === "success") {
                 const tbody = document.getElementById("risk-analysis-table-body");
@@ -1258,13 +1408,17 @@
                 document.getElementById("generate-button-container").classList.remove("d-none");
                 
                 document.getElementById("risk-analysis-dashboard").scrollIntoView({ behavior: 'smooth' });
-            } else {
-                alert("Error running analysis: " + data.message);
             }
         })
         .catch(err => {
             console.error("Error analyzing risk:", err);
-            alert("Error connecting to server to run risk analysis.");
+            if (errBanner && errMsg) {
+                errMsg.textContent = err.message || "Error connecting to server to run risk analysis.";
+                errBanner.classList.remove('d-none');
+                errBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                alert(err.message || "Error connecting to server to run risk analysis.");
+            }
         });
     }
 

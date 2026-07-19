@@ -1,869 +1,465 @@
 {% extends 'base.html' %}
-{% block title %}AI Study Material{% endblock %}
+{% block title %}Study Materials{% endblock %}
 
-{% block head %}
+{% block content %}
 <style>
-    /* Premium Collapsible Panel Styles */
-    .material-section-card {
+    .library-header {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.5), rgba(15, 23, 42, 0.8));
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: var(--radius-lg);
+        padding: 2rem;
+        margin-bottom: 2rem;
+    }
+
+    /* ── Subject Entry Cards ── */
+    .subject-entry-card {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        margin-bottom: 1rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        overflow: hidden;
-    }
-    .material-section-card:hover {
-        border-color: var(--border-strong);
-        background: var(--surface-hover);
-        box-shadow: var(--shadow-sm);
-    }
-    .material-header-btn {
-        width: 100%;
-        padding: 1.25rem 1.5rem;
-        background: transparent;
-        border: none;
-        color: var(--text);
-        text-align: left;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        font-weight: 600;
-        font-size: 1.1rem;
-        cursor: pointer;
-        transition: color 0.2s ease;
-    }
-    .material-header-btn:focus {
-        outline: none;
-    }
-    .material-header-btn .header-left {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-    }
-    .material-header-btn .header-left i {
-        font-size: 1.25rem;
-        transition: transform 0.3s ease;
-    }
-    .material-header-btn .toggle-icon {
-        font-size: 0.9rem;
-        color: var(--text-muted);
-        transition: transform 0.3s ease;
-    }
-    .material-section-card.expanded {
-        border-color: rgba(56, 189, 248, 0.3);
-        box-shadow: var(--shadow-sm);
-    }
-    .material-section-card.expanded .toggle-icon {
-        transform: rotate(180deg);
-        color: var(--blue);
-    }
-    .material-body-content {
-        max-height: 0;
-        overflow: hidden;
-        transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        background: rgba(0, 0, 0, 0.15);
-    }
-    .material-body-inner {
         padding: 1.5rem;
-        border-top: 1px solid var(--border);
-        color: rgba(241, 245, 249, 0.9);
-        line-height: 1.7;
-    }
-    
-    /* Interactive Flashcard CSS */
-    .flashcard-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding: 1rem 0;
-    }
-    .flashcard-wrapper {
-        perspective: 1000px;
-        width: 100%;
-        max-width: 480px;
-        height: 260px;
         cursor: pointer;
-    }
-    .flashcard-inner-card {
+        text-decoration: none;
+        display: block;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
-        width: 100%;
-        height: 100%;
-        text-align: center;
-        transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-        transform-style: preserve-3d;
+        overflow: hidden;
     }
-    .flashcard-wrapper.flipped .flashcard-inner-card {
-        transform: rotateY(180deg);
-    }
-    .flashcard-front, .flashcard-back {
+    .subject-entry-card::before {
+        content: '';
         position: absolute;
-        width: 100%;
-        height: 100%;
-        -webkit-backface-visibility: hidden;
-        backface-visibility: hidden;
+        top: 0; left: 0; right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--neon-blue), var(--neon-purple));
+        transform: scaleX(0);
+        transform-origin: left;
+        transition: transform 0.3s ease;
+    }
+    .subject-entry-card:hover {
+        border-color: var(--neon-blue);
+        transform: translateY(-3px);
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+    }
+    .subject-entry-card:hover::before {
+        transform: scaleX(1);
+    }
+    .subject-icon {
+        width: 44px; height: 44px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2));
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.1rem;
+        flex-shrink: 0;
+    }
+    .subject-entry-card .go-arrow {
+        opacity: 0;
+        transition: all 0.2s ease;
+    }
+    .subject-entry-card:hover .go-arrow {
+        opacity: 1;
+        transform: translateX(4px);
+    }
+
+    /* ── Materials Library ── */
+    .material-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        padding: 2rem;
-        border: 1px solid var(--border-strong);
-        box-shadow: var(--shadow-md);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
     }
-    .flashcard-front {
-        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
-        color: var(--text);
+    .material-card:hover {
+        transform: translateY(-4px);
+        border-color: var(--neon-blue);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
     }
-    .flashcard-back {
-        background: linear-gradient(135deg, rgba(76, 29, 149, 0.95), rgba(15, 23, 42, 0.95));
-        color: var(--text);
-        transform: rotateY(180deg);
+    .card-glow-ai {
+        position: absolute; top: 0; left: 0;
+        width: 100%; height: 4px;
+        background: linear-gradient(90deg, var(--neon-blue), var(--neon-purple));
     }
-    
-    /* Interactive MCQ Styles */
-    .mcq-item {
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: 1.25rem;
-        margin-bottom: 1.25rem;
+    .card-glow-uploaded {
+        position: absolute; top: 0; left: 0;
+        width: 100%; height: 4px;
+        background: linear-gradient(90deg, #10b981, #34d399);
     }
-    .mcq-options-list {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        margin-top: 0.75rem;
-    }
-    .mcq-option-btn {
-        width: 100%;
-        text-align: left;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 0.75rem 1rem;
-        color: var(--text);
+    .dropzone-container {
+        border: 2px dashed rgba(255, 255, 255, 0.15);
+        border-radius: var(--radius-md);
+        padding: 2.5rem;
+        text-align: center;
+        background: rgba(255, 255, 255, 0.01);
         cursor: pointer;
         transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
     }
-    .mcq-option-btn:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.08);
-        border-color: var(--blue);
+    .dropzone-container:hover, .dropzone-container.dragover {
+        border-color: var(--neon-blue);
+        background: rgba(56, 189, 248, 0.05);
     }
-    .mcq-option-btn:focus {
-        outline: none;
-    }
-    .mcq-option-btn.correct {
-        background: rgba(52, 211, 153, 0.15) !important;
-        border-color: var(--green) !important;
-        color: #6ee7b7 !important;
-        font-weight: 600;
-    }
-    .mcq-option-btn.incorrect {
-        background: rgba(248, 113, 113, 0.15) !important;
-        border-color: var(--red) !important;
-        color: #fca5a5 !important;
-    }
-    .mcq-explanation {
-        margin-top: 1rem;
-        padding: 1rem;
-        background: rgba(56, 189, 248, 0.06);
-        border-left: 3px solid var(--blue);
-        border-radius: 0 8px 8px 0;
-        font-size: 0.9rem;
-    }
-    
-    /* Loading overlay */
-    .ai-loading-overlay {
-        display: none;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 5rem 2rem;
-        text-align: center;
-    }
-    .loading-pulse {
-        width: 70px;
-        height: 70px;
-        border-radius: 50%;
-        background: var(--blue);
-        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
-        animation: pulsing 1.6s infinite cubic-bezier(0.66, 0, 0, 1);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    .search-filter-bar {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 1.25rem;
         margin-bottom: 2rem;
     }
-    .loading-pulse i {
-        font-size: 2rem;
-        color: #070b14;
-    }
-    
-    @keyframes pulsing {
-        to {
-            box-shadow: 0 0 0 30px rgba(56, 189, 248, 0);
-        }
-    }
-    
-    .subject-selector-pill {
-        border-radius: 50px;
-        padding: 0.5rem 1.25rem;
-        border: 1px solid var(--border);
-        background: rgba(255,255,255,0.02);
-        color: var(--text-muted);
-        text-decoration: none;
-        transition: all 0.2s ease;
-        font-weight: 500;
-        font-size: 0.9rem;
-    }
-    .subject-selector-pill:hover {
-        background: rgba(255,255,255,0.06);
-        color: white;
-    }
-    .subject-selector-pill.active {
-        background: var(--grad-primary);
-        border-color: transparent;
-        color: white;
-        box-shadow: 0 4px 12px rgba(168, 85, 247, 0.35);
+    .section-divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 2.5rem 0;
     }
 </style>
-{% endblock %}
 
-{% block content %}
-<div class="row justify-content-center">
-    <div class="col-lg-10">
-        <!-- Hero Banner -->
-        <div class="hero-banner mb-4 stagger-1">
-            <div class="hero-glow-orb" style="right: 15%; top: 10%;"></div>
-            <div class="position-relative" style="z-index: 1;">
-                <h1 class="page-title mb-2"><i class="fas fa-magic text-gradient me-2"></i>AI Study Material</h1>
-                <p class="page-subtitle mb-0">Generate curriculum-aligned interactive revision notes, questions, MCQs, and flashcards instantly.</p>
-            </div>
+<div class="container py-4 stagger-1">
+    <!-- Header -->
+    <div class="library-header d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <div>
+            <h1 class="fw-bold text-gradient mb-1">Study Materials</h1>
+            <p class="text-muted mb-0">Your subjects are auto-loaded from your profile. Click a subject to access chapters, topics, and AI-generated material.</p>
         </div>
-
-        <!-- System Detection Banner -->
-        <div class="card card-flat p-3 mb-4 stagger-2" style="background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.15);">
-            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-                <div class="d-flex align-items-center gap-2">
-                    <span class="badge bg-primary px-3 py-2 rounded-pill"><i class="fas fa-graduation-cap me-1"></i> Class: {{ profile.study_level }}</span>
-                    <span class="badge bg-secondary px-3 py-2 rounded-pill"><i class="fas fa-book me-1"></i> Subject: {{ selected_subject.name }} ({{ selected_subject.code }})</span>
-                </div>
-                <div class="text-muted small">
-                    <i class="fas fa-info-circle me-1"></i> Automatically detected from active configuration.
-                </div>
-            </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                <i class="fas fa-cloud-upload-alt me-1"></i> Upload Document
+            </button>
         </div>
+    </div>
 
-        <!-- Subject Switcher -->
-        <div class="mb-4 stagger-2">
-            <div class="d-flex flex-wrap gap-2 align-items-center">
-                <span class="text-muted me-2 small fw-bold"><i class="fas fa-exchange-alt me-1"></i> Switch Subject:</span>
-                {% for subj in active_subjects %}
-                <a href="{{ url_for('student.study_material', subject_id=subj.id) }}" class="subject-selector-pill {% if subj.id == selected_subject.id %}active{% endif %}">
-                    {{ subj.name }}
-                </a>
-                {% endfor %}
-            </div>
-        </div>
+    <!-- ── SECTION 1: Subject Entry Points ── -->
+    <div class="mb-2 d-flex align-items-center gap-2">
+        <h5 class="fw-bold text-white mb-0"><i class="fas fa-book-reader text-primary me-2"></i>Your Subjects</h5>
+        <span class="badge bg-primary bg-opacity-20 text-primary">{{ active_subjects|length }} subjects</span>
+    </div>
+    <p class="text-muted small mb-4">Click any subject to explore chapters, topics, and generate AI study material on demand.</p>
 
-        <!-- Main Workspace Card -->
-        <div class="card card-flat p-4 mb-4 stagger-3" id="materialWorkspace">
-            <!-- Loading Indicator -->
-            <div class="ai-loading-overlay" id="aiLoadingOverlay">
-                <div class="loading-pulse">
-                    <i class="fas fa-brain"></i>
-                </div>
-                <h4 class="text-white fw-bold mb-2">Generating Complete Study Material</h4>
-                <p class="text-muted max-width-500 mx-auto">Gemini is structuring your revision notes, common mistakes, formulas, flashcards, MCQs, and practice questions. This may take up to 20-35 seconds...</p>
-            </div>
-
-            <!-- Empty / Prompt State -->
-            <div class="text-center py-5 {% if material %}d-none{% endif %}" id="emptyStateContainer">
-                <div class="mb-4">
-                    <i class="fas fa-book-reader text-gradient opacity-75" style="font-size: 4rem;"></i>
-                </div>
-                <h3 class="text-white fw-bold">No Study Material Generated Yet</h3>
-                <p class="text-muted mx-auto" style="max-width: 500px;">
-                    Generate comprehensive study materials customized for <strong>{{ selected_subject.name }}</strong> ({{ profile.study_level }} level).
-                </p>
-                <button class="btn btn-primary btn-glow px-4 py-3 fw-bold mt-3" id="btnFirstGenerate">
-                    <i class="fas fa-magic me-2"></i> Generate Study Material
-                </button>
-            </div>
-
-            <!-- Content Renders Here -->
-            <div class="{% if not material %}d-none{% endif %}" id="studyMaterialContainer">
-                <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
-                    <div>
-                        <h4 class="text-white fw-bold mb-1"><i class="fas fa-book text-primary me-2"></i>Revision Vault</h4>
-                        <p class="text-muted small mb-0">Saved on your profile. Load times are instant. Last updated: <span id="lastUpdatedText">{{ saved_material_obj.updated_at.strftime('%Y-%m-%d %H:%M') if saved_material_obj else 'Just now' }}</span></p>
+    <div class="row g-3 stagger-2 mb-2">
+        {% for sub in active_subjects %}
+        <div class="col-md-6 col-lg-4">
+            <a href="{{ url_for('student.study_subject', subject_id=sub.id) }}" class="subject-entry-card">
+                <div class="d-flex align-items-start gap-3">
+                    <div class="subject-icon">
+                        <i class="fas fa-graduation-cap text-primary"></i>
                     </div>
-                    <div>
-                        <button class="btn btn-outline-primary btn-sm py-2 px-3 fw-bold" id="btnRegenerate">
-                            <i class="fas fa-sync-alt me-1"></i> Regenerate Study Material
-                        </button>
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="fw-bold text-white small text-truncate">{{ sub.name }}</div>
+                        <div class="text-muted" style="font-size: 0.72rem; margin-top: 4px;">
+                            <i class="fas fa-layer-group me-1"></i> Chapters &amp; Topics &nbsp;
+                            <i class="fas fa-bolt text-warning me-1 ms-1"></i> AI Generation
+                        </div>
+                    </div>
+                    <div class="go-arrow text-primary">
+                        <i class="fas fa-chevron-right"></i>
                     </div>
                 </div>
+            </a>
+        </div>
+        {% else %}
+        <div class="col-12">
+            <div class="alert alert-warning d-flex align-items-center gap-2">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>No subjects assigned. <a href="{{ url_for('student.profile') }}" class="alert-link">Complete your profile</a> to auto-assign subjects.</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
 
-                <!-- Collapsible Sections -->
+    <hr class="section-divider">
+
+    <!-- ── SECTION 2: Materials Library (existing AI notes + uploads) ── -->
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+            <h5 class="fw-bold text-white mb-0"><i class="fas fa-book-open text-purple me-2"></i>Materials Library</h5>
+            <p class="text-muted small mb-0">All your AI-generated notes and uploaded documents in one place.</p>
+        </div>
+    </div>
+
+    <!-- Search & Filter Bar -->
+    <div class="search-filter-bar">
+        <form method="GET" action="{{ url_for('student.study_material') }}" class="row g-3">
+            <div class="col-md-4">
+                <div class="input-group">
+                    <span class="input-group-text bg-dark border-secondary text-muted"><i class="fas fa-search"></i></span>
+                    <input type="text" name="q" class="form-control bg-dark border-secondary text-white" placeholder="Search keywords..." value="{{ search_query or '' }}">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <select name="subject_id" class="form-select bg-dark border-secondary text-white">
+                    <option value="">All Subjects</option>
+                    {% for sub in active_subjects %}
+                    <option value="{{ sub.id }}" {% if selected_subject_id == sub.id %}selected{% endif %}>{{ sub.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select name="source" class="form-select bg-dark border-secondary text-white">
+                    <option value="all" {% if selected_source == 'all' %}selected{% endif %}>All Sources</option>
+                    <option value="ai" {% if selected_source == 'ai' %}selected{% endif %}>AI Notes</option>
+                    <option value="uploaded" {% if selected_source == 'uploaded' %}selected{% endif %}>Uploaded Files</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select name="sort_by" class="form-select bg-dark border-secondary text-white">
+                    <option value="newest" {% if selected_sort == 'newest' %}selected{% endif %}>Newest First</option>
+                    <option value="oldest" {% if selected_sort == 'oldest' %}selected{% endif %}>Oldest First</option>
+                </select>
+            </div>
+            <div class="col-md-1">
+                <button type="submit" class="btn btn-secondary w-100">Filter</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Materials Grid -->
+    <div class="row g-4 stagger-3">
+        {% for m in materials %}
+        <div class="col-md-6 col-lg-4">
+            <div class="material-card p-4 h-100 d-flex flex-column">
+                <!-- Top Indicator bar -->
+                <div class="{% if m.type == 'ai' %}card-glow-ai{% else %}card-glow-uploaded{% endif %}"></div>
                 
-                <!-- 1. Introduction -->
-                <div class="material-section-card" id="card-intro">
-                    <button class="material-header-btn" onclick="toggleSection('card-intro')">
-                        <span class="header-left">📖 <span class="ms-1">Introduction</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner" id="content-intro">
-                            {{ material.introduction | safe if material }}
-                        </div>
-                    </div>
+                <!-- Type Badge & Date -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="badge {{ m.badge_class }}">{{ m.badge_text }}</span>
+                    <small class="text-muted font-monospace">{{ m.date.strftime('%b %d, %Y') }}</small>
                 </div>
-
-                <!-- 2. Learning Objectives -->
-                <div class="material-section-card" id="card-objectives">
-                    <button class="material-header-btn" onclick="toggleSection('card-objectives')">
-                        <span class="header-left">🎯 <span class="ms-1">Learning Objectives</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner">
-                            <ul class="mb-0" id="content-objectives">
-                                {% if material and material.learning_objectives %}
-                                    {% for obj in material.learning_objectives %}
-                                        <li class="mb-2">{{ obj }}</li>
-                                    {% endfor %}
-                                {% endif %}
-                            </ul>
-                        </div>
-                    </div>
+                
+                <!-- Title & Path -->
+                <h5 class="fw-bold text-white mb-2 text-truncate-2">{{ m.title }}</h5>
+                <p class="text-muted small mb-3 flex-grow-1">
+                    <i class="fas fa-book text-primary me-1"></i> {{ m.subject_name }}<br>
+                    <i class="fas fa-folder-open text-warning me-1"></i> {{ m.chapter_name }} &gt; {{ m.topic_name }}
+                </p>
+                
+                <!-- Action Link -->
+                <div class="mt-auto pt-3 border-top border-secondary">
+                    <a href="{{ m.details_url }}" class="btn btn-sm {% if m.type == 'ai' %}btn-outline-primary{% else %}btn-outline-success{% endif %} w-100">
+                        <i class="fas fa-eye me-1"></i> Read &amp; Study
+                    </a>
                 </div>
-
-                <!-- 3. Notes -->
-                <div class="material-section-card" id="card-notes">
-                    <button class="material-header-btn" onclick="toggleSection('card-notes')">
-                        <span class="header-left">📘 <span class="ms-1">Notes</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner">
-                            <h5 class="text-gradient fw-bold mb-2">Detailed Notes</h5>
-                            <div class="notes-block mb-4" id="content-detailed-notes">
-                                {{ material.detailed_notes | safe if material }}
-                            </div>
-                            
-                            <hr class="border-secondary opacity-25">
-                            
-                            <h5 class="text-gradient fw-bold mb-2">Important Concepts</h5>
-                            <div class="concepts-block mb-4" id="content-concepts">
-                                {{ material.important_concepts | safe if material }}
-                            </div>
-
-                            <hr class="border-secondary opacity-25">
-
-                            <h5 class="text-gradient fw-bold mb-2">Easy Explanation</h5>
-                            <div class="easy-explain-block" id="content-easy-explanation" style="background: rgba(255,255,255,0.02); padding: 1rem; border-radius: 8px; border-left: 3px solid var(--purple);">
-                                {{ material.easy_explanation | safe if material }}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 4. Examples -->
-                <div class="material-section-card" id="card-examples">
-                    <button class="material-header-btn" onclick="toggleSection('card-examples')">
-                        <span class="header-left">💡 <span class="ms-1">Examples</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner">
-                            <h5 class="text-primary fw-bold mb-3"><i class="fas fa-globe me-2"></i>Real-life Examples</h5>
-                            <ul class="mb-4" id="content-real-life-examples">
-                                {% if material and material.real_life_examples %}
-                                    {% for ex in material.real_life_examples %}
-                                        <li class="mb-2">{{ ex }}</li>
-                                    {% endfor %}
-                                {% endif %}
-                            </ul>
-
-                            <hr class="border-secondary opacity-25">
-
-                            <h5 class="text-purple fw-bold mb-3"><i class="fas fa-tasks me-2"></i>Worked Examples</h5>
-                            <div class="d-flex flex-column gap-3" id="content-worked-examples">
-                                {% if material and material.worked_examples %}
-                                    {% for we in material.worked_examples %}
-                                        <div class="p-3 rounded border border-secondary bg-dark-card">
-                                            {{ we | safe }}
-                                        </div>
-                                    {% endfor %}
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 5. Formulas -->
-                <div class="material-section-card" id="card-formulas">
-                    <button class="material-header-btn" onclick="toggleSection('card-formulas')">
-                        <span class="header-left">📐 <span class="ms-1">Formulas</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner" id="content-formulas">
-                            {{ material.important_formulas | safe if material }}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 6. Common Mistakes -->
-                <div class="material-section-card" id="card-mistakes">
-                    <button class="material-header-btn" onclick="toggleSection('card-mistakes')">
-                        <span class="header-left">⚠ <span class="ms-1">Common Mistakes</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner">
-                            <div class="alert alert-danger mb-0" style="background: rgba(248, 113, 113, 0.05); border: 1px solid rgba(248, 113, 113, 0.15);">
-                                <ul class="mb-0 text-white" id="content-mistakes">
-                                    {% if material and material.common_mistakes %}
-                                        {% for m in material.common_mistakes %}
-                                            <li class="mb-2"><strong>Mistake:</strong> {{ m }}</li>
-                                        {% endfor %}
-                                    {% endif %}
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 7. Practice Questions -->
-                <div class="material-section-card" id="card-questions">
-                    <button class="material-header-btn" onclick="toggleSection('card-questions')">
-                        <span class="header-left">📝 <span class="ms-1">Practice Questions</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner">
-                            <h5 class="text-gradient fw-bold mb-3">Practice Questions (10)</h5>
-                            <ol class="mb-4" id="content-practice-questions">
-                                {% if material and material.practice_questions %}
-                                    {% for q in material.practice_questions %}
-                                        <li class="mb-2">{{ q }}</li>
-                                    {% endfor %}
-                                {% endif %}
-                            </ol>
-
-                            <hr class="border-secondary opacity-25">
-
-                            <h5 class="text-gradient fw-bold mb-3">Short Answer Questions (5)</h5>
-                            <ol id="content-short-questions">
-                                {% if material and material.short_answer_questions %}
-                                    {% for sq in material.short_answer_questions %}
-                                        <li class="mb-2">{{ sq }}</li>
-                                    {% endfor %}
-                                {% endif %}
-                            </ol>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 8. MCQs -->
-                <div class="material-section-card" id="card-mcqs">
-                    <button class="material-header-btn" onclick="toggleSection('card-mcqs')">
-                        <span class="header-left">❓ <span class="ms-1">MCQs</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner">
-                            <p class="text-muted small mb-4"><i class="fas fa-info-circle me-1"></i> Interactive MCQ Quiz. Click on any option to verify your answer and read explanation.</p>
-                            <div class="d-flex flex-column gap-2" id="content-mcqs">
-                                {% if material and material.mcqs %}
-                                    {% for item in material.mcqs %}
-                                        {% set outer_loop = loop %}
-                                        <div class="mcq-item">
-                                            <div class="fw-bold text-white mb-2">{{ item.question }}</div>
-                                            <div class="mcq-options-list">
-                                                {% for opt in item.options %}
-                                                    {% set opt_letter = opt[0] %}
-                                                    <button type="button" class="mcq-option-btn" onclick="checkMcq(this, '{{ opt_letter }}', '{{ item.correct_answer }}', 'mcq-exp-{{ outer_loop.index0 }}', '{{ item.explanation | replace("'", "\\'") }}')">
-                                                        {{ opt }}
-                                                    </button>
-                                                {% endfor %}
-                                            </div>
-                                            <div class="mcq-explanation d-none" id="mcq-exp-{{ outer_loop.index0 }}"></div>
-                                        </div>
-                                    {% endfor %}
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 9. Flashcards -->
-                <div class="material-section-card" id="card-flashcards">
-                    <button class="material-header-btn" onclick="toggleSection('card-flashcards')">
-                        <span class="header-left">🧠 <span class="ms-1">Flashcards</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner">
-                            <p class="text-muted small text-center mb-3"><i class="fas fa-info-circle me-1"></i> Click card to flip. Use buttons below to navigate.</p>
-                            <div class="flashcard-container">
-                                <div class="flashcard-wrapper" id="flashcardBox" onclick="flipFlashcard()">
-                                    <div class="flashcard-inner-card">
-                                        <div class="flashcard-front">
-                                            <h5 class="fw-bold text-center" id="flashcardFrontText">Front text</h5>
-                                        </div>
-                                        <div class="flashcard-back">
-                                            <h5 class="fw-bold text-center" id="flashcardBackText">Back text</h5>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="d-flex align-items-center gap-4 mt-4">
-                                    <button class="btn btn-outline-secondary btn-sm" onclick="prevFlashcard()">
-                                        <i class="fas fa-chevron-left me-1"></i> Previous
-                                    </button>
-                                    <span class="text-muted small fw-bold" id="flashcardCounter">Card 1 / 10</span>
-                                    <button class="btn btn-outline-secondary btn-sm" onclick="nextFlashcard()">
-                                        Next <i class="fas fa-chevron-right ms-1"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 10. Summary -->
-                <div class="material-section-card" id="card-summary">
-                    <button class="material-header-btn" onclick="toggleSection('card-summary')">
-                        <span class="header-left">📄 <span class="ms-1">Summary</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner" id="content-summary">
-                            {{ material.chapter_summary | safe if material }}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 11. Revision Notes -->
-                <div class="material-section-card" id="card-revision">
-                    <button class="material-header-btn" onclick="toggleSection('card-revision')">
-                        <span class="header-left">📚 <span class="ms-1">Revision Notes</span></span>
-                        <i class="fas fa-chevron-down toggle-icon"></i>
-                    </button>
-                    <div class="material-body-content">
-                        <div class="material-body-inner">
-                            <h5 class="text-gradient fw-bold mb-3">Key Points</h5>
-                            <ul class="mb-4" id="content-key-points">
-                                {% if material and material.key_points %}
-                                    {% for kp in material.key_points %}
-                                        <li class="mb-2">{{ kp }}</li>
-                                    {% endfor %}
-                                {% endif %}
-                            </ul>
-
-                            <hr class="border-secondary opacity-25">
-
-                            <h5 class="text-gradient fw-bold mb-3">Quick Revision Guide</h5>
-                            <div id="content-revision-notes">
-                                {{ material.revision_notes | safe if material }}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
             </div>
+        </div>
+        {% else %}
+        <div class="col-12 text-center py-5">
+            <div class="mb-3 text-muted">
+                <i class="fas fa-box-open fa-4x opacity-30"></i>
+            </div>
+            <h4 class="text-white">No materials yet</h4>
+            <p class="text-muted small">Click a subject above to explore and generate AI study material, or upload your own document.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Upload Modal -->
+<div class="modal fade" id="uploadModal" tabindex="-1" aria-labelledby="uploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark border-secondary text-white">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title fw-bold" id="uploadModalLabel"><i class="fas fa-cloud-upload-alt text-primary me-2"></i>Upload Study Document</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="uploadMaterialForm" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <!-- Target Subject/Chapter/Topic Dropdowns -->
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Subject <span class="text-danger">*</span></label>
+                        <select name="subject_id" id="modalSubject" class="form-select bg-dark border-secondary text-white" required onchange="loadModalChapters(this.value)">
+                            <option value="">Select Target Subject</option>
+                            {% for sub in active_subjects %}
+                            <option value="{{ sub.id }}">{{ sub.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label small text-muted">Chapter (Optional)</label>
+                            <select name="chapter_id" id="modalChapter" class="form-select bg-dark border-secondary text-white" disabled onchange="loadModalTopics(this.value)">
+                                <option value="">Select Chapter</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label small text-muted">Topic (Optional)</label>
+                            <select name="topic_id" id="modalTopic" class="form-select bg-dark border-secondary text-white" disabled>
+                                <option value="">Select Topic</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Drag and Drop Dropzone -->
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Document File <span class="text-danger">*</span></label>
+                        <div class="dropzone-container" id="dropzone" onclick="document.getElementById('fileInput').click()">
+                            <i class="fas fa-file-pdf fa-3x text-muted mb-2" id="dropzone-icon"></i>
+                            <h6 class="fw-bold mb-1" id="dropzone-text">Drag &amp; drop document or click to browse</h6>
+                            <p class="text-muted small mb-0">Supported formats: PDF, TXT, PNG, JPG, JPEG (Max 15MB)</p>
+                            <input type="file" name="file" id="fileInput" class="d-none" required onchange="handleFileSelect(this)">
+                        </div>
+                    </div>
+
+                    <!-- Loading Progress Indicator -->
+                    <div class="d-none" id="uploadProgressContainer">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <small class="text-primary font-monospace" id="uploadStatusText">Analyzing &amp; extracting text...</small>
+                            <span class="badge bg-primary" id="progressPercentage">0%</span>
+                        </div>
+                        <div class="progress" style="height: 6px; background: rgba(255,255,255,0.08);">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" id="uploadProgressBar" style="width: 0%; background: linear-gradient(135deg, #667eea, #764ba2);"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="btnSubmitUpload">Start Processing</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
-{% endblock %}
 
-{% block scripts %}
 <script>
-    // In-memory generated material representation
-    let materialData = {% if material %}{{ material | tojson | safe }}{% else %}null{% endif %};
-    let flashcards = [];
-    let currentFlashcardIdx = 0;
-
-    document.addEventListener("DOMContentLoaded", function() {
-        // Wire generation buttons
-        document.getElementById("btnFirstGenerate").addEventListener("click", () => triggerGeneration(false));
-        document.getElementById("btnRegenerate").addEventListener("click", () => triggerGeneration(true));
+    // Load chapters dynamically for the upload modal
+    function loadModalChapters(subjectId) {
+        const chapterSelect = document.getElementById("modalChapter");
+        const topicSelect = document.getElementById("modalTopic");
         
-        // Initial setup for flashcards
-        if (materialData && materialData.flashcards && materialData.flashcards.length > 0) {
-            flashcards = materialData.flashcards;
-            initFlashcards();
+        chapterSelect.innerHTML = '<option value="">Select Chapter</option>';
+        topicSelect.innerHTML = '<option value="">Select Topic</option>';
+        chapterSelect.disabled = true;
+        topicSelect.disabled = true;
+
+        if (!subjectId) return;
+
+        fetch(`/student/study/api/subject/${subjectId}/chapters`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success" && data.chapters.length > 0) {
+                data.chapters.forEach(ch => {
+                    chapterSelect.innerHTML += `<option value="${ch.id}">${ch.name}</option>`;
+                });
+                chapterSelect.disabled = false;
+            }
+        });
+    }
+
+    // Load topics dynamically for the upload modal
+    function loadModalTopics(chapterId) {
+        const topicSelect = document.getElementById("modalTopic");
+        topicSelect.innerHTML = '<option value="">Select Topic</option>';
+        topicSelect.disabled = true;
+
+        if (!chapterId) return;
+
+        fetch(`/student/study/api/chapter/${chapterId}/topics`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success" && data.topics.length > 0) {
+                data.topics.forEach(t => {
+                    topicSelect.innerHTML += `<option value="${t.id}">Topic ${t.topic_number}: ${t.name}</option>`;
+                });
+                topicSelect.disabled = false;
+            }
+        });
+    }
+
+    // Drag & Drop Handlers
+    const dropzone = document.getElementById("dropzone");
+    const fileInput = document.getElementById("fileInput");
+    
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+        }, false);
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files.length > 0) {
+            fileInput.files = files;
+            handleFileSelect(fileInput);
         }
     });
 
-    // Expand/Collapse controller
-    function toggleSection(cardId) {
-        const card = document.getElementById(cardId);
-        const bodyContent = card.querySelector(".material-body-content");
-        
-        if (card.classList.contains("expanded")) {
-            bodyContent.style.maxHeight = "0";
-            card.classList.remove("expanded");
-        } else {
-            // Expand
-            card.classList.add("expanded");
-            // Set max-height dynamically to fit content
-            bodyContent.style.maxHeight = bodyContent.scrollHeight + "px";
+    function handleFileSelect(input) {
+        const file = input.files[0];
+        if (file) {
+            document.getElementById("dropzone-text").innerText = file.name;
+            const ext = file.name.split('.').pop().toLowerCase();
+            const icon = document.getElementById("dropzone-icon");
+            if (ext === 'pdf') icon.className = "fas fa-file-pdf fa-3x text-danger mb-2";
+            else if (['png', 'jpg', 'jpeg'].includes(ext)) icon.className = "fas fa-file-image fa-3x text-success mb-2";
+            else icon.className = "fas fa-file-alt fa-3x text-muted mb-2";
         }
     }
 
-    // Call dynamic generation endpoint
-    function triggerGeneration(isRegenerate) {
-        const emptyState = document.getElementById("emptyStateContainer");
-        const loader = document.getElementById("aiLoadingOverlay");
-        const contentArea = document.getElementById("studyMaterialContainer");
+    // Submit Document Upload & Process
+    document.getElementById("uploadMaterialForm").addEventListener("submit", function(e) {
+        e.preventDefault();
         
-        // Update viewports
-        emptyState.classList.add("d-none");
-        contentArea.classList.add("d-none");
-        loader.style.display = "flex";
+        const btnSubmit = document.getElementById("btnSubmitUpload");
+        const progressContainer = document.getElementById("uploadProgressContainer");
+        const progressBar = document.getElementById("uploadProgressBar");
+        const statusText = document.getElementById("uploadStatusText");
+        const percentageText = document.getElementById("progressPercentage");
         
-        // Form Data
-        const formData = new FormData();
-        formData.append("subject_id", "{{ selected_subject.id }}");
-        if (isRegenerate) {
-            formData.append("regenerate", "1");
-        }
+        btnSubmit.disabled = true;
+        progressContainer.classList.remove("d-none");
         
-        fetch("{{ url_for('student.generate_study_material_route') }}", {
+        const states = [
+            { pct: 15, msg: "Uploading file to server..." },
+            { pct: 40, msg: "Extracting document content text..." },
+            { pct: 75, msg: "Composing AI summary & revision notes..." },
+            { pct: 90, msg: "Finalizing database entries..." }
+        ];
+        
+        let currentStateIdx = 0;
+        const interval = setInterval(() => {
+            if (currentStateIdx < states.length) {
+                const s = states[currentStateIdx];
+                progressBar.style.width = s.pct + "%";
+                statusText.innerText = s.msg;
+                percentageText.innerText = s.pct + "%";
+                currentStateIdx++;
+            }
+        }, 1500);
+
+        const formData = new FormData(this);
+        
+        fetch("/student/study-material/upload", {
             method: "POST",
             body: formData
         })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error("HTTP error " + response.status);
-            }
-            return response.json();
-        })
+        .then(res => res.json())
         .then(data => {
+            clearInterval(interval);
             if (data.status === "success") {
-                materialData = data.data;
-                renderGeneratedContent(data.data);
-                
-                // Update UI visibility
-                loader.style.display = "none";
-                contentArea.classList.remove("d-none");
-                
-                // Show datetime
-                const now = new Date();
-                const pad = (n) => n.toString().padStart(2, '0');
-                const timeString = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-                document.getElementById("lastUpdatedText").innerText = timeString;
+                progressBar.style.width = "100%";
+                statusText.innerText = "Success! Redirecting...";
+                percentageText.innerText = "100%";
+                setTimeout(() => {
+                    window.location.href = `/student/study-material/uploaded/${data.material_id}`;
+                }, 1000);
             } else {
-                alert("Error: " + data.message);
-                resetToInitialView();
+                alert(data.message || "Failed to upload document");
+                btnSubmit.disabled = false;
+                progressContainer.classList.add("d-none");
             }
         })
-        .catch(error => {
-            console.error("AI Generation Error:", error);
-            alert("AI generation failed or timed out. Please try again.");
-            resetToInitialView();
+        .catch(err => {
+            clearInterval(interval);
+            alert("Error: " + err);
+            btnSubmit.disabled = false;
+            progressContainer.classList.add("d-none");
         });
-    }
-
-    function resetToInitialView() {
-        document.getElementById("aiLoadingOverlay").style.display = "none";
-        if (materialData) {
-            document.getElementById("studyMaterialContainer").classList.remove("d-none");
-        } else {
-            document.getElementById("emptyStateContainer").classList.remove("d-none");
-        }
-    }
-
-    // Dynamically insert content into collapsible containers
-    function renderGeneratedContent(data) {
-        // 1. Introduction
-        document.getElementById("content-intro").innerHTML = data.introduction;
-        
-        // 2. Learning Objectives
-        const objectivesList = document.getElementById("content-objectives");
-        objectivesList.innerHTML = "";
-        data.learning_objectives.forEach(obj => {
-            const li = document.createElement("li");
-            li.className = "mb-2";
-            li.innerText = obj;
-            objectivesList.appendChild(li);
-        });
-        
-        // 3. Notes
-        document.getElementById("content-detailed-notes").innerHTML = data.detailed_notes;
-        document.getElementById("content-concepts").innerHTML = data.important_concepts;
-        document.getElementById("content-easy-explanation").innerHTML = data.easy_explanation;
-        
-        // 4. Examples
-        const realLifeList = document.getElementById("content-real-life-examples");
-        realLifeList.innerHTML = "";
-        data.real_life_examples.forEach(ex => {
-            const li = document.createElement("li");
-            li.className = "mb-2";
-            li.innerText = ex;
-            realLifeList.appendChild(li);
-        });
-        
-        const workedContainer = document.getElementById("content-worked-examples");
-        workedContainer.innerHTML = "";
-        data.worked_examples.forEach(we => {
-            const div = document.createElement("div");
-            div.className = "p-3 rounded border border-secondary bg-dark-card";
-            div.innerHTML = we;
-            workedContainer.appendChild(div);
-        });
-        
-        // 5. Formulas
-        document.getElementById("content-formulas").innerHTML = data.important_formulas;
-        
-        // 6. Common Mistakes
-        const mistakesList = document.getElementById("content-mistakes");
-        mistakesList.innerHTML = "";
-        data.common_mistakes.forEach(m => {
-            const li = document.createElement("li");
-            li.className = "mb-2";
-            li.innerHTML = `<strong>Mistake:</strong> ${m}`;
-            mistakesList.appendChild(li);
-        });
-        
-        // 7. Practice Questions
-        const practiceList = document.getElementById("content-practice-questions");
-        practiceList.innerHTML = "";
-        data.practice_questions.forEach(q => {
-            const li = document.createElement("li");
-            li.className = "mb-2";
-            li.innerText = q;
-            practiceList.appendChild(li);
-        });
-        
-        const shortList = document.getElementById("content-short-questions");
-        shortList.innerHTML = "";
-        data.short_answer_questions.forEach(sq => {
-            const li = document.createElement("li");
-            li.className = "mb-2";
-            li.innerText = sq;
-            shortList.appendChild(li);
-        });
-        
-        // 8. MCQs
-        const mcqsContainer = document.getElementById("content-mcqs");
-        mcqsContainer.innerHTML = "";
-        data.mcqs.forEach((item, index) => {
-            const mcqItemDiv = document.createElement("div");
-            mcqItemDiv.className = "mcq-item";
-            
-            const questionDiv = document.createElement("div");
-            questionDiv.className = "fw-bold text-white mb-2";
-            questionDiv.innerText = item.question;
-            mcqItemDiv.appendChild(questionDiv);
-            
-            const optionsDiv = document.createElement("div");
-            optionsDiv.className = "mcq-options-list";
-            
-            item.options.forEach(opt => {
-                const optLetter = opt.trim()[0];
-                const btn = document.createElement("button");
-                btn.type = "button";
-                btn.className = "mcq-option-btn";
-                btn.innerText = opt;
-                btn.onclick = function() {
-                    checkMcq(btn, optLetter, item.correct_answer, `mcq-exp-${index}`, item.explanation);
-                };
-                optionsDiv.appendChild(btn);
-            });
-            mcqItemDiv.appendChild(optionsDiv);
-            
-            const explanationDiv = document.createElement("div");
-            explanationDiv.className = "mcq-explanation d-none";
-            explanationDiv.id = `mcq-exp-${index}`;
-            mcqItemDiv.appendChild(explanationDiv);
-            
-            mcqsContainer.appendChild(mcqItemDiv);
-        });
-        
-        // 9. Flashcards
-        if (data.flashcards && data.flashcards.length > 0) {
-            flashcards = data.flashcards;
-            currentFlashcardIdx = 0;
-            initFlashcards();
-        }
-        
-        // 10. Summary
-        document.getElementById("content-summary").innerHTML = data.chapter_summary;
-        
-        // 11. Revision Notes
-        const keyPointsList = document.getElementById("content-key-points");
-        keyPointsList.innerHTML = "";
-        data.key_points.forEach(kp => {
-            const li = document.createElement("li");
-            li.className = "mb-2";
-            li.innerText = kp;
-            keyPointsList.appendChild(li);
-        });
-        
-        document.getElementById("content-revision-notes").innerHTML = data.revision_notes;
-    }
-
-    // MCQ interactive checking
-    function checkMcq(selectedBtn, selectedLetter, correctLetter, expDivId, explanationText) {
-        const parentList = selectedBtn.parentNode;
-        const allButtons = parentList.querySelectorAll(".mcq-option-btn");
-        
-        // Disable all buttons in this MCQ block
-        allButtons.forEach(btn => {
-            btn.disabled = true;
-            
-            // Highlight correct one automatically
-            const currentLetter = btn.innerText.trim()[0];
-            if (currentLetter === correctLetter) {
-                btn.classList.add("correct");
-            }
-        });
-        
-        // If wrong option was chosen, style it red
-        if (selectedLetter !== correctLetter) {
-            selectedBtn.classList.add("incorrect");
-        }
-        
-        // Reveal explanation
-        const expDiv = document.getElementById(expDivId);
-        expDiv.innerHTML = `<strong>Answer: ${correctLetter}</strong> · ${explanationText}`;
-        expDiv.classList.remove("d-none");
-    }
-
-    // Interactive Flashcards Controller
-    function initFlashcards() {
-        const box = document.getElementById("flashcardBox");
-        box.classList.remove("flipped");
-        
-        if (flashcards.length > 0) {
-            const card = flashcards[currentFlashcardIdx];
-            document.getElementById("flashcardFrontText").innerText = card.front;
-            document.getElementById("flashcardBackText").innerText = card.back;
-            document.getElementById("flashcardCounter").innerText = `Card ${currentFlashcardIdx + 1} / ${flashcards.length}`;
-        }
-    }
-
-    function flipFlashcard() {
-        document.getElementById("flashcardBox").classList.toggle("flipped");
-    }
-
-    function nextFlashcard() {
-        if (flashcards.length === 0) return;
-        currentFlashcardIdx = (currentFlashcardIdx + 1) % flashcards.length;
-        initFlashcards();
-    }
-
-    function prevFlashcard() {
-        if (flashcards.length === 0) return;
-        currentFlashcardIdx = (currentFlashcardIdx - 1 + flashcards.length) % flashcards.length;
-        initFlashcards();
-    }
+    });
 </script>
 {% endblock %}

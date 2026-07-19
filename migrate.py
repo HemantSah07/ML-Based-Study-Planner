@@ -36,7 +36,8 @@ with app.app_context():
         "ALTER TABLE predictions ADD level_of_study VARCHAR(50)",
         "ALTER TABLE predictions ADD raw_inputs TEXT",
         "ALTER TABLE assessment_questions ADD chapter_id INTEGER",
-        "ALTER TABLE student_profiles ADD university VARCHAR(100)"
+        "ALTER TABLE student_profiles ADD university VARCHAR(100)",
+        "ALTER TABLE student_profiles ADD program_duration VARCHAR(20) DEFAULT NULL"
     ]
     
     for q in queries:

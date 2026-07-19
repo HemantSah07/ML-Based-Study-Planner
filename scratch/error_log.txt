@@ -1,0 +1,21 @@
+Exception: Unterminated string starting at: line 82 column 19 (char 29134)
+
+Traceback:
+Traceback (most recent call last):
+  File "C:\smart_study\app\routes\student.py", line 3946, in generate_study_material_route
+    material_data = parse_json_safely(response_text)
+  File "C:\smart_study\app\routes\student.py", line 3800, in parse_json_safely
+    raise e
+  File "C:\smart_study\app\routes\student.py", line 3767, in parse_json_safely
+    return json.loads(cleaned_no_trailing)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\AppData\Local\Python\pythoncore-3.14-64\Lib\json\__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\HP\AppData\Local\Python\pythoncore-3.14-64\Lib\json\decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\AppData\Local\Python\pythoncore-3.14-64\Lib\json\decoder.py", line 361, in raw_decode
+    obj, end = self.scan_once(s, idx)
+               ~~~~~~~~~~~~~~^^^^^^^^
+json.decoder.JSONDecodeError: Unterminated string starting at: line 82 column 19 (char 29134)
