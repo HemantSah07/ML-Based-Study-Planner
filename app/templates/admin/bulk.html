@@ -79,6 +79,43 @@
     </div>
 </div>
 
+<!-- Section 8: Database & Curriculum Bulk Operations -->
+<div class="row g-4 mt-2 mb-5">
+    <!-- Curriculum Import & MCQ Bulk-Seeding -->
+    <div class="col-lg-6">
+        <div class="card card-flat p-4 h-100">
+            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-database me-2"></i> Curriculum & Question Bank Seeding</h6>
+            <p class="text-muted small">Import class structures and subjects using a CSV spreadsheet, or queue multiple subjects for automated MCQ generation in a rate-limit safe execution queue.</p>
+            
+            <div class="d-flex gap-3 mt-auto">
+                <a href="{{ url_for('admin.bulk_import_curriculum') }}" class="btn btn-outline-primary flex-grow-1 py-2 fw-semibold">
+                    <i class="fas fa-file-import me-1"></i> Import Curriculum CSV
+                </a>
+                <a href="{{ url_for('admin.bulk_seed_questions') }}" class="btn btn-primary flex-grow-1 py-2 fw-semibold">
+                    <i class="fas fa-seedling me-1"></i> Queue MCQ Seeding
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Student Data Backup & Exports -->
+    <div class="col-lg-6">
+        <div class="card card-flat p-4 h-100">
+            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-download me-2"></i> Student Data Backups</h6>
+            <p class="text-muted small">Export all student accounts, profiles, cumulative GPAs, study planner records, and assessment counts for backup, analytics, or external reporting purposes.</p>
+            
+            <div class="d-flex gap-3 mt-auto">
+                <a href="{{ url_for('admin.bulk_export_students_json') }}" class="btn btn-outline-secondary flex-grow-1 py-2 fw-semibold" download>
+                    <i class="fas fa-file-code me-1"></i> Export Student JSON
+                </a>
+                <a href="{{ url_for('admin.bulk_export_students') }}" class="btn btn-primary flex-grow-1 py-2 fw-semibold" download>
+                    <i class="fas fa-file-csv me-1"></i> Export Student CSV
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 function toggleNotificationTargets() {
     var target = document.getElementById("target").value;
