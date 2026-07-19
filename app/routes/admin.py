@@ -705,10 +705,50 @@ def analytics():
     )
 
 
-# ── SECTION 7 STUB: CONFIG ───────────────────────────────────────────────────
-@admin_bp.route("/config")
+# ── SECTION 7: RESTART-FREE LIVE CONFIGURATION ────────────────────────────────
+@admin_bp.route("/config", methods=["GET", "POST"])
 def config():
-    return render_template("admin/config.html")
+    from app.models import AppSetting
+    from app.live_config import load_live_config
+    
+    if request.method == "POST":
+        # Save all configs
+        keys = [
+            "GEMINI_API_KEY", "ANTHROPIC_API_KEY",
+            "GEMINI_MODEL_MCQ", "GEMINI_MODEL_ASSISTANT_PRIMARY", "GEMINI_MODEL_ASSISTANT_FALLBACK",
+            "GEMINI_DAILY_LIMIT_MCQ", "GEMINI_RPM_LIMIT_MCQ",
+            "GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", "GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK",
+            "GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY"
+        ]
+        for k in keys:
+            val = request.form.get(k, "").strip()
+            setting = AppSetting.query.get(k)
+            if setting:
+                setting.value = val
+            else:
+                setting = AppSetting(key=k, value=val)
+                db.session.add(setting)
+                
+        # Billing switch
+        billing = "True" if request.form.get("GEMINI_BILLING_ENABLED") else "False"
+        setting = AppSetting.query.get("GEMINI_BILLING_ENABLED")
+        if setting:
+            setting.value = billing
+        else:
+            setting = AppSetting(key="GEMINI_BILLING_ENABLED", value=billing)
+            db.session.add(setting)
+            
+        db.session.commit()
+        
+        # Instantly reload config cache
+        load_live_config(current_app._get_current_object(), force=True)
+        
+        log_admin_action("update_config", "AppSetting", None, "Updated application settings and flushed config cache")
+        flash("Configuration updated and cache reloaded successfully.", "success")
+        return redirect(url_for("admin.config"))
+        
+    settings = {s.key: s.value for s in AppSetting.query.all()}
+    return render_template("admin/config.html", settings=settings)
 
 
 # ── SECTION 8 STUB: BULK OPS ─────────────────────────────────────────────────

@@ -1,8 +1,101 @@
 {% extends 'base.html' %}
-{% block title %}Configuration — Admin{% endblock %}
+{% block title %}System Configuration — Admin{% endblock %}
+
 {% block content %}
 <div class="hero-banner mb-4">
-    <h1 class="page-title mb-2"><i class="fas fa-sliders-h me-2 text-gradient"></i> Configuration</h1>
-    <p class="page-subtitle">Live app settings with no-restart reload. <span class="badge bg-warning text-dark">Building...</span></p>
+    <h1 class="page-title mb-2"><i class="fas fa-sliders-h me-2 text-gradient"></i> Dynamic Configuration</h1>
+    <p class="page-subtitle mb-0">Modify API keys, model selections, and daily query limits in real-time without restarting the application.</p>
 </div>
+
+<form method="POST" action="{{ url_for('admin.config') }}">
+    <div class="row g-4">
+        <!-- API Credentials -->
+        <div class="col-lg-6">
+            <div class="card card-flat p-4 h-100">
+                <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-key me-2"></i> API Credentials</h6>
+                
+                <div class="mb-3">
+                    <label for="GEMINI_API_KEY" class="form-label text-muted small">Gemini API Key</label>
+                    <input type="password" id="GEMINI_API_KEY" name="GEMINI_API_KEY" value="{{ settings.get('GEMINI_API_KEY', '') }}" class="form-control bg-dark border-secondary text-white" placeholder="Enter Gemini API Key">
+                    <div class="form-text text-muted x-small">Used for MCQ generation and AI Assistant chats.</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="ANTHROPIC_API_KEY" class="form-label text-muted small">Anthropic API Key (Optional)</label>
+                    <input type="password" id="ANTHROPIC_API_KEY" name="ANTHROPIC_API_KEY" value="{{ settings.get('ANTHROPIC_API_KEY', '') }}" class="form-control bg-dark border-secondary text-white" placeholder="Enter Anthropic API Key">
+                    <div class="form-text text-muted x-small">Used as secondary/legacy model fallback.</div>
+                </div>
+                
+                <div class="form-check form-switch mt-4">
+                    <input class="form-check-input" type="checkbox" id="GEMINI_BILLING_ENABLED" name="GEMINI_BILLING_ENABLED" {% if settings.get('GEMINI_BILLING_ENABLED') == 'True' %}checked{% endif %}>
+                    <label class="form-check-label text-white fw-semibold small" for="GEMINI_BILLING_ENABLED">
+                        Enable Paid Billing
+                    </label>
+                    <div class="form-text text-muted x-small">When enabled, daily student query limits are bypassed completely. Only enable if your API key has a billing account linked.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Model Selection -->
+        <div class="col-lg-6">
+            <div class="card card-flat p-4 h-100">
+                <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-robot me-2"></i> Gemini Model Selection</h6>
+                
+                <div class="mb-3">
+                    <label for="GEMINI_MODEL_MCQ" class="form-label text-muted small">MCQ Generator Model</label>
+                    <input type="text" id="GEMINI_MODEL_MCQ" name="GEMINI_MODEL_MCQ" value="{{ settings.get('GEMINI_MODEL_MCQ', 'gemini-3.1-flash-lite') }}" class="form-control bg-dark border-secondary text-white">
+                    <div class="form-text text-muted x-small">Recommended: <code>gemini-3.1-flash-lite</code> or <code>gemini-2.5-flash-lite</code></div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="GEMINI_MODEL_ASSISTANT_PRIMARY" class="form-label text-muted small">AI Assistant Primary Model</label>
+                    <input type="text" id="GEMINI_MODEL_ASSISTANT_PRIMARY" name="GEMINI_MODEL_ASSISTANT_PRIMARY" value="{{ settings.get('GEMINI_MODEL_ASSISTANT_PRIMARY', 'gemini-2.5-flash') }}" class="form-control bg-dark border-secondary text-white">
+                    <div class="form-text text-muted x-small">Recommended: <code>gemini-2.5-flash</code></div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="GEMINI_MODEL_ASSISTANT_FALLBACK" class="form-label text-muted small">AI Assistant Fallback Model</label>
+                    <input type="text" id="GEMINI_MODEL_ASSISTANT_FALLBACK" name="GEMINI_MODEL_ASSISTANT_FALLBACK" value="{{ settings.get('GEMINI_MODEL_ASSISTANT_FALLBACK', 'gemini-2.5-flash-lite') }}" class="form-control bg-dark border-secondary text-white">
+                </div>
+            </div>
+        </div>
+
+        <!-- Rate Limits and Caps -->
+        <div class="col-md-12">
+            <div class="card card-flat p-4">
+                <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-tachometer-alt me-2"></i> Free Tier Limits &amp; Throttling</h6>
+                
+                <div class="row g-3">
+                    <div class="col-md-6 col-lg-3">
+                        <label for="GEMINI_DAILY_LIMIT_MCQ" class="form-label text-muted small">MCQ Daily Limit</label>
+                        <input type="number" id="GEMINI_DAILY_LIMIT_MCQ" name="GEMINI_DAILY_LIMIT_MCQ" value="{{ settings.get('GEMINI_DAILY_LIMIT_MCQ', '450') }}" class="form-control bg-dark border-secondary text-white">
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <label for="GEMINI_RPM_LIMIT_MCQ" class="form-label text-muted small">MCQ RPM Limit</label>
+                        <input type="number" id="GEMINI_RPM_LIMIT_MCQ" name="GEMINI_RPM_LIMIT_MCQ" value="{{ settings.get('GEMINI_RPM_LIMIT_MCQ', '10') }}" class="form-control bg-dark border-secondary text-white">
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <label for="GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY" class="form-label text-muted small">Primary Assistant Daily Limit</label>
+                        <input type="number" id="GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY" name="GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY" value="{{ settings.get('GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY', '45') }}" class="form-control bg-dark border-secondary text-white">
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <label for="GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY" class="form-label text-muted small">Primary Assistant RPM Limit</label>
+                        <input type="number" id="GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY" name="GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY" value="{{ settings.get('GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY', '4') }}" class="form-control bg-dark border-secondary text-white">
+                    </div>
+                    <div class="col-md-6 col-lg-3">
+                        <label for="GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK" class="form-label text-muted small">Fallback Assistant Daily Limit</label>
+                        <input type="number" id="GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK" name="GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK" value="{{ settings.get('GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK', '45') }}" class="form-control bg-dark border-secondary text-white">
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Save Bar -->
+        <div class="col-md-12 text-end mb-5">
+            <button type="submit" class="btn btn-primary px-4 py-2 fw-semibold">
+                <i class="fas fa-save me-1"></i> Save Configuration
+            </button>
+        </div>
+    </div>
+</form>
 {% endblock %}

@@ -18,6 +18,15 @@ def create_app():
     bcrypt.init_app(app)
     login_manager.init_app(app)
 
+    with app.app_context():
+        from app.live_config import load_live_config
+        load_live_config(app, force=True)
+
+    @app.before_request
+    def check_live_config():
+        from app.live_config import load_live_config
+        load_live_config(app)
+
     from app.routes.auth    import auth_bp
     from app.routes.student import student_bp
     from app.routes.admin   import admin_bp
