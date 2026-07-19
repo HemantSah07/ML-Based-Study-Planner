@@ -606,10 +606,103 @@ def content_subjects():
     return redirect(url_for("admin.content_stats"))
 
 
-# ── SECTION 5 STUB: ANALYTICS ────────────────────────────────────────────────
+# ── SECTION 5: COHORT ANALYTICS ──────────────────────────────────────────────
 @admin_bp.route("/analytics")
 def analytics():
-    return render_template("admin/analytics.html")
+    from app.models import StudentProfile, Prediction, StudyLog, StudentAssessment, EducationLevel
+    from sqlalchemy import func
+    
+    # Get all active cohorts (Education Levels)
+    levels = [l.name for l in EducationLevel.query.filter_by(is_active=True).order_by(EducationLevel.sort_order).all()]
+    
+    # Fallback to distinct study_levels if EducationLevel is empty
+    if not levels:
+        levels = [r[0] for r in db.session.query(StudentProfile.study_level).distinct().all() if r[0]]
+        
+    cohort_data = {}
+    for lvl in levels:
+        # Get student profiles in this cohort
+        profiles = StudentProfile.query.filter_by(study_level=lvl).all()
+        student_ids = [p.user_id for p in profiles]
+        
+        if not student_ids:
+            cohort_data[lvl] = {
+                "student_count": 0,
+                "high_risk": 0, "medium_risk": 0, "low_risk": 0, "unknown_risk": 0,
+                "avg_gpa": 0.0, "avg_study_hours": 0.0, "avg_assessment": 0.0
+            }
+            continue
+            
+        # Risk distribution (using latest prediction for each student)
+        high = 0
+        medium = 0
+        low = 0
+        unknown = 0
+        for sid in student_ids:
+            pred = Prediction.query.filter_by(user_id=sid).order_by(Prediction.date.desc()).first()
+            if pred:
+                risk = (pred.predicted_risk_level or "").lower()
+                if "high" in risk: high += 1
+                elif "medium" in risk: medium += 1
+                elif "low" in risk: low += 1
+                else: unknown += 1
+            else:
+                unknown += 1
+                
+        # Metrics
+        gpas = [p.cumulative_gpa for p in profiles if p.cumulative_gpa is not None]
+        avg_gpa = round(sum(gpas) / len(gpas), 2) if gpas else 0.0
+        
+        # Study Hours
+        total_hours = db.session.query(func.sum(StudyLog.duration_hours)).filter(StudyLog.user_id.in_(student_ids)).scalar() or 0.0
+        avg_study_hours = round(total_hours / len(student_ids), 1)
+        
+        # Assessment
+        scores = db.session.query(func.avg(StudentAssessment.weighted_score)).filter(StudentAssessment.student_id.in_(student_ids)).scalar() or 0.0
+        avg_assessment = round(scores, 1)
+        
+        cohort_data[lvl] = {
+            "student_count": len(student_ids),
+            "high_risk": high,
+            "medium_risk": medium,
+            "low_risk": low,
+            "unknown_risk": unknown,
+            "avg_gpa": avg_gpa,
+            "avg_study_hours": avg_study_hours,
+            "avg_assessment": avg_assessment
+        }
+        
+    # Overall summary metrics
+    total_students = User.query.filter_by(role="student").count()
+    overall_high = 0
+    overall_medium = 0
+    overall_low = 0
+    # Query latest predictions for all students
+    all_student_ids = [u.id for u in User.query.filter_by(role="student").all()]
+    for sid in all_student_ids:
+        pred = Prediction.query.filter_by(user_id=sid).order_by(Prediction.date.desc()).first()
+        if pred:
+            risk = (pred.predicted_risk_level or "").lower()
+            if "high" in risk: overall_high += 1
+            elif "medium" in risk: overall_medium += 1
+            else: overall_low += 1
+        else:
+            overall_low += 1
+            
+    # Format a list of cohort dicts for easy rendering in jinja2
+    cohort_list = []
+    for lvl, metrics in cohort_data.items():
+        metrics["level"] = lvl
+        cohort_list.append(metrics)
+        
+    return render_template(
+        "admin/analytics.html",
+        cohorts=cohort_list,
+        total_students=total_students,
+        overall_high=overall_high,
+        overall_medium=overall_medium,
+        overall_low=overall_low
+    )
 
 
 # ── SECTION 7 STUB: CONFIG ───────────────────────────────────────────────────

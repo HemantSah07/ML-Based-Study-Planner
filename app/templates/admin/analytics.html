@@ -1,8 +1,137 @@
 {% extends 'base.html' %}
-{% block title %}Analytics — Admin{% endblock %}
+{% block title %}Cohort Analytics — Admin{% endblock %}
+
 {% block content %}
-<div class="hero-banner mb-4">
-    <h1 class="page-title mb-2"><i class="fas fa-chart-bar me-2 text-gradient"></i> Analytics</h1>
-    <p class="page-subtitle">Cohort analysis, risk trends, and engagement metrics. <span class="badge bg-warning text-dark">Building...</span></p>
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <div>
+        <h1 class="page-title mb-1"><i class="fas fa-chart-bar me-2 text-gradient"></i> Analytics &amp; Risk Reporting</h1>
+        <p class="page-subtitle mb-0">Cohort progress, risk distribution, and study engagement across academic levels.</p>
+    </div>
+    <div>
+        <a href="{{ url_for('admin.analytics') }}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-sync me-1"></i> Refresh Data</a>
+    </div>
+</div>
+
+<!-- Overall Risk Breakdown Summary -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card card-flat p-4 text-center h-100 border-start border-3 border-info">
+            <div class="fs-6 text-muted mb-1">Total Monitored</div>
+            <div class="fw-bold text-gradient fs-2">{{ total_students }}</div>
+            <div class="text-info small mt-1"><i class="fas fa-users me-1"></i> Enrolled Students</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card card-flat p-4 text-center h-100 border-start border-3 border-danger">
+            <div class="fs-6 text-muted mb-1">High Risk Cohort</div>
+            <div class="fw-bold text-danger fs-2">{{ overall_high }}</div>
+            <div class="text-muted small mt-1">Requires Intervention</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card card-flat p-4 text-center h-100 border-start border-3 border-warning">
+            <div class="fs-6 text-muted mb-1">Medium Risk Cohort</div>
+            <div class="fw-bold text-warning fs-2">{{ overall_medium }}</div>
+            <div class="text-muted small mt-1">Under Close Watch</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card card-flat p-4 text-center h-100 border-start border-3 border-success">
+            <div class="fs-6 text-muted mb-1">Low Risk / Safe</div>
+            <div class="fw-bold text-success fs-2">{{ overall_low }}</div>
+            <div class="text-muted small mt-1">On Track to Pass</div>
+        </div>
+    </div>
+</div>
+
+<!-- Cohort Breakdown Table -->
+<div class="card card-flat p-0 mb-4">
+    <div class="p-4 border-bottom border-secondary d-flex justify-content-between align-items-center">
+        <h6 class="fw-bold text-white mb-0"><i class="fas fa-table me-2 text-primary"></i> Academic Cohort Metrics</h6>
+        <span class="text-muted small">Grouped by Education Level</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-dark table-hover align-middle border-0 mb-0">
+            <thead class="border-bottom border-secondary">
+                <tr class="text-muted small">
+                    <th class="px-4">Cohort Level</th>
+                    <th>Students</th>
+                    <th style="min-width: 200px;">Risk Profile (Low / Med / High)</th>
+                    <th>Avg GPA</th>
+                    <th>Avg Study Hours</th>
+                    <th class="pe-4">Avg Assessment</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cohort in cohorts %}
+                <tr>
+                    <td class="px-4">
+                        <div class="fw-bold text-white">{{ cohort.level }}</div>
+                    </td>
+                    <td>
+                        <span class="badge bg-secondary">{{ cohort.student_count }}</span>
+                    </td>
+                    <td>
+                        {% if cohort.student_count > 0 %}
+                            {% set total_pred = cohort.low_risk + cohort.medium_risk + cohort.high_risk + cohort.unknown_risk %}
+                            {% set pct_low = ((cohort.low_risk + cohort.unknown_risk) / total_pred * 100) | round | int %}
+                            {% set pct_med = (cohort.medium_risk / total_pred * 100) | round | int %}
+                            {% set pct_high = (cohort.high_risk / total_pred * 100) | round | int %}
+                            
+                            <div class="progress" style="height: 16px; background: #1e293b; border-radius: 8px; overflow: hidden; display: flex;">
+                                {% if pct_low > 0 %}
+                                <div class="progress-bar bg-success" style="width: {{ pct_low }}%" title="Low Risk: {{ cohort.low_risk + cohort.unknown_risk }} ({{ pct_low }}%)"></div>
+                                {% endif %}
+                                {% if pct_med > 0 %}
+                                <div class="progress-bar bg-warning text-dark font-monospace" style="width: {{ pct_med }}%" title="Medium Risk: {{ cohort.medium_risk }} ({{ pct_med }}%)"></div>
+                                {% endif %}
+                                {% if pct_high > 0 %}
+                                <div class="progress-bar bg-danger" style="width: {{ pct_high }}%" title="High Risk: {{ cohort.high_risk }} ({{ pct_high }}%)"></div>
+                                {% endif %}
+                            </div>
+                            <div class="d-flex justify-content-between x-small text-muted mt-1 px-1">
+                                <span>Low: {{ pct_low }}%</span>
+                                <span>Med: {{ pct_med }}%</span>
+                                <span>High: {{ pct_high }}%</span>
+                            </div>
+                        {% else %}
+                            <span class="text-muted small">No students in cohort</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if cohort.student_count > 0 %}
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="fw-bold text-white">{{ cohort.avg_gpa }}</span>
+                            <div class="progress flex-grow-1" style="height: 4px; width: 60px; background: #1e293b;">
+                                <div class="progress-bar bg-info" style="width: {{ (cohort.avg_gpa / 4.0 * 100) | int }}%"></div>
+                            </div>
+                        </div>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if cohort.student_count > 0 %}
+                        <span class="text-white">{{ cohort.avg_study_hours }} hrs</span>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="pe-4">
+                        {% if cohort.student_count > 0 %}
+                        <span class="badge bg-primary fs-6">{{ cohort.avg_assessment }}%</span>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="text-center py-5 text-muted">No cohorts configured.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endblock %}
