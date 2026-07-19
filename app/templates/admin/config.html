@@ -89,6 +89,30 @@
                 </div>
             </div>
         </div>
+
+        <!-- Default Study Planner Settings -->
+        <div class="col-md-12">
+            <div class="card card-flat p-4">
+                <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-calendar-alt me-2"></i> Default Study Planner Settings</h6>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label for="PLANNER_SESSION_MINUTES" class="form-label text-muted small">Session Duration (minutes)</label>
+                        <input type="number" id="PLANNER_SESSION_MINUTES" name="PLANNER_SESSION_MINUTES" value="{{ settings.get('PLANNER_SESSION_MINUTES', '45') }}" class="form-control bg-dark border-secondary text-white" min="15" max="120" step="5">
+                        <div class="form-text text-muted x-small">Default length of a single study slot in the generated planner.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="PLANNER_BREAK_MINUTES" class="form-label text-muted small">Break Duration (minutes)</label>
+                        <input type="number" id="PLANNER_BREAK_MINUTES" name="PLANNER_BREAK_MINUTES" value="{{ settings.get('PLANNER_BREAK_MINUTES', '10') }}" class="form-control bg-dark border-secondary text-white" min="0" max="60" step="5">
+                        <div class="form-text text-muted x-small">Default rest period inserted between back-to-back sessions.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="PLANNER_SESSIONS_PER_DAY" class="form-label text-muted small">Max Sessions per Day</label>
+                        <input type="number" id="PLANNER_SESSIONS_PER_DAY" name="PLANNER_SESSIONS_PER_DAY" value="{{ settings.get('PLANNER_SESSIONS_PER_DAY', '4') }}" class="form-control bg-dark border-secondary text-white" min="1" max="10">
+                        <div class="form-text text-muted x-small">Maximum daily study slots allowed to prevent student burnout.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <!-- Save Bar -->
         <div class="col-md-12 text-end mb-5">
