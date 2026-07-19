@@ -751,10 +751,136 @@ def config():
     return render_template("admin/config.html", settings=settings)
 
 
-# ── SECTION 8 STUB: BULK OPS ─────────────────────────────────────────────────
-@admin_bp.route("/bulk")
+# ── SECTION 8: BULK OPERATIONS ────────────────────────────────────────────────
+@admin_bp.route("/bulk", methods=["GET", "POST"])
 def bulk():
-    return render_template("admin/bulk.html")
+    from app.models import Notification, EducationLevel, StudentProfile, Prediction
+    
+    levels = [l.name for l in EducationLevel.query.filter_by(is_active=True).order_by(EducationLevel.sort_order).all()]
+    if not levels:
+        levels = [r[0] for r in db.session.query(StudentProfile.study_level).distinct().all() if r[0]]
+        
+    if request.method == "POST":
+        action = request.form.get("action")
+        
+        if action == "batch_ml":
+            # Run predictions for all students
+            students = User.query.filter_by(role="student").all()
+            success_count = 0
+            fail_count = 0
+            
+            from app.routes.student import (
+                get_profile_subjects, get_subject_performance_snapshot,
+                get_subject_features, load_ml_model,
+            )
+            import numpy as np
+            
+            model = load_ml_model("random_forest")
+            scaler = load_ml_model("scaler")
+            prediction_rank = {"low": 0, "medium": 1, "high": 2}
+            
+            for s in students:
+                profile = StudentProfile.query.filter_by(user_id=s.id).first()
+                if not profile:
+                    fail_count += 1
+                    continue
+                    
+                student_subjects = get_profile_subjects(profile)
+                if not student_subjects:
+                    fail_count += 1
+                    continue
+                    
+                try:
+                    raw_gpa = float(profile.cumulative_gpa or profile.prior_academic_score or 0.0)
+                    attendance = float(profile.attendance_pct or 85.0)
+                    target_weekly_hours = float(profile.target_weekly_hours or 14.0)
+                    per_subject_weekly_hours = max(1.0, target_weekly_hours / max(1, len(student_subjects)))
+                    
+                    overall_risk = "low"
+                    for subject in student_subjects:
+                        snapshot = get_subject_performance_snapshot(s.id, subject.id)
+                        if snapshot["source"] == "missing" or snapshot["score"] is None:
+                            continue
+                        performance_score = snapshot["score"]
+                        difficulty = float(subject.difficulty_level or 3.0)
+                        features = get_subject_features(
+                            s.id, subject.name, performance_score,
+                            attendance, per_subject_weekly_hours, difficulty, 30, None
+                        )
+                        if model and scaler:
+                            f_scaled = scaler.transform(np.array([features]))
+                            if hasattr(model, "predict_proba"):
+                                probs = model.predict_proba(f_scaled)[0]
+                                risk_pred = int(np.argmax(probs))
+                            else:
+                                risk_pred = min(2, max(0, int(model.predict(f_scaled)[0])))
+                        else:
+                            risk_pred = 1
+                        risk_lvl = ["low", "medium", "high"][risk_pred]
+                        if prediction_rank.get(risk_lvl, 0) > prediction_rank.get(overall_risk, 0):
+                            overall_risk = risk_lvl
+                            
+                    # Update Prediction table
+                    existing = Prediction.query.filter_by(user_id=s.id).order_by(Prediction.date.desc()).first()
+                    if existing:
+                        existing.predicted_risk_level = overall_risk
+                        existing.date = datetime.utcnow()
+                    else:
+                        new_pred = Prediction(user_id=s.id, predicted_risk_level=overall_risk, date=datetime.utcnow())
+                        db.session.add(new_pred)
+                    success_count += 1
+                except Exception:
+                    fail_count += 1
+                    
+            db.session.commit()
+            log_admin_action("batch_ml_prediction", "Prediction", None, f"Triggered batch ML prediction. Success: {success_count}, Fails: {fail_count}")
+            flash(f"Batch ML run completed. Success: {success_count}, Skip/Fails: {fail_count}", "success")
+            return redirect(url_for("admin.bulk"))
+            
+        elif action == "bulk_notification":
+            target = request.form.get("target")
+            cohort = request.form.get("cohort")
+            risk_level = request.form.get("risk_level")
+            message = request.form.get("message", "").strip()
+            
+            if not message:
+                flash("Notification message cannot be empty.", "warning")
+                return redirect(url_for("admin.bulk"))
+                
+            # Filter users
+            query = User.query.filter_by(role="student")
+            
+            if target == "cohort" and cohort:
+                query = query.join(StudentProfile).filter(StudentProfile.study_level == cohort)
+            elif target == "risk" and risk_level:
+                all_students = query.all()
+                filtered_students = []
+                for s in all_students:
+                    pred = Prediction.query.filter_by(user_id=s.id).order_by(Prediction.date.desc()).first()
+                    r_lvl = (pred.predicted_risk_level or "low").lower() if pred else "low"
+                    if r_lvl == risk_level.lower():
+                        filtered_students.append(s)
+                query = filtered_students
+                
+            # Send notifications
+            sent_count = 0
+            target_list = query if isinstance(query, list) else query.all()
+            for s in target_list:
+                notif = Notification(
+                    user_id=s.id,
+                    message=message,
+                    is_read=False,
+                    date=datetime.utcnow()
+                )
+                db.session.add(notif)
+                sent_count += 1
+                
+            db.session.commit()
+            log_admin_action("bulk_notification", "Notification", None, f"Sent bulk notification to {sent_count} students (Target: {target})")
+            flash(f"Bulk notification sent successfully to {sent_count} students.", "success")
+            return redirect(url_for("admin.bulk"))
+            
+    return render_template("admin/bulk.html", cohorts=levels)
 
 
 # ── SECTION 4: SYSTEM HEALTH DASHBOARD ───────────────────────────────────────
