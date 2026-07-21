@@ -76,6 +76,8 @@ class StudentProfile(db.Model):
     target_score_goal = db.Column(db.Float, default=70.0)   # Desired academic percentage (contextual only)
     peak_focus_time = db.Column(db.String(20), default="Morning")  # Morning/Afternoon/Evening/Night
     program_duration = db.Column(db.String(20), nullable=True)     # e.g. "3 Years", "4 Years" (Bachelors only)
+    university_type = db.Column(db.String(50), nullable=True)      # e.g. "National", "Foreign"
+    university_country = db.Column(db.String(100), nullable=True)   # e.g. "United Kingdom", "Malaysia"
 
 
 # ── Curriculum Taxonomy (Section 1: Admin Curriculum Management) ─────────────

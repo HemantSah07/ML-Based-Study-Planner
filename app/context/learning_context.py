@@ -1021,7 +1021,7 @@ class StudentLearningContext:
             "country", "curriculum", "level_of_study", "study_level",
             "program", "semester", "timezone", "explanation_level",
             "study_goal", "preferred_language", "profile_pic", "peak_focus_time",
-            "university",
+            "university", "university_type", "university_country", "program_duration",
         ]
         float_fields = ["cumulative_gpa", "attendance_pct", "target_score_goal"]
         int_fields = ["commute_buffer_minutes"]
@@ -1059,12 +1059,23 @@ class StudentLearningContext:
             return ""
 
         lines = [
+            f"Country: {getattr(p, 'country', 'Nepal')}",
             f"Education Level: {getattr(p, 'level_of_study', 'N/A')}",
             f"Curriculum: {getattr(p, 'curriculum', 'N/A')}",
             f"Explanation Level: {getattr(p, 'explanation_level', 'Intermediate')}",
             f"Study Goal: {getattr(p, 'study_goal', 'Improve Grades')}",
             f"Language Preference: {getattr(p, 'preferred_language', 'English')}",
         ]
+
+        # Add university context if available
+        if getattr(p, "university_type", None) and getattr(p, "study_level", "") in ("Bachelors", "Masters"):
+            lines.append(f"University Type: {p.university_type}")
+            if p.university_type == "Foreign" and getattr(p, "university_country", None):
+                lines.append(f"University Country: {p.university_country}")
+            if getattr(p, "university", None):
+                lines.append(f"University: {p.university}")
+            if getattr(p, "program_duration", None):
+                lines.append(f"Program Duration: {p.program_duration}")
 
         # System-derived style hint based on risk level (replaces manual learning_style field)
         risk = getattr(self, 'risk_summary', 'low')

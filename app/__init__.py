@@ -12,9 +12,37 @@ mail          = Mail()
 login_manager.login_view             = "auth.login"
 login_manager.login_message_category = "warning"
 
-def create_app():
+# Destructive database safety block to protect production database during test executions
+original_drop_all = db.drop_all
+
+def safe_drop_all(*args, **kwargs):
+    from flask import current_app
+    try:
+        if current_app:
+            testing = current_app.config.get('TESTING', False)
+            uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+            if testing:
+                if 'smart_study.db' in uri and not ('test' in uri or 'memory' in uri):
+                    raise RuntimeError(
+                        "SAFETY BLOCK: Automated tests are NOT allowed to perform destructive "
+                        "operations (like db.drop_all) on the production database 'smart_study.db'!"
+                    )
+    except RuntimeError as e:
+        if "SAFETY BLOCK" in str(e):
+            raise e
+    original_drop_all(*args, **kwargs)
+
+db.drop_all = safe_drop_all
+
+def create_app(config_class=None):
     app = Flask(__name__)
-    app.config.from_object(Config)
+    if config_class:
+        app.config.from_object(config_class)
+    else:
+        app.config.from_object(Config)
+
+    if app.config.get('TESTING'):
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
 
     db.init_app(app)
     bcrypt.init_app(app)

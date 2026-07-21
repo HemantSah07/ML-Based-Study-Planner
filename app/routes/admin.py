@@ -209,7 +209,15 @@ def curriculum_faculties_toggle(fac_id):
 
 @admin_bp.route("/curriculum/programs")
 def curriculum_programs():
+    import json
     programs = CurriculumProgram.query.order_by(CurriculumProgram.sort_order.asc()).all()
+    for p in programs:
+        p.parsed_duration_options = []
+        if p.duration_options_json:
+            try:
+                p.parsed_duration_options = json.loads(p.duration_options_json)
+            except Exception:
+                p.parsed_duration_options = []
     usage_counts = {}
     for prog in programs:
         usage_counts[prog.name] = StudentProfile.query.filter_by(program=prog.name).count()
@@ -224,11 +232,20 @@ def curriculum_programs_add():
     if name and lvl:
         dur_json = None
         if has_duration:
-            # Seed default duration choices for Bachelors duration-variable programs
-            dur_json = json.dumps([
-                {"value": "3 Years", "label": "3 Years (International-affiliated, e.g. APU/LBEF)"},
-                {"value": "4 Years", "label": "4 Years (TU-affiliated BSc CSIT)"}
-            ])
+            dur_vals = request.form.getlist("duration_values[]")
+            dur_lbls = request.form.getlist("duration_labels[]")
+            options = []
+            for val, lbl in zip(dur_vals, dur_lbls):
+                if val.strip():
+                    options.append({"value": val.strip(), "label": lbl.strip() or val.strip()})
+            if options:
+                dur_json = json.dumps(options)
+            else:
+                # Seed default duration choices for Bachelors duration-variable programs
+                dur_json = json.dumps([
+                    {"value": "3 Years", "label": "3 Years (International-affiliated, e.g. APU/LBEF)"},
+                    {"value": "4 Years", "label": "4 Years (TU-affiliated BSc CSIT)"}
+                ])
         prog = CurriculumProgram(
             name=name, level_name=lvl, country="Nepal",
             has_duration=has_duration, duration_options_json=dur_json,
@@ -250,12 +267,21 @@ def curriculum_programs_edit(prog_id):
     prog.level_name = request.form.get("level_name", "").strip()
     prog.has_duration = bool(request.form.get("has_duration"))
     prog.sort_order = int(request.form.get("sort_order", 0))
-    if prog.has_duration and not prog.duration_options_json:
-        prog.duration_options_json = json.dumps([
-            {"value": "3 Years", "label": "3 Years (International-affiliated, e.g. APU/LBEF)"},
-            {"value": "4 Years", "label": "4 Years (TU-affiliated BSc CSIT)"}
-        ])
-    elif not prog.has_duration:
+    if prog.has_duration:
+        dur_vals = request.form.getlist("duration_values[]")
+        dur_lbls = request.form.getlist("duration_labels[]")
+        options = []
+        for val, lbl in zip(dur_vals, dur_lbls):
+            if val.strip():
+                options.append({"value": val.strip(), "label": lbl.strip() or val.strip()})
+        if options:
+            prog.duration_options_json = json.dumps(options)
+        elif not prog.duration_options_json:
+            prog.duration_options_json = json.dumps([
+                {"value": "3 Years", "label": "3 Years (International-affiliated, e.g. APU/LBEF)"},
+                {"value": "4 Years", "label": "4 Years (TU-affiliated BSc CSIT)"}
+            ])
+    else:
         prog.duration_options_json = None
     db.session.commit()
     log_admin_action("edit_program", "CurriculumProgram", prog.id, f"Edited program '{old_name}' -> '{prog.name}'")

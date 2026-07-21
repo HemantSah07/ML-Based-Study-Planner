@@ -58,65 +58,8 @@ COUNTRY_CURRICULUM_MAP = {
     "India":           "CBSE/ICSE/State Boards",
 }
 
-# ── Nepal Faculty → Subject-DB level+program mapping ─────────────────────────
-# Maps the user-visible Faculty dropdown value to (level_of_study, program) pairs
-# that exist in the subjects table, searched in order until a match is found.
-NEPAL_FACULTY_SUBJECT_MAP = {
-    # Class 11
-    "Science Faculty":                              [("Class 11 - Science Stream", "Science Stream"), ("Class 11", "Science Stream")],
-    "Management Faculty (Commerce)":                [("Class 11 - Management Stream", "Management Stream"), ("Class 11", "Management")],
-    "Humanities and Social Sciences Faculty (Arts)": [("Class 11 - Humanities Stream", "Humanities Stream"), ("Class 11", "Humanities Stream")],
-    "Law Faculty":                                  [("Class 11", "Law")],
-    "Education Faculty":                            [("Class 11", "Education")],
-    # CTEVT technical streams (Class 11/12)
-    "Computer Engineering":      [("Class 11", "Computer Engineering")],
-    "Civil Engineering":         [("Class 11", "Civil Engineering")],
-    "Electrical/Electronics Engineering": [("Class 11", "Electrical Engineering")],
-    "Agriculture and Animal Science": [("Class 11", "Agriculture")],
-    "Forestry":                  [("Class 11", "Forestry")],
-    "Nursing (PCL Nursing)":     [("Class 11", "Nursing")],
-    "Pharmacy":                  [("Class 11", "Pharmacy")],
-    "Medical Lab Technology (CMLT)": [("Class 11", "CMLT")],
-    "Hotel Management & Culinary Arts": [("Class 11", "Hotel Management")],
-}
-# Equivalent set for Class 12 (same faculty names, different level prefix)
-NEPAL_FACULTY_SUBJECT_MAP_C12 = {
-    "Science Faculty":                              [("Class 12 - Science Stream", "Science Stream"), ("Class 12 (National Examination Board - NEB)", "Science Stream"), ("Class 12", "Science Stream")],
-    "Management Faculty (Commerce)":                [("Class 12 - Management Stream", "Management Stream"), ("Class 12 (National Examination Board - NEB)", "Management"), ("Class 12", "Management")],
-    "Humanities and Social Sciences Faculty (Arts)": [("Class 12 - Humanities Stream", "Humanities Stream"), ("Class 12", "Humanities Stream")],
-    "Law Faculty":                                  [("Class 12", "Law")],
-    "Education Faculty":                            [("Class 12", "Education")],
-    "Computer Engineering":      [("Class 12", "Computer Engineering")],
-    "Civil Engineering":         [("Class 12", "Civil Engineering")],
-    "Electrical/Electronics Engineering": [("Class 12", "Electrical Engineering")],
-    "Agriculture and Animal Science": [("Class 12", "Agriculture")],
-    "Forestry":                  [("Class 12", "Forestry")],
-    "Nursing (PCL Nursing)":     [("Class 12", "Nursing")],
-    "Pharmacy":                  [("Class 12", "Pharmacy")],
-    "Medical Lab Technology (CMLT)": [("Class 12", "CMLT")],
-    "Hotel Management & Culinary Arts": [("Class 12", "Hotel Management")],
-}
-
-NEPAL_FIXED_CLASS_SUBJECTS = {
-    "Class 9": [
-        ("C9-NEP", "Nepali", "Class 9", "General", 4, 3),
-        ("C9-ENG", "English", "Class 9", "General", 4, 3),
-        ("C9-MATH", "Mathematics", "Class 9", "General", 4, 4),
-        ("C9-SCI", "Science", "Class 9", "General", 4, 4),
-        ("C9-SOC", "Social Studies", "Class 9", "General", 4, 3),
-        ("C9-HPE", "Health and Population", "Class 9", "General", 3, 2),
-        ("C9-OPM", "Optional Mathematics", "Class 9", "General", 4, 5),
-        ("C9-COM", "Computer Science", "Class 9", "General", 3, 3),
-    ],
-    "Class 10": [
-        ("SEE-NEP", "Nepali", "Class 10 (Secondary Education Examination - SEE)", None, 4, 3),
-        ("SEE-ENG", "English", "Class 10 (Secondary Education Examination - SEE)", None, 4, 3),
-        ("SEE-MATH", "Mathematics", "Class 10 (Secondary Education Examination - SEE)", None, 4, 4),
-        ("SEE-SCI", "Science", "Class 10 (Secondary Education Examination - SEE)", None, 4, 4),
-        ("SEE-SOC", "Social Studies", "Class 10 (Secondary Education Examination - SEE)", None, 4, 3),
-        ("SEE-OPM", "Optional Mathematics", "Class 10 (Secondary Education Examination - SEE)", None, 4, 5),
-    ],
-}
+# ── Nepal Faculty → Subject-DB level+program mapping (replaced by DB query) ───
+# All curriculum mapping is now resolved dynamically from database entries.
 
 SUBJECT_NAME_ALIASES = {
     "scienceandtechnology": "science",
@@ -151,61 +94,19 @@ def _dedupe_subjects_by_name(subjects):
     return deduped
 
 
-def _ensure_nepal_fixed_subjects(study_level, curriculum):
-    specs = NEPAL_FIXED_CLASS_SUBJECTS.get(study_level)
-    if not specs:
-        return []
-
-    subjects = []
-    changed = False
-    for code, name, level, program, credit_hours, difficulty in specs:
-        subject = Subject.query.filter_by(code=code).first()
-        if not subject:
-            subject = Subject(code=code)
-            db.session.add(subject)
-            changed = True
-
-        updates = {
-            "name": name,
-            "credit_hours": credit_hours,
-            "difficulty_level": difficulty,
-            "level_of_study": level,
-            "program": program,
-            "semester": study_level,
-            "country": "Nepal",
-            "curriculum": curriculum,
-        }
-        for field, value in updates.items():
-            if getattr(subject, field) != value:
-                setattr(subject, field, value)
-                changed = True
-        subjects.append(subject)
-
-    if changed:
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-    return subjects
-
-
 def _is_fixed_nepal_class(profile):
-    return (
-        profile
-        and (profile.country or "Nepal").strip() == "Nepal"
-        and (profile.study_level or "").strip() in NEPAL_FIXED_CLASS_SUBJECTS
-    )
+    if not profile:
+        return False
+    country = (profile.country or "Nepal").strip()
+    study_level = (profile.study_level or "").strip()
+    return country == "Nepal" and study_level in ("Class 6", "Class 7", "Class 8", "Class 9", "Class 10")
 
 
 def get_valid_subjects_for_profile(profile):
     """
-    Returns the list of Subject objects valid for this student's
+    Returns the list of active Subject objects valid for this student's
     country + study_level + program (Faculty) combination.
-    
-    For Nepal it resolves the complex level/program naming in the DB.
-    For other countries it auto-seeds generic placeholder subjects
-    if none exist yet, so the system always has something to show.
+    Loads dynamically from the database.
     """
     if not profile:
         return []
@@ -215,56 +116,34 @@ def get_valid_subjects_for_profile(profile):
     program    = (profile.program    or "").strip()
     curriculum = COUNTRY_CURRICULUM_MAP.get(country, "National")
 
-    # Helper: try a list of (level, prog) pairs, return first match
-    def _query(pairs, country_filter=True):
-        for lvl, prog in pairs:
-            q = Subject.query.filter(Subject.level_of_study == lvl)
-            if prog:
-                q = q.filter(Subject.program == prog)
-            if country_filter:
-                q = q.filter((Subject.country == country) | (Subject.country == None))
-            results = q.all()
-            if results:
-                return results
-        return []
+    # 1. Query for active subjects matching level, program, country exactly
+    subjects = Subject.query.filter_by(
+        level_of_study=study_level,
+        program=program,
+        country=country,
+        is_active=True
+    ).all()
 
-    subjects = []
-
-    if country == "Nepal":
-        lvl = study_level
-        if lvl in NEPAL_FIXED_CLASS_SUBJECTS:
-            subjects = _ensure_nepal_fixed_subjects(lvl, curriculum)
-        elif lvl == "Class 6":
-            subjects = _query([("Class 6", None), ("Class 6", "General")])
-        elif lvl == "Class 7":
-            subjects = _query([("Class 7", None), ("Class 7", "General")])
-        elif lvl == "Class 8":
-            subjects = _query([("Class 8", None), ("Class 8", "General")])
-        elif lvl == "Class 11":
-            pairs = NEPAL_FACULTY_SUBJECT_MAP.get(program, [("Class 11", program or None)])
-            subjects = _query(pairs)
-        elif lvl == "Class 12":
-            pairs = NEPAL_FACULTY_SUBJECT_MAP_C12.get(program, [("Class 12", program or None)])
-            subjects = _query(pairs)
-        elif lvl == "Bachelors":
-            subjects = _query([("Bachelor's", program if program else None)])
-            # If no match for specific program, seed placeholders for that program
-            # (do NOT fall back to all Bachelor's subjects — wrong program mix)
-        elif lvl == "Masters":
-            subjects = _query([("Master's", program if program else None), ("Master's Level", program if program else None)])
-        else:
-            # Generic fallback for Nepal
-            subjects = Subject.query.filter(
-                Subject.level_of_study.ilike(f"%{lvl}%")
-            ).all()
-    else:
-        # Non-Nepal: try exact match first
+    # 2. If no subjects found for specific program, look for general/empty program subjects for this level and country
+    if not subjects:
         subjects = Subject.query.filter(
+            Subject.level_of_study == study_level,
             Subject.country == country,
-            Subject.level_of_study == study_level
+            Subject.is_active == True,
+            (Subject.program == "General") | (Subject.program == None) | (Subject.program == "")
         ).all()
 
-    # If still nothing found, auto-seed generic placeholders
+    # 3. Fallback: look for level/program match ignoring country constraint or with country=None
+    if not subjects:
+        subjects = Subject.query.filter(
+            Subject.level_of_study == study_level,
+            Subject.is_active == True,
+            (Subject.program == program) | (Subject.program == "General") | (Subject.program == None) | (Subject.program == "")
+        ).filter(
+            (Subject.country == country) | (Subject.country == None)
+        ).all()
+
+    # 4. If still empty, seed placeholders dynamically using the canonical names
     if not subjects:
         subjects = _seed_placeholder_subjects(country, study_level, program, curriculum)
 
@@ -286,7 +165,7 @@ def _seed_placeholder_subjects(country, study_level, program, curriculum):
             names = [f"{prog} Core I", f"{prog} Core II", f"{prog} Core III", "Research Methodology", "Elective Course"]
         else:
             names = ["Major Core I", "Major Core II", "Research Methods", "Elective I", "Elective II"]
-        db_level = "Bachelor's" if lvl == "Bachelors" else "Master's"
+        db_level = "Bachelors" if lvl == "Bachelors" else "Masters"
         db_prog  = prog
     elif lvl in ["Class 11", "Class 12"]:
         names = ["Mathematics", "English", "Core Subject I", "Core Subject II", "Optional Subject"]
@@ -314,6 +193,7 @@ def _seed_placeholder_subjects(country, study_level, program, curriculum):
             curriculum=curriculum,
             credit_hours=3,
             difficulty_level=3,
+            is_active=True,
         )
         db.session.add(sub)
         placeholders.append(sub)
@@ -3684,11 +3564,14 @@ def get_curriculum_data():
     if not country:
         countries = [r[0] for r in db.session.query(Subject.country).distinct().all() if r[0]]
         # also check active universities/levels countries
-        for el in EducationLevel.query.filter_by(is_active=True).distinct(EducationLevel.country).all():
-            if el.country not in countries:
-                countries.append(el.country)
-        if not countries:
-            countries = ["Nepal"]
+        for el_country in db.session.query(EducationLevel.country).filter_by(is_active=True).distinct().all():
+            if el_country[0] and el_country[0] not in countries:
+                countries.append(el_country[0])
+        # Always include the standard fallback countries
+        std_countries = ["Nepal", "United States", "United Kingdom", "Australia", "Canada", "India"]
+        for c in std_countries:
+            if c not in countries:
+                countries.append(c)
         return jsonify({"countries": sorted(list(set(countries)))})
         
     if not curriculum:
@@ -3817,10 +3700,12 @@ def get_taxonomy():
                 except Exception:
                     pass
                     
+    from app.utils.foreign_universities import FOREIGN_UNIVERSITIES
     return jsonify({
         "countries": sorted(list(countries)),
         "education_levels": education_levels,
         "universities": universities,
+        "foreign_universities": FOREIGN_UNIVERSITIES,
         "neb_general_faculties": neb_general,
         "neb_technical_streams": neb_technical if neb_technical else [
             "Computer Engineering", "Civil Engineering", "Electrical/Electronics Engineering",
@@ -3877,8 +3762,6 @@ def profile():
         # Collect profile field updates
         raw_country   = (request.form.get("country") or "Nepal").strip()
         raw_study_lvl = (request.form.get("study_level") or "").strip()
-        raw_program   = (request.form.get("program") or "").strip()
-        raw_semester  = (request.form.get("semester") or "").strip()
         raw_timezone  = (request.form.get("timezone") or default_timezone_for_country(raw_country)).strip()
         allowed_timezones = set(MULTI_TIMEZONE_OPTIONS.get(raw_country, []))
         if allowed_timezones:
@@ -3888,23 +3771,38 @@ def profile():
         
         derived_curriculum = COUNTRY_CURRICULUM_MAP.get(raw_country, "National")
 
+        raw_university_type = ""
+        raw_university_country = ""
         raw_university = ""
-        if raw_country == "Nepal" and raw_study_lvl in ("Bachelors", "Masters"):
-            sel_univ = request.form.get("university_select", "").strip()
-            if sel_univ in ("Foreign-Affiliated", "Other"):
-                custom_univ = request.form.get("university_custom", "").strip()
-                if custom_univ:
-                    raw_university = f"{sel_univ}: {custom_univ}"
+        raw_program = ""
+        raw_program_duration = ""
+        raw_semester = ""
+
+        if raw_study_lvl in ("Bachelors", "Masters"):
+            raw_program = (request.form.get("program") or "").strip()
+            raw_semester = (request.form.get("semester") or "").strip()
+            raw_university_type = (request.form.get("university_type") or "").strip()
+            
+            if raw_university_type == "Foreign":
+                raw_university_country = (request.form.get("university_country") or "").strip()
+                raw_university = (request.form.get("foreign_university") or "").strip()
+            else: # National
+                raw_university_type = "National"
+                raw_university_country = ""
+                sel_univ = request.form.get("university_select", "").strip()
+                if sel_univ in ("Foreign-Affiliated", "Other"):
+                    custom_univ = request.form.get("university_custom", "").strip()
+                    if custom_univ:
+                        raw_university = f"{sel_univ}: {custom_univ}"
+                    else:
+                        raw_university = sel_univ
                 else:
                     raw_university = sel_univ
-            else:
-                raw_university = sel_univ
-        
-        # Programs with explicit duration selection (frontend PROGRAMS_WITH_DURATION mirrors this).
-        # BSc CSIT excluded intentionally: implicit 4-year TU standard, no duration field shown.
-        DURATION_PROGRAMS = {"BSc IT"}
-        raw_program_duration = request.form.get("program_duration", "").strip() \
-            if raw_program in DURATION_PROGRAMS else ""
+            
+            from app.models import CurriculumProgram
+            prog_rec = CurriculumProgram.query.filter_by(name=raw_program, is_active=True).first()
+            has_duration = prog_rec.has_duration if prog_rec else (raw_program in {"BSc IT"})
+            raw_program_duration = request.form.get("program_duration", "").strip() if has_duration else ""
 
         profile_data = {
             "country":           raw_country,
@@ -3916,6 +3814,8 @@ def profile():
             "program_duration":  raw_program_duration,
             "semester":          raw_semester,
             "university":        raw_university,
+            "university_type":   raw_university_type,
+            "university_country": raw_university_country,
             "cumulative_gpa":    request.form.get("cumulative_gpa", 0.0),
             "commute_buffer_minutes": request.form.get("commute_buffer_minutes", 0),
             "attendance_pct":    float(request.form.get("attendance_pct") or 85.0),

@@ -1,5 +1,5 @@
 from app import create_app, db
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 
 app = create_app()
 
@@ -8,6 +8,10 @@ with app.app_context():
     db.create_all()
     
     print("Running migrations to add missing columns...")
+    
+    inspector = inspect(db.engine)
+    columns = [c['name'] for c in inspector.get_columns('student_profiles')]
+    
     queries = [
         "ALTER TABLE student_profiles ADD study_level VARCHAR(50) DEFAULT 'Class 9'",
         "ALTER TABLE student_profiles ADD has_completed_assessment BOOLEAN DEFAULT 0",
@@ -41,6 +45,11 @@ with app.app_context():
         "ALTER TABLE users ADD email_verified_status VARCHAR(32) DEFAULT 'unknown'"
     ]
     
+    if 'university_type' not in columns:
+        queries.append("ALTER TABLE student_profiles ADD university_type VARCHAR(50) DEFAULT NULL")
+    if 'university_country' not in columns:
+        queries.append("ALTER TABLE student_profiles ADD university_country VARCHAR(100) DEFAULT NULL")
+        
     for q in queries:
         try:
             db.session.execute(text(q))

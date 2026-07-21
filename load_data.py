@@ -127,4 +127,14 @@ if __name__ == "__main__":
         help="Drop and recreate all tables before loading (DESTRUCTIVE — recreate admin after).",
     )
     args = parser.parse_args()
+    if args.fresh:
+        print("WARNING: Running with --fresh will drop ALL database tables, deleting all admin accounts and custom data!")
+        try:
+            confirm = input("Type 'YES DELETE EVERYTHING' to confirm: ")
+        except (KeyboardInterrupt, EOFError):
+            print("\nAborted.")
+            sys.exit(0)
+        if confirm.strip() != "YES DELETE EVERYTHING":
+            print("Aborted. No changes made.")
+            sys.exit(0)
     load_seed_data(fresh=args.fresh)

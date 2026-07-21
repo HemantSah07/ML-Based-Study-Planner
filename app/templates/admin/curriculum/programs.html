@@ -104,10 +104,58 @@
                                                     <option value="Masters" {% if item.level_name == 'Masters' %}selected{% endif %}>Masters</option>
                                                 </select>
                                             </div>
-                                            <div class="mb-3 form-check form-switch mt-3">
-                                                <input class="form-check-input" type="checkbox" name="has_duration" id="hasDurationEdit{{ item.id }}" {% if item.has_duration %}checked{% endif %}>
-                                                <label class="form-check-label text-white small" for="hasDurationEdit{{ item.id }}">Has variable program duration</label>
-                                            </div>
+                                             <div class="mb-3 form-check form-switch mt-3">
+                                                 <input class="form-check-input" type="checkbox" name="has_duration" id="hasDurationEdit{{ item.id }}" {% if item.has_duration %}checked{% endif %}>
+                                                 <label class="form-check-label text-white small" for="hasDurationEdit{{ item.id }}">Has variable program duration</label>
+                                             </div>
+                                             
+                                             <!-- Dynamic Duration Options for Edit Modal -->
+                                             <div id="durationOptionsContainerEdit{{ item.id }}" class="mb-3 border border-secondary p-3 rounded bg-dark-light" style="{% if not item.has_duration %}display: none;{% endif %}">
+                                                 <label class="form-label text-muted small d-block mb-2">Duration Options</label>
+                                                 <div id="durationRowsEdit{{ item.id }}">
+                                                     {% if item.parsed_duration_options %}
+                                                         {% for opt in item.parsed_duration_options %}
+                                                         <div class="row g-2 mb-2 align-items-center duration-row">
+                                                             <div class="col-5">
+                                                                 <input type="text" name="duration_values[]" class="form-control form-control-sm bg-dark border-secondary text-white" value="{{ opt.value }}" placeholder="Value (e.g. 3 Years)" required>
+                                                             </div>
+                                                             <div class="col-6">
+                                                                 <input type="text" name="duration_labels[]" class="form-control form-control-sm bg-dark border-secondary text-white" value="{{ opt.label }}" placeholder="Label (e.g. 3 Years (UK))">
+                                                             </div>
+                                                             <div class="col-1 text-end">
+                                                                 <button type="button" class="btn btn-sm btn-outline-danger border-0 p-0 remove-duration-row"><i class="fas fa-trash-alt"></i></button>
+                                                             </div>
+                                                         </div>
+                                                         {% endfor %}
+                                                     {% else %}
+                                                         <div class="row g-2 mb-2 align-items-center duration-row">
+                                                             <div class="col-5">
+                                                                 <input type="text" name="duration_values[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Value (e.g. 3 Years)" value="3 Years" required>
+                                                             </div>
+                                                             <div class="col-6">
+                                                                 <input type="text" name="duration_labels[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Label" value="3 Years (International-affiliated, e.g. APU/LBEF)">
+                                                             </div>
+                                                             <div class="col-1 text-end">
+                                                                 <button type="button" class="btn btn-sm btn-outline-danger border-0 p-0 remove-duration-row"><i class="fas fa-trash-alt"></i></button>
+                                                             </div>
+                                                         </div>
+                                                         <div class="row g-2 mb-2 align-items-center duration-row">
+                                                             <div class="col-5">
+                                                                 <input type="text" name="duration_values[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Value (e.g. 4 Years)" value="4 Years" required>
+                                                             </div>
+                                                             <div class="col-6">
+                                                                 <input type="text" name="duration_labels[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Label" value="4 Years (TU-affiliated BSc CSIT)">
+                                                             </div>
+                                                             <div class="col-1 text-end">
+                                                                 <button type="button" class="btn btn-sm btn-outline-danger border-0 p-0 remove-duration-row"><i class="fas fa-trash-alt"></i></button>
+                                                             </div>
+                                                         </div>
+                                                     {% endif %}
+                                                 </div>
+                                                 <button type="button" class="btn btn-xs btn-outline-info w-100 mt-2 add-duration-row-btn" data-target-id="{{ item.id }}">
+                                                     <i class="fas fa-plus me-1"></i> Add Duration Option
+                                                 </button>
+                                             </div>
                                             <div class="mb-3">
                                                 <label class="form-label text-muted small">Sort Order</label>
                                                 <input type="number" name="sort_order" class="form-control bg-dark border-secondary text-white" value="{{ item.sort_order }}" required>
@@ -148,6 +196,38 @@
                     <input class="form-check-input" type="checkbox" name="has_duration" id="hasDurationAdd">
                     <label class="form-check-label text-white small" for="hasDurationAdd">Has variable program duration</label>
                 </div>
+                
+                <!-- Dynamic Duration Options for Add Form -->
+                <div id="durationOptionsContainer" class="mb-3 border border-secondary p-3 rounded bg-dark-light" style="display: none;">
+                    <label class="form-label text-muted small d-block mb-2">Duration Options</label>
+                    <div id="durationRows">
+                        <div class="row g-2 mb-2 align-items-center duration-row">
+                            <div class="col-5">
+                                <input type="text" name="duration_values[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Value (e.g. 3 Years)" value="3 Years">
+                            </div>
+                            <div class="col-6">
+                                <input type="text" name="duration_labels[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Label" value="3 Years (International-affiliated, e.g. APU/LBEF)">
+                            </div>
+                            <div class="col-1 text-end">
+                                <button type="button" class="btn btn-sm btn-outline-danger border-0 p-0 remove-duration-row"><i class="fas fa-trash-alt"></i></button>
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-2 align-items-center duration-row">
+                            <div class="col-5">
+                                <input type="text" name="duration_values[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Value (e.g. 4 Years)" value="4 Years">
+                            </div>
+                            <div class="col-6">
+                                <input type="text" name="duration_labels[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Label" value="4 Years (TU-affiliated BSc CSIT)">
+                            </div>
+                            <div class="col-1 text-end">
+                                <button type="button" class="btn btn-sm btn-outline-danger border-0 p-0 remove-duration-row"><i class="fas fa-trash-alt"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-xs btn-outline-info w-100 mt-2" id="addDurationRowBtn">
+                        <i class="fas fa-plus me-1"></i> Add Duration Option
+                    </button>
+                </div>
                 <div class="mb-3">
                     <label class="form-label text-muted small">Sort Order</label>
                     <input type="number" name="sort_order" class="form-control bg-dark border-secondary text-white" value="{{ (programs|length) + 1 }}" required>
@@ -169,5 +249,73 @@
         }
         return confirm(`Are you sure you want to deactivate "${name}"?`);
     }
+
+    document.addEventListener("DOMContentLoaded", function() {
+        // Toggle container visibility for Add Form
+        const hasDurationAdd = document.getElementById("hasDurationAdd");
+        const durationOptionsContainer = document.getElementById("durationOptionsContainer");
+        
+        if (hasDurationAdd && durationOptionsContainer) {
+            hasDurationAdd.addEventListener("change", function() {
+                durationOptionsContainer.style.display = this.checked ? "block" : "none";
+            });
+        }
+
+        // Add row helper function
+        function createDurationRow(val = "", lbl = "") {
+            const row = document.createElement("div");
+            row.className = "row g-2 mb-2 align-items-center duration-row";
+            row.innerHTML = `
+                <div class="col-5">
+                    <input type="text" name="duration_values[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Value (e.g. 3 Years)" value="${val}" required>
+                </div>
+                <div class="col-6">
+                    <input type="text" name="duration_labels[]" class="form-control form-control-sm bg-dark border-secondary text-white" placeholder="Label (e.g. 3 Years (UK))" value="${lbl}">
+                </div>
+                <div class="col-1 text-end">
+                    <button type="button" class="btn btn-sm btn-outline-danger border-0 p-0 remove-duration-row"><i class="fas fa-trash-alt"></i></button>
+                </div>
+            `;
+            return row;
+        }
+
+        // Add row button for Add form
+        const addDurationRowBtn = document.getElementById("addDurationRowBtn");
+        const durationRows = document.getElementById("durationRows");
+        if (addDurationRowBtn && durationRows) {
+            addDurationRowBtn.addEventListener("click", function() {
+                durationRows.appendChild(createDurationRow());
+            });
+        }
+
+        // Edit Modals Toggle & Add Row handlers
+        document.querySelectorAll(".form-check-input[id^='hasDurationEdit']").forEach(checkbox => {
+            const progId = checkbox.id.replace("hasDurationEdit", "");
+            const container = document.getElementById("durationOptionsContainerEdit" + progId);
+            checkbox.addEventListener("change", function() {
+                container.style.display = this.checked ? "block" : "none";
+            });
+        });
+
+        document.querySelectorAll(".add-duration-row-btn").forEach(btn => {
+            const targetId = btn.getAttribute("data-target-id");
+            const rowsContainer = document.getElementById("durationRowsEdit" + targetId);
+            btn.addEventListener("click", function() {
+                rowsContainer.appendChild(createDurationRow());
+            });
+        });
+
+        // Delegated event listener to remove any duration row (Add or Edit)
+        document.addEventListener("click", function(e) {
+            const btn = e.target.closest(".remove-duration-row");
+            if (btn) {
+                e.preventDefault();
+                const row = btn.closest(".duration-row");
+                if (row) {
+                    row.remove();
+                }
+            }
+        });
+    });
 </script>
 {% endblock %}

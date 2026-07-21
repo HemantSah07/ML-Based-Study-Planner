@@ -21,17 +21,9 @@
         "India":          "CBSE/ICSE/State Boards"
     };
 
-    // ── Level options per country ────────────────────────────────────────────
-    var LEVEL_OPTIONS = {
-        "Nepal": [
-            "Class 6","Class 7","Class 8","Class 9","Class 10",
-            "Class 11","Class 12","Bachelors","Masters"
-        ],
-        "__default__": [
-            "Class 6","Class 7","Class 8","Class 9","Class 10",
-            "Class 11","Class 12","Bachelors","Masters"
-        ]
-    };
+    // ── Level options per country (loaded dynamically from database) ─────────
+    var LEVEL_OPTIONS = {};
+
 
     // ── Timezone data ────────────────────────────────────────────────────────
     var DEFAULT_TIMEZONES = {
@@ -52,49 +44,16 @@
                           "Australia/Adelaide","Australia/Perth"]
     };
 
-    // ── Faculty / Program data ───────────────────────────────────────────────
-    var NEB_GENERAL_FACULTIES = [
-        "Science Faculty",
-        "Management Faculty (Commerce)",
-        "Humanities and Social Sciences Faculty (Arts)",
-        "Law Faculty",
-        "Education Faculty"
-    ];
-    var NEB_TECHNICAL_STREAMS = [
-        "Computer Engineering",
-        "Civil Engineering",
-        "Electrical/Electronics Engineering",
-        "Agriculture and Animal Science",
-        "Forestry",
-        "Nursing (PCL Nursing)",
-        "Pharmacy",
-        "Medical Lab Technology (CMLT)",
-        "Hotel Management & Culinary Arts"
-    ];
+    // ── Faculty / Program data (loaded dynamically from database) ────────────
+    var NEB_GENERAL_FACULTIES = [];
+    var NEB_TECHNICAL_STREAMS = [];
 
-    // BSc IT = explicit duration (3 or 4 years).
-    // BSc CSIT = implicit 4-year TU standard — no duration field shown.
-    var NEPAL_BACHELORS_PROGRAMS = [
-        "BBA","BCA","BE Computer","BE Civil","BIT",
-        "BSc IT",
-        "BSc CSIT",
-        "BSc Nursing","BTech","MBBS"
-    ];
-    var NEPAL_MASTERS_PROGRAMS = [
-        "MBA","MCA","MIT","MSc Computer Science"
-    ];
+    var NEPAL_BACHELORS_PROGRAMS = [];
+    var NEPAL_MASTERS_PROGRAMS = [];
 
-    // ── Program Duration data ────────────────────────────────────────────────
-    // ONLY programs in this list trigger the Duration selector.
-    // BSc CSIT excluded intentionally.
-    var PROGRAMS_WITH_DURATION_ARR = ["BSc IT"];
-
-    var DURATION_OPTIONS = {
-        "BSc IT": [
-            { value: "3 Years", label: "3 Years (International-affiliated, e.g. APU/LBEF)" },
-            { value: "4 Years", label: "4 Years (TU-affiliated BSc CSIT)" }
-        ]
-    };
+    // ── Program Duration data (loaded dynamically from database) ─────────────
+    var PROGRAMS_WITH_DURATION_ARR = [];
+    var DURATION_OPTIONS = {};
 
     // Number of semesters generated per duration
     var SEMESTER_COUNTS = {
@@ -259,6 +218,7 @@
                 global.ProfileFields.NEPAL_MASTERS_PROGRAMS = data.masters_programs;
                 global.ProfileFields.PROGRAMS_WITH_DURATION = data.programs_with_duration;
                 global.ProfileFields.DURATION_OPTIONS = data.duration_options;
+                global.ProfileFields.FOREIGN_UNIVERSITIES = data.foreign_universities || {};
                 
                 if (callback) callback();
             })

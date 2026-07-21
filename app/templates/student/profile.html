@@ -169,13 +169,23 @@
                         </select>
                     </div>
 
-                    <!-- University (Bachelors / Masters only) -->
+                    <!-- University Type (Bachelors / Masters only) -->
+                    <div class="col-md-6" id="universityTypeGroup" style="display:none;">
+                        <label class="form-label text-muted small">University Type <span class="text-danger">*</span></label>
+                        <select name="university_type" id="universityTypeSelect" class="form-select border-secondary bg-dark text-white">
+                            <option value="">-- Select Type --</option>
+                            <option value="National" {% if profile.university_type == 'National' %}selected{% endif %}>National University</option>
+                            <option value="Foreign" {% if profile.university_type == 'Foreign' %}selected{% endif %}>Foreign University</option>
+                        </select>
+                    </div>
+
+                    <!-- University (National selection, Bachelors / Masters only) -->
                     <div class="col-md-6" id="universityGroup" style="display:none;">
                         <label class="form-label text-muted small">University <span class="text-danger">*</span></label>
                         <select name="university_select" id="universitySelect" class="form-select border-secondary bg-dark text-white">
                             <option value="">-- Select University --</option>
                             {% for uni in active_universities %}
-                            <option value="{{ uni.name }}" {% if profile.university == uni.name %}selected{% endif %}>{{ uni.name }}</option>
+                            <option value="{{ uni.name }}" {% if profile.university == uni.name and profile.university_type != 'Foreign' %}selected{% endif %}>{{ uni.name }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -184,6 +194,22 @@
                     <div class="col-md-6" id="universityCustomGroup" style="display:none;">
                         <label class="form-label text-muted small" id="universityCustomLabel">Specify institution <span class="text-danger">*</span></label>
                         <input type="text" name="university_custom" id="universityCustomInput" class="form-control bg-dark border-secondary text-white" placeholder="Enter institution name">
+                    </div>
+
+                    <!-- University Country (Foreign selection, Bachelors / Masters only) -->
+                    <div class="col-md-6" id="foreignUniversityCountryGroup" style="display:none;">
+                        <label class="form-label text-muted small">University Country <span class="text-danger">*</span></label>
+                        <select name="university_country" id="universityCountrySelect" class="form-select border-secondary bg-dark text-white">
+                            <option value="">-- Select Country --</option>
+                        </select>
+                    </div>
+
+                    <!-- Foreign University Selection (Bachelors / Masters only) -->
+                    <div class="col-md-6" id="foreignUniversityGroup" style="display:none;">
+                        <label class="form-label text-muted small">Foreign University <span class="text-danger">*</span></label>
+                        <select name="foreign_university" id="foreignUniversitySelect" class="form-select border-secondary bg-dark text-white">
+                            <option value="">-- Select Country First --</option>
+                        </select>
                     </div>
                 </div>
 
@@ -316,6 +342,20 @@
                     <span class="text-muted d-block">Semester</span>
                     <span class="fw-semibold text-white">{{ profile.semester }}</span>
                 </div>
+                {% endif %}
+                {% if profile.study_level in ("Bachelors", "Masters") %}
+                    {% if profile.university_type %}
+                    <div class="col-6 col-md-4">
+                        <span class="text-muted d-block">University Type</span>
+                        <span class="fw-semibold text-white">{{ profile.university_type }} University</span>
+                    </div>
+                    {% endif %}
+                    {% if profile.university_type == "Foreign" and profile.university_country %}
+                    <div class="col-6 col-md-4">
+                        <span class="text-muted d-block">University Country</span>
+                        <span class="fw-semibold text-white">{{ profile.university_country }}</span>
+                    </div>
+                    {% endif %}
                 {% endif %}
                 {% if profile.university %}
                 <div class="col-6 col-md-4">
@@ -529,6 +569,8 @@ const SAVED_PROGRAM_DURATION = {{ (profile.program_duration or '') | tojson }};
 const SAVED_SEMESTER         = {{ (profile.semester or '') | tojson }};
 const SAVED_UNIVERSITY       = {{ (profile.university or '') | tojson }};
 const SAVED_TIMEZONE         = {{ (profile.timezone or 'Asia/Kathmandu') | tojson }};
+const SAVED_UNIVERSITY_TYPE  = {{ (profile.university_type or '') | tojson }};
+const SAVED_UNIVERSITY_COUNTRY = {{ (profile.university_country or '') | tojson }};
 
 // ── Pull shared data arrays from ProfileFields module ─────────────────────
 // (profile-fields.js loaded above exposes window.ProfileFields)
@@ -553,11 +595,19 @@ const programDurationGroup  = document.getElementById("programDurationGroup");
 const programDurationSelect = document.getElementById("programDurationSelect");
 const semesterGroup  = document.getElementById("semesterGroup");
 const semesterSelect = document.getElementById("semesterSelect");
-const universityGroup       = document.getElementById("universityGroup");
-const universitySelect      = document.getElementById("universitySelect");
-const universityCustomGroup = document.getElementById("universityCustomGroup");
-const universityCustomLabel = document.getElementById("universityCustomLabel");
-const universityCustomInput = document.getElementById("universityCustomInput");
+
+const universityTypeGroup       = document.getElementById("universityTypeGroup");
+const universityTypeSelect      = document.getElementById("universityTypeSelect");
+const universityGroup           = document.getElementById("universityGroup");
+const universitySelect          = document.getElementById("universitySelect");
+const universityCustomGroup     = document.getElementById("universityCustomGroup");
+const universityCustomLabel     = document.getElementById("universityCustomLabel");
+const universityCustomInput     = document.getElementById("universityCustomInput");
+const foreignUniversityCountryGroup = document.getElementById("foreignUniversityCountryGroup");
+const universityCountrySelect   = document.getElementById("universityCountrySelect");
+const foreignUniversityGroup    = document.getElementById("foreignUniversityGroup");
+const foreignUniversitySelect   = document.getElementById("foreignUniversitySelect");
+
 const timezoneGroup  = document.getElementById("timezoneGroup");
 const timezoneSelect = document.getElementById("timezoneSelect");
 const timezoneHidden = document.getElementById("timezoneHidden");
@@ -685,12 +735,17 @@ function updateConditionalFields(country, level, savedProg) {
     semesterGroup.style.display = showSemester ? "" : "none";
     if (!showSemester) semesterSelect.value = "";
 
-    // University visibility (delegates to shared helper)
-    ProfileFields.updateUniversityGroup(
-        country, level,
-        universityGroup, universitySelect,
-        universityCustomGroup, universityCustomInput, universityCustomLabel
-    );
+    // University visibility
+    if (showSemester) {
+        universityTypeGroup.style.display = "";
+        universityTypeSelect.required = true;
+        refreshUniversityTypeFields();
+    } else {
+        universityTypeGroup.style.display = "none";
+        universityTypeSelect.required = false;
+        universityTypeSelect.value = "";
+        refreshUniversityTypeFields();
+    }
 
     // Grade label
     if (GRADE_LABELS[level]) {
@@ -699,6 +754,57 @@ function updateConditionalFields(country, level, savedProg) {
     } else {
         gradeLabelEl.textContent = "Previous Grade %";
         gradeHintEl.textContent  = "Enter your most recent overall grade percentage.";
+    }
+}
+
+function refreshUniversityTypeFields() {
+    const type = universityTypeSelect.value;
+    if (universityTypeSelect.required && type === "National") {
+        universityGroup.style.display = "";
+        universitySelect.required = true;
+        
+        universityCustomGroup.style.display = "none";
+        universityCustomInput.required = false;
+        
+        foreignUniversityCountryGroup.style.display = "none";
+        universityCountrySelect.required = false;
+        
+        foreignUniversityGroup.style.display = "none";
+        foreignUniversitySelect.required = false;
+        
+        ProfileFields.refreshUniversityCustom(
+            universitySelect.value, universityCustomGroup, universityCustomInput, universityCustomLabel
+        );
+    } else if (universityTypeSelect.required && type === "Foreign") {
+        universityGroup.style.display = "none";
+        universitySelect.required = false;
+        universitySelect.value = "";
+        
+        universityCustomGroup.style.display = "none";
+        universityCustomInput.required = false;
+        universityCustomInput.value = "";
+        
+        foreignUniversityCountryGroup.style.display = "";
+        universityCountrySelect.required = true;
+        
+        foreignUniversityGroup.style.display = "";
+        foreignUniversitySelect.required = true;
+    } else {
+        universityGroup.style.display = "none";
+        universitySelect.required = false;
+        universitySelect.value = "";
+        
+        universityCustomGroup.style.display = "none";
+        universityCustomInput.required = false;
+        universityCustomInput.value = "";
+        
+        foreignUniversityCountryGroup.style.display = "none";
+        universityCountrySelect.required = false;
+        universityCountrySelect.value = "";
+        
+        foreignUniversityGroup.style.display = "none";
+        foreignUniversitySelect.required = false;
+        foreignUniversitySelect.value = "";
     }
 }
 
@@ -728,6 +834,28 @@ if (programDurationSelect) {
     });
 }
 
+universityTypeSelect.addEventListener("change", function() {
+    refreshUniversityTypeFields();
+});
+
+universityCountrySelect.addEventListener("change", function() {
+    populateForeignUniversities(this.value, "");
+});
+
+function populateForeignUniversities(country, selectedUni) {
+    foreignUniversitySelect.innerHTML = '<option value="">-- Select University --</option>';
+    if (!country) return;
+    const unis = ProfileFields.FOREIGN_UNIVERSITIES[country] || [];
+    unis.forEach(uni => {
+        const o = document.createElement("option");
+        o.value = uni.name;
+        const partnerText = uni.partners && uni.partners.length > 0 ? ` (Partners: ${uni.partners.join(', ')})` : '';
+        o.textContent = uni.name + partnerText;
+        if (uni.name === selectedUni) o.selected = true;
+        foreignUniversitySelect.appendChild(o);
+    });
+}
+
 // University custom toggle (delegates to shared helper)
 if (universitySelect) {
     universitySelect.addEventListener("change", function() {
@@ -752,6 +880,41 @@ document.addEventListener("DOMContentLoaded", function() {
 
         if (SAVED_COUNTRY) {
             populateLevels(SAVED_COUNTRY, SAVED_STUDY_LEVEL);
+            
+            // Populate foreign countries
+            const foreignCountries = Object.keys(ProfileFields.FOREIGN_UNIVERSITIES || {});
+            universityCountrySelect.innerHTML = '<option value="">-- Select Country --</option>';
+            foreignCountries.forEach(c => {
+                const o = document.createElement("option");
+                o.value = c;
+                o.textContent = c;
+                if (c === SAVED_UNIVERSITY_COUNTRY) o.selected = true;
+                universityCountrySelect.appendChild(o);
+            });
+
+            // Restore university type
+            if (SAVED_UNIVERSITY_TYPE) {
+                universityTypeSelect.value = SAVED_UNIVERSITY_TYPE;
+                refreshUniversityTypeFields();
+                
+                if (SAVED_UNIVERSITY_TYPE === "Foreign") {
+                    populateForeignUniversities(SAVED_UNIVERSITY_COUNTRY, SAVED_UNIVERSITY);
+                } else if (SAVED_UNIVERSITY_TYPE === "National") {
+                    if (SAVED_UNIVERSITY.startsWith("Foreign-Affiliated: ")) {
+                        universitySelect.value = "Foreign-Affiliated";
+                        universityCustomInput.value = SAVED_UNIVERSITY.substring("Foreign-Affiliated: ".length);
+                    } else if (SAVED_UNIVERSITY.startsWith("Other: ")) {
+                        universitySelect.value = "Other";
+                        universityCustomInput.value = SAVED_UNIVERSITY.substring("Other: ".length);
+                    } else {
+                        universitySelect.value = SAVED_UNIVERSITY;
+                    }
+                    ProfileFields.refreshUniversityCustom(
+                        universitySelect.value, universityCustomGroup, universityCustomInput, universityCustomLabel
+                    );
+                }
+            }
+
             // semester restore (after populateLevels sets visibility)
             if (SAVED_SEMESTER) {
                 const semOpts = semesterSelect.options;
@@ -762,19 +925,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     }
                 }
             }
-            // university restore
-            if (SAVED_UNIVERSITY) {
-                if (SAVED_UNIVERSITY.startsWith("Foreign-Affiliated: ")) {
-                    universitySelect.value = "Foreign-Affiliated";
-                    universityCustomInput.value = SAVED_UNIVERSITY.substring("Foreign-Affiliated: ".length);
-                } else if (SAVED_UNIVERSITY.startsWith("Other: ")) {
-                    universitySelect.value = "Other";
-                    universityCustomInput.value = SAVED_UNIVERSITY.substring("Other: ".length);
-                } else {
-                    universitySelect.value = SAVED_UNIVERSITY;
-                }
-                updateConditionalFields(countrySelect.value, studyLevelSel.value, SAVED_PROGRAM);
-            }
+            updateConditionalFields(countrySelect.value, studyLevelSel.value, SAVED_PROGRAM);
         }
     });
 });

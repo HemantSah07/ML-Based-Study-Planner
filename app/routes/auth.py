@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from app import db, bcrypt
 from app.models import User, AuditLog, StudentProfile, AvailabilitySlot, University, EmailVerificationCode
@@ -91,124 +91,340 @@ def check_password_strength(password):
     if re.search(r'[@#$%^&*]', password): score += 1
     return score >= 4 and len(password) >= 8
 
+@auth_bp.route("/send-verification-ajax", methods=["POST"])
+def send_verification_ajax():
+    email = request.form.get("email", "").strip().lower()
+    if not email:
+        return jsonify({"status": "error", "message": "Email address is required"}), 400
+        
+    # Check if duplicate email
+    if User.query.filter(db.func.lower(User.email) == email).first():
+        return jsonify({"status": "error", "message": "This email is already registered. Please login"}), 400
+        
+    # Format & Deliverability check
+    from app.utils.email_verification import verify_email
+    verification = verify_email(email)
+    if not verification.get("is_valid_format") or verification.get("deliverability") == "UNDELIVERABLE":
+        return jsonify({"status": "error", "message": "This email address doesn't appear to be valid or deliverable, please check and try again"}), 400
+        
+    # Generate code
+    import secrets
+    code = "".join(secrets.choice("0123456789") for _ in range(6))
+    
+    now = datetime.utcnow()
+    expires = now + timedelta(minutes=10)
+    
+    # Clear existing code
+    EmailVerificationCode.query.filter_by(email=email).delete()
+    
+    verification_code = EmailVerificationCode(
+        email=email,
+        code=code,
+        created_at=now,
+        expires_at=expires,
+        verified=False,
+        attempts=0
+    )
+    db.session.add(verification_code)
+    db.session.commit()
+    
+    # Send email
+    from flask_mail import Message
+    from app import mail
+    try:
+        msg = Message(
+            subject="Verify Your Email - Smart Study",
+            recipients=[email],
+            body=f"Your Smart Study verification code is: {code}. This code expires in 10 minutes."
+        )
+        mail.send(msg)
+        return jsonify({"status": "success", "message": "Verification email sent. Please check your inbox."})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Failed to send verification email: {str(e)}. Please try again later."}), 500
+
+@auth_bp.route("/verify-code-ajax", methods=["POST"])
+def verify_code_ajax():
+    email = request.form.get("email", "").strip().lower()
+    user_code = request.form.get("code", "").strip()
+    
+    if not email or not user_code:
+        return jsonify({"status": "error", "message": "Email and verification code are required"}), 400
+        
+    code_record = EmailVerificationCode.query.filter_by(email=email).order_by(EmailVerificationCode.created_at.desc()).first()
+    if not code_record:
+        return jsonify({"status": "error", "message": "No verification code found. Please request a new one."}), 400
+        
+    # Expiration check
+    if datetime.utcnow() > code_record.expires_at:
+        return jsonify({"status": "error", "message": "Verification code has expired. Please request a new one."}), 400
+        
+    # Attempt limit check
+    if code_record.attempts >= 5:
+        return jsonify({"status": "error", "message": "Too many failed attempts. Please request a new code."}), 400
+        
+    # Code check
+    if code_record.code != user_code:
+        code_record.attempts += 1
+        db.session.commit()
+        remaining = 5 - code_record.attempts
+        if remaining <= 0:
+            return jsonify({"status": "error", "message": "Too many failed attempts. Please request a new code."}), 400
+        else:
+            return jsonify({"status": "error", "message": f"Invalid verification code. {remaining} attempt(s) remaining."}), 400
+            
+    code_record.verified = True
+    db.session.commit()
+    
+    session['verified_email'] = email
+    return jsonify({"status": "success", "message": "✓ Email Verified"})
+
 @auth_bp.route("/register", methods=["GET", "POST"])
 def register():
     if current_user.is_authenticated:
         return redirect(url_for('student.dashboard'))
         
     if request.method == "POST":
-        full_name = request.form.get("full_name")
-        email = request.form.get("email")
+        full_name = request.form.get("full_name", "").strip()
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password")
-        country = request.form.get("country", "Nepal")
-        curriculum = COUNTRY_CURRICULUM_MAP.get(country, "National")
-        level_of_study = request.form.get("level_of_study")
-        program = request.form.get("program") if level_of_study in ("Class 11", "Class 12", "Bachelors", "Masters") else ""
-        semester = request.form.get("semester") if level_of_study in ("Bachelors", "Masters") else ""
-
-        # University (shown on registration for Bachelors / Masters, Nepal only)
-        university = ""
-        if level_of_study in ("Bachelors", "Masters"):
-            uni_select = request.form.get("university_select", "").strip()
-            uni_custom = request.form.get("university_custom", "").strip()
-            if uni_select in ("Foreign-Affiliated", "Other"):
-                university = f"{uni_select}: {uni_custom}" if uni_custom else uni_select
-            else:
-                university = uni_select
+        confirm_password = request.form.get("confirm_password")
+        country = request.form.get("country", "Nepal").strip()
+        level_of_study = request.form.get("level_of_study", "").strip()
         
-        # Auto-generate a unique student identifier internally
-        import uuid
-        student_number = f"STU-{uuid.uuid4().hex[:8].upper()}"
+        # Check if email is already verified in this session (new flow)
+        session_verified_email = session.get('verified_email', '').strip().lower()
+        is_verified_inline = (session_verified_email and email == session_verified_email)
         
-        # Resolve year_of_study
-        year_of_study = 1
-        if semester:
-            if "Semester" in semester:
-                try:
-                    sem_num = int(semester.replace("Semester", "").strip())
-                    year_of_study = (sem_num - 1) // 2 + 1
-                except ValueError:
-                    pass
-            elif "Professional Year" in semester:
-                try:
-                    year_of_study = int(semester.replace("Professional Year", "").strip())
-                except ValueError:
-                    pass
-        
-        # Case-insensitive email duplicate check
-        if User.query.filter(db.func.lower(User.email) == email.lower()).first():
+        # If not verified inline, we fall back to the old registration/redirect flow (for unit tests / compatibility)
+        if not is_verified_inline:
+            # Case-insensitive duplicate check
+            if User.query.filter(db.func.lower(User.email) == email).first():
+                flash("This email is already registered. Please login", "danger")
+                return redirect(url_for('auth.register'))
+                
+            if not check_password_strength(password):
+                flash("Password does not meet strength requirements", "danger")
+                return redirect(url_for('auth.register'))
+                
+            # Exclude program/duration/university for lower classes
+            program = request.form.get("program") if level_of_study in ("Class 11", "Class 12", "Bachelors", "Masters") else ""
+            semester = request.form.get("semester") if level_of_study in ("Bachelors", "Masters") else ""
+            
+            university = ""
+            if level_of_study in ("Bachelors", "Masters"):
+                uni_select = request.form.get("university_select", "").strip()
+                uni_custom = request.form.get("university_custom", "").strip()
+                if uni_select in ("Foreign-Affiliated", "Other"):
+                    university = f"{uni_select}: {uni_custom}" if uni_custom else uni_select
+                else:
+                    university = uni_select
+            
+            import uuid
+            student_number = f"STU-{uuid.uuid4().hex[:8].upper()}"
+            
+            year_of_study = 1
+            if semester:
+                if "Semester" in semester:
+                    try:
+                        sem_num = int(semester.replace("Semester", "").strip())
+                        year_of_study = (sem_num - 1) // 2 + 1
+                    except ValueError:
+                        pass
+                elif "Professional Year" in semester:
+                    try:
+                        year_of_study = int(semester.replace("Professional Year", "").strip())
+                    except ValueError:
+                        pass
+            
+            from app.utils.email_verification import verify_email
+            verification = verify_email(email)
+            if not verification.get("is_valid_format") or verification.get("deliverability") == "UNDELIVERABLE":
+                flash("This email address doesn't appear to be valid or deliverable, please check and try again", "danger")
+                return redirect(url_for('auth.register'))
+                
+            import secrets
+            code = "".join(secrets.choice("0123456789") for _ in range(6))
+            
+            now = datetime.utcnow()
+            expires = now + timedelta(minutes=10)
+            
+            EmailVerificationCode.query.filter_by(email=email).delete()
+            
+            verification_code = EmailVerificationCode(
+                email=email,
+                code=code,
+                created_at=now,
+                expires_at=expires,
+                verified=False,
+                attempts=0
+            )
+            db.session.add(verification_code)
+            db.session.commit()
+            
+            session['temp_registration'] = {
+                'email': email,
+                'full_name': full_name,
+                'password': password,
+                'country': country,
+                'curriculum': COUNTRY_CURRICULUM_MAP.get(country, "National"),
+                'level_of_study': level_of_study,
+                'program': program,
+                'semester': semester,
+                'university': university,
+                'student_number': student_number,
+                'year_of_study': year_of_study,
+                'email_verified_status': verification.get("deliverability", "unknown").lower()
+            }
+            session['resend_count'] = 0
+            session['last_resend_time'] = None
+            
+            from flask_mail import Message
+            from app import mail
+            try:
+                msg = Message(
+                    subject="Verify Your Email - Smart Study",
+                    recipients=[email],
+                    body=f"Your Smart Study verification code is: {code}. This code expires in 10 minutes."
+                )
+                mail.send(msg)
+                flash("A 6-digit verification code has been sent to your email.", "info")
+            except Exception as e:
+                flash(f"Failed to send verification email: {e}. Please try again later.", "danger")
+                return redirect(url_for('auth.register'))
+                
+            return redirect(url_for('auth.verify_email_code', email=email))
+            
+        # --- NEW FLOW (verified inline) ---
+        code_record = EmailVerificationCode.query.filter_by(email=email).order_by(EmailVerificationCode.created_at.desc()).first()
+        if not code_record or not code_record.verified or datetime.utcnow() > code_record.expires_at:
+            flash("Please verify your email address before registering.", "danger")
+            return redirect(url_for('auth.register'))
+            
+        # Email uniqueness check
+        if User.query.filter(db.func.lower(User.email) == email).first():
             flash("This email is already registered. Please login", "danger")
+            return redirect(url_for('auth.register'))
+            
+        if not full_name:
+            flash("Full Name is required.", "danger")
             return redirect(url_for('auth.register'))
             
         if not check_password_strength(password):
             flash("Password does not meet strength requirements", "danger")
             return redirect(url_for('auth.register'))
             
-        # Email verification check using Abstract API
+        if password != confirm_password:
+            flash("Passwords do not match.", "danger")
+            return redirect(url_for('auth.register'))
+            
+        curriculum = COUNTRY_CURRICULUM_MAP.get(country, "National")
+        
+        university_type = ""
+        university_country = ""
+        university = ""
+        program = ""
+        program_duration = ""
+        semester = ""
+        
+        if level_of_study in ("Bachelors", "Masters"):
+            university_type = request.form.get("university_type", "").strip()
+            program = request.form.get("program", "").strip()
+            program_duration = request.form.get("program_duration", "").strip()
+            
+            if not university_type or not program:
+                flash("Academic program and university settings are required.", "danger")
+                return redirect(url_for('auth.register'))
+                
+            if university_type == "Foreign":
+                university_country = request.form.get("university_country", "").strip()
+                university = request.form.get("foreign_university", "").strip()
+                if not university_country or not university:
+                    flash("Foreign country and university selections are required.", "danger")
+                    return redirect(url_for('auth.register'))
+            else: # National
+                university_type = "National"
+                university_country = ""
+                uni_select = request.form.get("university_select", "").strip()
+                if uni_select in ("Foreign-Affiliated", "Other"):
+                    uni_custom = request.form.get("university_custom", "").strip()
+                    university = f"{uni_select}: {uni_custom}" if uni_custom else uni_select
+                else:
+                    university = uni_select
+                if not university:
+                    flash("University selection is required.", "danger")
+                    return redirect(url_for('auth.register'))
+                    
+            semester = f"Semester 1"
+            
+        import uuid
+        student_number = f"STU-{uuid.uuid4().hex[:8].upper()}"
+        
+        # Create User record
         from app.utils.email_verification import verify_email
         verification = verify_email(email)
-        
-        # Block ONLY if format is invalid OR if deliverability is explicitly UNDELIVERABLE
-        if not verification.get("is_valid_format") or verification.get("deliverability") == "UNDELIVERABLE":
-            flash("This email address doesn't appear to be valid or deliverable, please check and try again", "danger")
-            return redirect(url_for('auth.register'))
-            
-        # ── 1. Generate a cryptographically secure 6-digit code ──────────────────
-        import secrets
-        code = "".join(secrets.choice("0123456789") for _ in range(6))
-        
-        now = datetime.utcnow()
-        expires = now + timedelta(minutes=10)
-        
-        # Clear any existing code for this email first
-        EmailVerificationCode.query.filter_by(email=email).delete()
-        
-        verification_code = EmailVerificationCode(
+        status = verification.get("deliverability", "unknown").lower()
+        if status not in ('deliverable', 'risky', 'unknown', 'undeliverable'):
+            status = 'deliverable'
+
+        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+        new_user = User(
+            username=email,
+            full_name=full_name,
             email=email,
-            code=code,
-            created_at=now,
-            expires_at=expires,
-            verified=False,
-            attempts=0
+            password_hash=hashed_password,
+            role='student',
+            email_verified_status=status
         )
-        db.session.add(verification_code)
+        db.session.add(new_user)
+        db.session.flush()
+        
+        # Create StudentProfile record
+        profile = StudentProfile(
+            user_id=new_user.id,
+            student_number=student_number,
+            program=program,
+            year_of_study=1,
+            level_of_study=level_of_study,
+            study_level=level_of_study,
+            semester=semester,
+            country=country,
+            university=university,
+            university_type=university_type,
+            university_country=university_country,
+            timezone=default_timezone_for_country(country),
+            curriculum=curriculum,
+            cumulative_gpa=0.0,
+            program_duration=program_duration
+        )
+        db.session.add(profile)
+        
+        # Seed availability slots
+        days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        default_slots = [
+            {"start": "00:00", "end": "06:00", "category": "Sleep"},
+            {"start": "08:00", "end": "17:00", "category": "Class/Academic"},
+            {"start": "22:00", "end": "23:59", "category": "Sleep"}
+        ]
+        for day in days:
+            for ds in default_slots:
+                slot = AvailabilitySlot(
+                    user_id=new_user.id,
+                    day_of_week=day,
+                    start_time=ds["start"],
+                    end_time=ds["end"],
+                    slot_type="Sleep" if ds["category"] == "Sleep" else "Busy",
+                    category=ds["category"],
+                    is_overnight=ds["start"] > ds["end"],
+                )
+                db.session.add(slot)
+                
         db.session.commit()
         
-        # ── 2. Store registration data temporarily in the session ────────────────
-        from flask import session
-        session['temp_registration'] = {
-            'email': email,
-            'full_name': full_name,
-            'password': password,
-            'country': country,
-            'curriculum': curriculum,
-            'level_of_study': level_of_study,
-            'program': program,
-            'semester': semester,
-            'university': university,
-            'student_number': student_number,
-            'year_of_study': year_of_study,
-            'email_verified_status': verification.get("deliverability", "unknown").lower()
-        }
-        session['resend_count'] = 0
-        session['last_resend_time'] = None
-
-        # ── 3. Send verification code email via Flask-Mail ───────────────────────
-        from flask_mail import Message
-        from app import mail
-        try:
-            msg = Message(
-                subject="Verify Your Email - Smart Study",
-                recipients=[email],
-                body=f"Your Smart Study verification code is: {code}. This code expires in 10 minutes."
-            )
-            mail.send(msg)
-            flash("A 6-digit verification code has been sent to your email.", "info")
-        except Exception as e:
-            flash(f"Failed to send verification email: {e}. Please try again later.", "danger")
-            return redirect(url_for('auth.register'))
-            
-        return redirect(url_for('auth.verify_email_code', email=email))
+        # Log student in and clear temp data
+        login_user(new_user)
+        session.pop('verified_email', None)
+        flash("Registration successful!", "success")
+        return redirect(url_for('student.dashboard'))
         
     return render_template("auth/register.html", active_universities=University.query.filter_by(is_active=True).order_by(University.sort_order).all())
 
