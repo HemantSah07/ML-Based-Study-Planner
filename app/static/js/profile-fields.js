@@ -240,6 +240,34 @@
         return DERIVED_CURRICULUM[country] || "National";
     }
 
+    function init(callback) {
+        fetch("/student/api/taxonomy")
+            .then(res => res.json())
+            .then(data => {
+                LEVEL_OPTIONS = data.education_levels;
+                NEB_GENERAL_FACULTIES = data.neb_general_faculties;
+                NEB_TECHNICAL_STREAMS = data.neb_technical_streams;
+                NEPAL_BACHELORS_PROGRAMS = data.bachelors_programs;
+                NEPAL_MASTERS_PROGRAMS = data.masters_programs;
+                PROGRAMS_WITH_DURATION_ARR = data.programs_with_duration;
+                DURATION_OPTIONS = data.duration_options;
+
+                global.ProfileFields.LEVEL_OPTIONS = data.education_levels;
+                global.ProfileFields.NEB_GENERAL_FACULTIES = data.neb_general_faculties;
+                global.ProfileFields.NEB_TECHNICAL_STREAMS = data.neb_technical_streams;
+                global.ProfileFields.NEPAL_BACHELORS_PROGRAMS = data.bachelors_programs;
+                global.ProfileFields.NEPAL_MASTERS_PROGRAMS = data.masters_programs;
+                global.ProfileFields.PROGRAMS_WITH_DURATION = data.programs_with_duration;
+                global.ProfileFields.DURATION_OPTIONS = data.duration_options;
+                
+                if (callback) callback();
+            })
+            .catch(err => {
+                console.error("Failed to load dynamic taxonomy, using defaults", err);
+                if (callback) callback();
+            });
+    }
+
     // ── Export ───────────────────────────────────────────────────────────────
     global.ProfileFields = {
         // Data
@@ -266,7 +294,8 @@
         refreshUniversityCustom:  refreshUniversityCustom,
         defaultTimezone:          defaultTimezone,
         levelsForCountry:         levelsForCountry,
-        curriculumForCountry:     curriculumForCountry
+        curriculumForCountry:     curriculumForCountry,
+        init:                     init
     };
 
 }(window));

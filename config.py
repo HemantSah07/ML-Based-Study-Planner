@@ -26,6 +26,7 @@ class Config:
         SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(basedir, 'smart_study.db')}"
     
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    ABSTRACT_API_KEY = os.getenv("ABSTRACT_API_KEY")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
     # ── Gemini model selection per feature ────────────────────────────────────
@@ -48,4 +49,12 @@ class Config:
     # When True, the daily cap check is bypassed entirely — no other code
     # changes are needed at that point.
     GEMINI_BILLING_ENABLED = os.getenv("GEMINI_BILLING_ENABLED", "False").lower() in ("true", "1", "yes")
+
+    # ── Flask-Mail configuration ──────────────────────────────────────────────
+    MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")
+    MAIL_PORT = int(os.getenv("MAIL_PORT", "587"))
+    MAIL_USE_TLS = os.getenv("MAIL_USE_TLS", "True").lower() in ("true", "1", "yes")
+    MAIL_USERNAME = os.getenv("MAIL_USERNAME")
+    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
+    MAIL_DEFAULT_SENDER = os.getenv("MAIL_USERNAME")
 

@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 from app import db, bcrypt
-from app.models import User, AuditLog, StudentProfile, AvailabilitySlot, University
+from app.models import User, AuditLog, StudentProfile, AvailabilitySlot, University, EmailVerificationCode
 from app.utils.timezone_utils import default_timezone_for_country
 from datetime import datetime, timedelta
 import re
@@ -52,6 +52,14 @@ def login():
             
         if not user.is_active:
             flash("Your account has been deactivated. Contact admin", "danger")
+            return render_template("auth/login.html")
+
+        # Seed accounts created by load_data.py are not loginable.
+        if getattr(user, 'is_seed_account', False):
+            log = AuditLog(ip_address=ip, email_attempted=email, status='failed')
+            db.session.add(log)
+            db.session.commit()
+            flash("No account found with this email address", "danger")
             return render_template("auth/login.html")
             
         if bcrypt.check_password_hash(user.password_hash, password):
@@ -136,29 +144,168 @@ def register():
             flash("Password does not meet strength requirements", "danger")
             return redirect(url_for('auth.register'))
             
-        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
-        new_user = User(username=email.lower(), full_name=full_name, email=email, password_hash=hashed_password, role='student')
+        # Email verification check using Abstract API
+        from app.utils.email_verification import verify_email
+        verification = verify_email(email)
         
+        # Block ONLY if format is invalid OR if deliverability is explicitly UNDELIVERABLE
+        if not verification.get("is_valid_format") or verification.get("deliverability") == "UNDELIVERABLE":
+            flash("This email address doesn't appear to be valid or deliverable, please check and try again", "danger")
+            return redirect(url_for('auth.register'))
+            
+        # ── 1. Generate a cryptographically secure 6-digit code ──────────────────
+        import secrets
+        code = "".join(secrets.choice("0123456789") for _ in range(6))
+        
+        now = datetime.utcnow()
+        expires = now + timedelta(minutes=10)
+        
+        # Clear any existing code for this email first
+        EmailVerificationCode.query.filter_by(email=email).delete()
+        
+        verification_code = EmailVerificationCode(
+            email=email,
+            code=code,
+            created_at=now,
+            expires_at=expires,
+            verified=False,
+            attempts=0
+        )
+        db.session.add(verification_code)
+        db.session.commit()
+        
+        # ── 2. Store registration data temporarily in the session ────────────────
+        from flask import session
+        session['temp_registration'] = {
+            'email': email,
+            'full_name': full_name,
+            'password': password,
+            'country': country,
+            'curriculum': curriculum,
+            'level_of_study': level_of_study,
+            'program': program,
+            'semester': semester,
+            'university': university,
+            'student_number': student_number,
+            'year_of_study': year_of_study,
+            'email_verified_status': verification.get("deliverability", "unknown").lower()
+        }
+        session['resend_count'] = 0
+        session['last_resend_time'] = None
+
+        # ── 3. Send verification code email via Flask-Mail ───────────────────────
+        from flask_mail import Message
+        from app import mail
+        try:
+            msg = Message(
+                subject="Verify Your Email - Smart Study",
+                recipients=[email],
+                body=f"Your Smart Study verification code is: {code}. This code expires in 10 minutes."
+            )
+            mail.send(msg)
+            flash("A 6-digit verification code has been sent to your email.", "info")
+        except Exception as e:
+            flash(f"Failed to send verification email: {e}. Please try again later.", "danger")
+            return redirect(url_for('auth.register'))
+            
+        return redirect(url_for('auth.verify_email_code', email=email))
+        
+    return render_template("auth/register.html", active_universities=University.query.filter_by(is_active=True).order_by(University.sort_order).all())
+
+
+@auth_bp.route("/verify-email", methods=["GET", "POST"])
+def verify_email_code():
+    from flask import session
+    email = request.args.get("email")
+    if not email:
+        flash("Email parameter missing.", "danger")
+        return redirect(url_for('auth.register'))
+        
+    temp_data = session.get('temp_registration')
+    if not temp_data or temp_data.get('email') != email:
+        flash("Session expired or invalid email. Please register again.", "danger")
+        return redirect(url_for('auth.register'))
+        
+    resend_count = session.get('resend_count', 0)
+    
+    # Calculate remaining time for the 60-second resend cooldown
+    time_remaining = 0
+    last_resend_time_str = session.get('last_resend_time')
+    if last_resend_time_str:
+        try:
+            last_resend_time = datetime.fromisoformat(last_resend_time_str)
+            elapsed = (datetime.utcnow() - last_resend_time).total_seconds()
+            if elapsed < 60:
+                time_remaining = int(60 - elapsed)
+        except Exception:
+            pass
+
+    code_record = EmailVerificationCode.query.filter_by(email=email).order_by(EmailVerificationCode.created_at.desc()).first()
+    if not code_record:
+        flash("No verification code found. Please request a new one.", "danger")
+        return redirect(url_for('auth.register'))
+        
+    # Expiration check
+    if datetime.utcnow() > code_record.expires_at:
+        session.pop('temp_registration', None)
+        flash("Verification code has expired. Please register again.", "danger")
+        return redirect(url_for('auth.register'))
+
+    if request.method == "POST":
+        user_code = request.form.get("code", "").strip()
+        
+        # 1. Attempt limit check
+        if code_record.attempts >= 5:
+            flash("Too many failed attempts. Please request a new code.", "danger")
+            return render_template("auth/verify_email.html", email=email, resend_count=resend_count, time_remaining=time_remaining)
+            
+        # 2. Code check
+        if code_record.code != user_code:
+            code_record.attempts += 1
+            db.session.commit()
+            
+            remaining = 5 - code_record.attempts
+            if remaining <= 0:
+                flash("Too many failed attempts. Please request a new code.", "danger")
+            else:
+                flash(f"Invalid verification code. {remaining} attempt(s) remaining.", "danger")
+            return render_template("auth/verify_email.html", email=email, resend_count=resend_count, time_remaining=time_remaining)
+            
+        # Successful code verification
+        code_record.verified = True
+        db.session.commit()
+        
+        # Create User record
+        hashed_password = bcrypt.generate_password_hash(temp_data['password']).decode('utf-8')
+        new_user = User(
+            username=temp_data['email'].lower(),
+            full_name=temp_data['full_name'],
+            email=temp_data['email'],
+            password_hash=hashed_password,
+            role='student',
+            email_verified_status=temp_data['email_verified_status']
+        )
         db.session.add(new_user)
-        db.session.flush() # To get user ID
+        db.session.flush()
         
+        # Create StudentProfile record
         profile = StudentProfile(
             user_id=new_user.id,
-            student_number=student_number,
-            program=program,
-            year_of_study=year_of_study,
-            level_of_study=level_of_study,
-            study_level=level_of_study,
-            semester=semester,
-            country=country,
-            university=university,
-            timezone=default_timezone_for_country(country),
-            curriculum=curriculum,
+            student_number=temp_data['student_number'],
+            program=temp_data['program'],
+            year_of_study=temp_data['year_of_study'],
+            level_of_study=temp_data['level_of_study'],
+            study_level=temp_data['level_of_study'],
+            semester=temp_data['semester'],
+            country=temp_data['country'],
+            university=temp_data['university'],
+            timezone=default_timezone_for_country(temp_data['country']),
+            curriculum=temp_data['curriculum'],
             cumulative_gpa=0.0
         )
         db.session.add(profile)
         
-        # Seed default availability slots
+        # Seed availability slots
         days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
         default_slots = [
             {"start": "00:00", "end": "06:00", "category": "Sleep"},
@@ -180,11 +327,86 @@ def register():
                 
         db.session.commit()
         
-        flash("Account created successfully! Please login", "success")
-
-        return redirect(url_for('auth.login'))
+        # Log student in and clear temp data
+        login_user(new_user)
+        session.pop('temp_registration', None)
+        flash("Email verified and account created successfully!", "success")
+        return redirect(url_for('student.dashboard'))
         
-    return render_template("auth/register.html", active_universities=University.query.filter_by(is_active=True).order_by(University.sort_order).all())
+    return render_template("auth/verify_email.html", email=email, resend_count=resend_count, time_remaining=time_remaining)
+
+
+@auth_bp.route("/resend-code", methods=["POST"])
+def resend_verification_code():
+    from flask import session
+    email = request.args.get("email")
+    if not email:
+        flash("Email parameter missing.", "danger")
+        return redirect(url_for('auth.register'))
+        
+    temp_data = session.get('temp_registration')
+    if not temp_data or temp_data.get('email') != email:
+        flash("Session expired or invalid email. Please register again.", "danger")
+        return redirect(url_for('auth.register'))
+        
+    resend_count = session.get('resend_count', 0)
+    
+    # 1. Count limit
+    if resend_count >= 3:
+        flash("Maximum resend attempts reached (3). Please complete verification or start over.", "danger")
+        return redirect(url_for('auth.verify_email_code', email=email))
+        
+    # 2. Wait limit check
+    last_resend_time_str = session.get('last_resend_time')
+    if last_resend_time_str:
+        try:
+            last_resend_time = datetime.fromisoformat(last_resend_time_str)
+            elapsed = (datetime.utcnow() - last_resend_time).total_seconds()
+            if elapsed < 60:
+                flash(f"Please wait {int(60 - elapsed)} second(s) before resending.", "danger")
+                return redirect(url_for('auth.verify_email_code', email=email))
+        except Exception:
+            pass
+
+    # 3. Generate new code and save
+    import secrets
+    code = "".join(secrets.choice("0123456789") for _ in range(6))
+    
+    now = datetime.utcnow()
+    expires = now + timedelta(minutes=10)
+    
+    # Clean previous codes
+    EmailVerificationCode.query.filter_by(email=email).delete()
+    
+    verification_code = EmailVerificationCode(
+        email=email,
+        code=code,
+        created_at=now,
+        expires_at=expires,
+        verified=False,
+        attempts=0
+    )
+    db.session.add(verification_code)
+    db.session.commit()
+    
+    session['resend_count'] = resend_count + 1
+    session['last_resend_time'] = datetime.utcnow().isoformat()
+    
+    # 4. Send code
+    from flask_mail import Message
+    from app import mail
+    try:
+        msg = Message(
+            subject="Verify Your Email - Smart Study",
+            recipients=[email],
+            body=f"Your Smart Study verification code is: {code}. This code expires in 10 minutes."
+        )
+        mail.send(msg)
+        flash("A new 6-digit verification code has been sent to your email.", "success")
+    except Exception as e:
+        flash(f"Failed to send verification email: {e}. Please try again later.", "danger")
+        
+    return redirect(url_for('auth.verify_email_code', email=email))
 
 @auth_bp.route("/logout")
 @login_required

@@ -532,14 +532,14 @@ const SAVED_TIMEZONE         = {{ (profile.timezone or 'Asia/Kathmandu') | tojso
 
 // ── Pull shared data arrays from ProfileFields module ─────────────────────
 // (profile-fields.js loaded above exposes window.ProfileFields)
-const LEVEL_OPTIONS          = ProfileFields.LEVEL_OPTIONS;
-const DEFAULT_TIMEZONES      = ProfileFields.DEFAULT_TIMEZONES;
-const MULTI_TIMEZONE_OPTIONS = ProfileFields.MULTI_TIMEZONE_OPTIONS;
-const NEB_GENERAL_FACULTIES  = ProfileFields.NEB_GENERAL_FACULTIES;
-const NEB_TECHNICAL_STREAMS  = ProfileFields.NEB_TECHNICAL_STREAMS;
-const NEPAL_BACHELORS_PROGRAMS = ProfileFields.NEPAL_BACHELORS_PROGRAMS;
-const NEPAL_MASTERS_PROGRAMS = ProfileFields.NEPAL_MASTERS_PROGRAMS;
-const GRADE_LABELS           = ProfileFields.GRADE_LABELS;
+let LEVEL_OPTIONS          = ProfileFields.LEVEL_OPTIONS;
+let DEFAULT_TIMEZONES      = ProfileFields.DEFAULT_TIMEZONES;
+let MULTI_TIMEZONE_OPTIONS = ProfileFields.MULTI_TIMEZONE_OPTIONS;
+let NEB_GENERAL_FACULTIES  = ProfileFields.NEB_GENERAL_FACULTIES;
+let NEB_TECHNICAL_STREAMS  = ProfileFields.NEB_TECHNICAL_STREAMS;
+let NEPAL_BACHELORS_PROGRAMS = ProfileFields.NEPAL_BACHELORS_PROGRAMS;
+let NEPAL_MASTERS_PROGRAMS = ProfileFields.NEPAL_MASTERS_PROGRAMS;
+let GRADE_LABELS           = ProfileFields.GRADE_LABELS;
 
 // GRADE_LABELS pulled from ProfileFields above
 
@@ -739,32 +739,44 @@ if (universitySelect) {
 
 // ── Initialise on page load ──────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", function() {
-    if (SAVED_COUNTRY) {
-        populateLevels(SAVED_COUNTRY, SAVED_STUDY_LEVEL);
-        // semester restore (after populateLevels sets visibility)
-        if (SAVED_SEMESTER) {
-            const semOpts = semesterSelect.options;
-            for (let i = 0; i < semOpts.length; i++) {
-                if (semOpts[i].value === SAVED_SEMESTER) {
-                    semOpts[i].selected = true;
-                    break;
+    ProfileFields.init(function() {
+        // Update local variables from the initialized ProfileFields object
+        LEVEL_OPTIONS          = ProfileFields.LEVEL_OPTIONS;
+        DEFAULT_TIMEZONES      = ProfileFields.DEFAULT_TIMEZONES;
+        MULTI_TIMEZONE_OPTIONS = ProfileFields.MULTI_TIMEZONE_OPTIONS;
+        NEB_GENERAL_FACULTIES  = ProfileFields.NEB_GENERAL_FACULTIES;
+        NEB_TECHNICAL_STREAMS  = ProfileFields.NEB_TECHNICAL_STREAMS;
+        NEPAL_BACHELORS_PROGRAMS = ProfileFields.NEPAL_BACHELORS_PROGRAMS;
+        NEPAL_MASTERS_PROGRAMS = ProfileFields.NEPAL_MASTERS_PROGRAMS;
+        GRADE_LABELS           = ProfileFields.GRADE_LABELS;
+
+        if (SAVED_COUNTRY) {
+            populateLevels(SAVED_COUNTRY, SAVED_STUDY_LEVEL);
+            // semester restore (after populateLevels sets visibility)
+            if (SAVED_SEMESTER) {
+                const semOpts = semesterSelect.options;
+                for (let i = 0; i < semOpts.length; i++) {
+                    if (semOpts[i].value === SAVED_SEMESTER) {
+                        semOpts[i].selected = true;
+                        break;
+                    }
                 }
             }
-        }
-        // university restore
-        if (SAVED_UNIVERSITY) {
-            if (SAVED_UNIVERSITY.startsWith("Foreign-Affiliated: ")) {
-                universitySelect.value = "Foreign-Affiliated";
-                universityCustomInput.value = SAVED_UNIVERSITY.substring("Foreign-Affiliated: ".length);
-            } else if (SAVED_UNIVERSITY.startsWith("Other: ")) {
-                universitySelect.value = "Other";
-                universityCustomInput.value = SAVED_UNIVERSITY.substring("Other: ".length);
-            } else {
-                universitySelect.value = SAVED_UNIVERSITY;
+            // university restore
+            if (SAVED_UNIVERSITY) {
+                if (SAVED_UNIVERSITY.startsWith("Foreign-Affiliated: ")) {
+                    universitySelect.value = "Foreign-Affiliated";
+                    universityCustomInput.value = SAVED_UNIVERSITY.substring("Foreign-Affiliated: ".length);
+                } else if (SAVED_UNIVERSITY.startsWith("Other: ")) {
+                    universitySelect.value = "Other";
+                    universityCustomInput.value = SAVED_UNIVERSITY.substring("Other: ".length);
+                } else {
+                    universitySelect.value = SAVED_UNIVERSITY;
+                }
+                updateConditionalFields(countrySelect.value, studyLevelSel.value, SAVED_PROGRAM);
             }
-            updateConditionalFields(countrySelect.value, studyLevelSel.value, SAVED_PROGRAM);
         }
-    }
+    });
 });
 // ── Live GPA → % conversion hint ─────────────────────────────────────────────
 const gradeInputEl  = document.getElementById('gradeInput');

@@ -32,6 +32,10 @@ class User(db.Model, UserMixin):
     role = db.Column(db.String(20), nullable=False, default="student") # student or admin
     is_active = db.Column(db.Boolean, default=True)
     date_registered = db.Column(db.DateTime, default=datetime.utcnow)
+    email_verified_status = db.Column(db.String(32), default='unknown')
+    # Seed accounts created by load_data.py cannot log in regardless of password.
+    # Only accounts created via create_admin.py or real registration have this False.
+    is_seed_account = db.Column(db.Boolean, default=False, nullable=False)
 
     @property
     def profile(self):
@@ -681,6 +685,26 @@ class AppSetting(db.Model):
     value = db.Column(db.String(500), nullable=False)
     description = db.Column(db.String(255), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class EmailVerificationCache(db.Model):
+    __tablename__ = "email_verification_caches"
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, index=True, nullable=False)
+    verification_result = db.Column(db.Text, nullable=False)
+    checked_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class EmailVerificationCode(db.Model):
+    __tablename__ = "email_verification_codes"
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), nullable=False)
+    code = db.Column(db.String(6), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    verified = db.Column(db.Boolean, default=False, nullable=False)
+    attempts = db.Column(db.Integer, default=0, nullable=False)
+
 
 
 

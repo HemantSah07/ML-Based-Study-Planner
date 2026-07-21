@@ -3748,6 +3748,101 @@ def get_curriculum_data():
     return jsonify({"semesters": sorted(semesters)})
 
 
+@student_bp.route("/api/taxonomy", methods=["GET"])
+def get_taxonomy():
+    from app.models import EducationLevel, University, Faculty, CurriculumProgram
+    import json
+    
+    # 1. Fetch active education levels
+    levels_db = EducationLevel.query.filter_by(is_active=True).order_by(EducationLevel.sort_order.asc()).all()
+    education_levels = {}
+    countries = set()
+    for l in levels_db:
+        countries.add(l.country)
+        if l.country not in education_levels:
+            education_levels[l.country] = []
+        education_levels[l.country].append(l.name)
+    
+    # Fallback to standard countries if database is empty or missing countries
+    std_countries = ["Nepal", "United States", "United Kingdom", "Australia", "Canada", "India"]
+    for c in std_countries:
+        countries.add(c)
+        if c not in education_levels:
+            education_levels[c] = ["Class 6", "Class 7", "Class 8", "Class 9", "Class 10", "Class 11", "Class 12", "Bachelors", "Masters"]
+            
+    if "__default__" not in education_levels:
+        education_levels["__default__"] = ["Class 6", "Class 7", "Class 8", "Class 9", "Class 10", "Class 11", "Class 12", "Bachelors", "Masters"]
+        
+    # 2. Fetch active universities
+    unis_db = University.query.filter_by(is_active=True).order_by(University.sort_order.asc()).all()
+    universities = {}
+    for u in unis_db:
+        if u.country not in universities:
+            universities[u.country] = []
+        universities[u.country].append(u.name)
+    # Default list for Nepal if empty
+    if "Nepal" not in universities:
+        universities["Nepal"] = [
+            "Tribhuvan University (TU)", "Kathmandu University (KU)", "Purbanchal University (PU)",
+            "Pokhara University (PokU)", "Mid-Western University", "Far-Western University",
+            "Agriculture and Forestry University (AFU)", "Nepal Sanskrit University",
+            "Foreign-Affiliated", "Other"
+        ]
+        
+    # 3. Fetch active faculties
+    facs_db = Faculty.query.filter_by(is_active=True).order_by(Faculty.sort_order.asc()).all()
+    neb_general = ["Science Faculty", "Management Faculty (Commerce)", "Humanities and Social Sciences Faculty (Arts)", "Law Faculty", "Education Faculty"]
+    neb_technical = []
+    for f in facs_db:
+        if f.name not in neb_general:
+            neb_technical.append(f.name)
+            
+    # 4. Fetch programs
+    bachelors_db = CurriculumProgram.query.filter_by(level_name="Bachelors", is_active=True).order_by(CurriculumProgram.sort_order.asc()).all()
+    masters_db = CurriculumProgram.query.filter_by(level_name="Masters", is_active=True).order_by(CurriculumProgram.sort_order.asc()).all()
+    
+    bachelors_programs = [p.name for p in bachelors_db]
+    masters_programs = [p.name for p in masters_db]
+    
+    programs_with_duration = []
+    duration_options = {}
+    
+    all_programs_db = CurriculumProgram.query.filter_by(is_active=True).all()
+    for p in all_programs_db:
+        if p.has_duration:
+            programs_with_duration.append(p.name)
+            if p.duration_options_json:
+                try:
+                    duration_options[p.name] = json.loads(p.duration_options_json)
+                except Exception:
+                    pass
+                    
+    return jsonify({
+        "countries": sorted(list(countries)),
+        "education_levels": education_levels,
+        "universities": universities,
+        "neb_general_faculties": neb_general,
+        "neb_technical_streams": neb_technical if neb_technical else [
+            "Computer Engineering", "Civil Engineering", "Electrical/Electronics Engineering",
+            "Agriculture and Animal Science", "Forestry", "Nursing (PCL Nursing)", "Pharmacy",
+            "Medical Lab Technology (CMLT)", "Hotel Management & Culinary Arts"
+        ],
+        "bachelors_programs": bachelors_programs if bachelors_programs else [
+            "BBA", "BCA", "BE Computer", "BE Civil", "BIT", "BSc IT", "BSc CSIT", "BSc Nursing", "BTech", "MBBS"
+        ],
+        "masters_programs": masters_programs if masters_programs else [
+            "MBA", "MCA", "MIT", "MSc Computer Science"
+        ],
+        "programs_with_duration": programs_with_duration if programs_with_duration else ["BSc IT"],
+        "duration_options": duration_options if duration_options else {
+            "BSc IT": [
+                { "value": "3 Years", "label": "3 Years (International-affiliated, e.g. APU/LBEF)" },
+                { "value": "4 Years", "label": "4 Years (TU-affiliated BSc CSIT)" }
+            ]
+        }
+    })
+
+
 
 @student_bp.route("/profile", methods=["GET", "POST"])
 @login_required
