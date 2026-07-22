@@ -26,15 +26,61 @@
   --admin-info: #3b82f6;
   --admin-info-bg: rgba(59, 130, 246, 0.12);
 
-  --admin-text-main: #f9fafb;
-  --admin-text-muted: #9ca3af;
-  --admin-text-dim: #6b7280;
+  --admin-text-main: #ffffff;
+  --admin-text-muted: #d1d5db;
+  --admin-text-dim: #9ca3af;
 
   --admin-sidebar-width: 270px;
   --admin-header-height: 70px;
   --admin-radius: 12px;
   --admin-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5);
   --admin-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Global Text Contrast & Utility Overrides */
+.text-muted, .text-secondary {
+  color: var(--admin-text-muted) !important;
+}
+
+.text-dim {
+  color: var(--admin-text-dim) !important;
+}
+
+.form-text {
+  color: var(--admin-text-muted) !important;
+}
+
+.form-label, label {
+  color: #f3f4f6 !important;
+}
+
+.form-control::placeholder,
+.admin-form-control::placeholder,
+.form-select::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: #9ca3af !important;
+  opacity: 1 !important;
+}
+
+.form-select option, select option {
+  background-color: #1f2937 !important;
+  color: #ffffff !important;
+}
+
+.dropdown-menu {
+  background-color: #1f2937 !important;
+  border-color: var(--admin-border) !important;
+  color: #ffffff !important;
+}
+
+.dropdown-item {
+  color: #e5e7eb !important;
+}
+
+.dropdown-item:hover, .dropdown-item:focus {
+  background-color: var(--admin-surface-hover) !important;
+  color: #ffffff !important;
 }
 
 /* Base resets for Admin shell */

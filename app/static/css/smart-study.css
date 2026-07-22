@@ -6,9 +6,9 @@
     --surface-hover: rgba(22, 32, 56, 0.85);
     --border: rgba(255, 255, 255, 0.07);
     --border-strong: rgba(255, 255, 255, 0.12);
-    --text: #f1f5f9;
-    --text-muted: #94a3b8;
-    --text-dim: #64748b;
+    --text: #ffffff;
+    --text-muted: #cbd5e1;
+    --text-dim: #94a3b8;
     --blue: #38bdf8;
     --purple: #a855f7;
     --green: #34d399;
@@ -41,7 +41,7 @@
 }
 
 .subject-risk-name {
-    color: #111827 !important;
+    color: #ffffff !important;
 }
 
 .text-dim {
@@ -52,11 +52,17 @@
     color: var(--text-muted) !important;
 }
 
+.form-text {
+    color: var(--text-muted) !important;
+}
+
 ::placeholder,
 .form-control::placeholder,
-.form-select::placeholder {
+.form-select::placeholder,
+input::placeholder,
+textarea::placeholder {
     color: var(--text-dim) !important;
-    opacity: 0.85 !important;
+    opacity: 1 !important;
 }
 
 html { scroll-behavior: smooth; }
