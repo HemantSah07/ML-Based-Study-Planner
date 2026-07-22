@@ -105,26 +105,66 @@ def _is_fixed_nepal_class(profile):
 def get_valid_subjects_for_profile(profile):
     """
     Returns the list of active Subject objects valid for this student's
-    country + study_level + program (Faculty) combination.
-    Loads dynamically from the database.
+    country + study_level + program + semester combination.
+    Loads dynamically from database-backed curriculum tables (CurriculumProgram & ProgramSubject).
     """
     if not profile:
         return []
 
-    country    = (profile.country    or "Nepal").strip()
-    study_level = (profile.study_level or "").strip()
-    program    = (profile.program    or "").strip()
-    curriculum = COUNTRY_CURRICULUM_MAP.get(country, "National")
+    from app.models import CurriculumProgram, ProgramSubject
 
-    # 1. Query for active subjects matching level, program, country exactly
-    subjects = Subject.query.filter_by(
+    country     = (profile.country     or "Nepal").strip()
+    study_level = (profile.study_level or "").strip()
+    program     = (profile.program     or "").strip()
+    semester    = (profile.semester    or "").strip()
+    curriculum  = COUNTRY_CURRICULUM_MAP.get(country, "National")
+
+    # 1. Query database single source of truth: CurriculumProgram & ProgramSubject
+    if program and study_level:
+        prog_rec = CurriculumProgram.query.filter_by(
+            name=program, level_name=study_level, is_active=True
+        ).first()
+        if not prog_rec:
+            prog_rec = CurriculumProgram.query.filter(
+                CurriculumProgram.name.ilike(program),
+                CurriculumProgram.is_active == True
+            ).first()
+
+        if prog_rec:
+            query = db.session.query(Subject).join(
+                ProgramSubject, Subject.id == ProgramSubject.subject_id
+            ).filter(
+                ProgramSubject.program_id == prog_rec.id,
+                ProgramSubject.is_active == True,
+                Subject.is_active == True
+            )
+            if semester:
+                sem_query = query.filter(
+                    (ProgramSubject.semester == semester) | (Subject.semester == semester)
+                )
+                sem_subjects = sem_query.order_by(ProgramSubject.sort_order, Subject.name).all()
+                if sem_subjects:
+                    return _dedupe_subjects_by_name(sem_subjects)
+
+            subjects = query.order_by(ProgramSubject.sort_order, Subject.name).all()
+            if subjects:
+                return _dedupe_subjects_by_name(subjects)
+
+    # 2. Query Subject table directly for active subjects matching level, program, country
+    query = Subject.query.filter_by(
         level_of_study=study_level,
         program=program,
         country=country,
         is_active=True
-    ).all()
+    )
+    if semester:
+        sem_subs = query.filter_by(semester=semester).all()
+        if sem_subs:
+            return _dedupe_subjects_by_name(sem_subs)
 
-    # 2. If no subjects found for specific program, look for general/empty program subjects for this level and country
+    subjects = query.all()
+
+    # 3. If no subjects found for specific program, look for general/empty program subjects for this level and country
     if not subjects:
         subjects = Subject.query.filter(
             Subject.level_of_study == study_level,
@@ -133,7 +173,7 @@ def get_valid_subjects_for_profile(profile):
             (Subject.program == "General") | (Subject.program == None) | (Subject.program == "")
         ).all()
 
-    # 3. Fallback: look for level/program match ignoring country constraint or with country=None
+    # 4. Fallback: look for level/program match ignoring country constraint or with country=None
     if not subjects:
         subjects = Subject.query.filter(
             Subject.level_of_study == study_level,
@@ -143,7 +183,7 @@ def get_valid_subjects_for_profile(profile):
             (Subject.country == country) | (Subject.country == None)
         ).all()
 
-    # 4. If still empty, seed placeholders dynamically using the canonical names
+    # 5. If still empty, seed placeholders dynamically using canonical names
     if not subjects:
         subjects = _seed_placeholder_subjects(country, study_level, program, curriculum)
 
@@ -3729,6 +3769,79 @@ def get_taxonomy():
 
 
 
+def sync_student_subjects_from_program(profile, user_id):
+    """
+    Synchronizes StudentSubject rows for a user based on their selected CurriculumProgram and semester.
+    
+    1. Locates CurriculumProgram matching profile.program (or profile.stream).
+    2. Retrieves ProgramSubject mappings for that program and profile.semester (or all active if semester not set).
+    3. Populates StudentSubject with mapped subjects while preventing duplicate entries.
+    4. Handles missing or empty program/semester mappings gracefully.
+    """
+    if not profile or not user_id:
+        return 0, "No profile or user_id provided"
+    
+    program_name = (profile.program or profile.stream or "").strip()
+    semester_name = (profile.semester or "").strip()
+    
+    if not program_name:
+        return 0, "No program selected in profile"
+    
+    from app.models import CurriculumProgram, ProgramSubject, StudentSubject, Subject
+    
+    prog = CurriculumProgram.query.filter_by(name=program_name, is_active=True).first()
+    if not prog:
+        prog = CurriculumProgram.query.filter(CurriculumProgram.name.ilike(program_name), CurriculumProgram.is_active == True).first()
+    
+    if not prog:
+        return 0, f"No active curriculum program found matching '{program_name}'"
+    
+    query = ProgramSubject.query.filter_by(program_id=prog.id, is_active=True)
+    if semester_name:
+        ps_mappings = query.filter(db.or_(ProgramSubject.semester == semester_name, ProgramSubject.semester.ilike(semester_name))).all()
+    else:
+        ps_mappings = query.all()
+    
+    if not ps_mappings and semester_name:
+        all_ps = ProgramSubject.query.filter_by(program_id=prog.id, is_active=True).all()
+        ps_mappings = [m for m in all_ps if m.semester and (semester_name.lower() in m.semester.lower() or m.semester.lower() in semester_name.lower())]
+        if not ps_mappings:
+            ps_mappings = all_ps
+    
+    if not ps_mappings:
+        return 0, f"No curriculum subjects are currently mapped to '{program_name}' ({semester_name})."
+    
+    existing_subjs = StudentSubject.query.filter_by(user_id=user_id).all()
+    existing_ids = {s.subject_id for s in existing_subjs}
+    
+    added_count = 0
+    for m in ps_mappings:
+        if m.subject_id and m.subject_id not in existing_ids:
+            sub_rec = Subject.query.get(m.subject_id)
+            if sub_rec and getattr(sub_rec, 'is_active', True):
+                new_st_sub = StudentSubject(user_id=user_id, subject_id=m.subject_id)
+                db.session.add(new_st_sub)
+                existing_ids.add(m.subject_id)
+                added_count += 1
+    
+    if added_count > 0:
+        db.session.commit()
+    
+    return added_count, f"Successfully synchronized {added_count} subjects for {program_name} ({semester_name})."
+
+
+@student_bp.route("/api/sync-subjects", methods=["POST"])
+@login_required
+def sync_subjects_api():
+    ctx = get_learning_context(current_user.id)
+    profile = ctx.profile or StudentProfile.query.filter_by(user_id=current_user.id).first()
+    if not profile or not profile.program:
+        return jsonify({"success": False, "message": "No program selected in student profile. Please complete profile onboarding."}), 400
+    
+    count, msg = sync_student_subjects_from_program(profile, current_user.id)
+    return jsonify({"success": True, "added_count": count, "message": msg}), 200
+
+
 @student_bp.route("/profile", methods=["GET", "POST"])
 @login_required
 def profile():
@@ -3846,7 +3959,14 @@ def profile():
 
         ctx.update_profile(profile_data)
         db.session.commit()
-        flash("Profile updated successfully!", "success")
+        
+        # Auto-synchronize StudentSubject records based on updated program/semester
+        added_cnt, sync_msg = sync_student_subjects_from_program(ctx.profile, current_user.id)
+        if added_cnt > 0:
+            flash(f"Profile updated and {added_cnt} curriculum subjects synchronized!", "success")
+        else:
+            flash(f"Profile updated successfully! ({sync_msg})", "info")
+            
         return redirect(url_for("student.profile"))
 
     # GET — read all data from the shared analytics service (avoids duplicate queries)

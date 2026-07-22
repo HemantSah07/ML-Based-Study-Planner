@@ -1,144 +1,304 @@
-{% extends 'base.html' %}
-{% block title %}Student Detail — Admin{% endblock %}
+{% extends 'admin/admin_base.html' %}
+{% block title %}{{ student.full_name or student.email }} — Student Detail{% endblock %}
 
-{% block content %}
-<div class="d-flex align-items-center justify-content-between mb-4">
-    <div>
-        <a href="{{ url_for('admin.students') }}" class="text-muted small text-decoration-none"><i class="fas fa-arrow-left me-1"></i> Back to Students</a>
-        <h1 class="page-title mt-1 mb-0"><i class="fas fa-user me-2 text-gradient"></i> {{ student.full_name or student.email }}</h1>
+{% block breadcrumb_items %}
+    <a href="{{ url_for('admin.students') }}">Student Directory</a>
+    <span class="sep"><i class="fas fa-chevron-right"></i></span>
+    <span class="active-item">{{ student.full_name or student.email }}</span>
+{% endblock %}
+
+{% block admin_content %}
+<!-- Header Bar with Actions -->
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
+    <div class="d-flex align-items-center gap-3">
+        <a href="{{ url_for('admin.students') }}" class="btn btn-admin btn-admin-secondary btn-admin-sm">
+            <i class="fas fa-arrow-left"></i> Back
+        </a>
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h1 class="h3 fw-bold text-white mb-0">{{ student.full_name or 'Unnamed Student' }}</h1>
+                {% if student.is_active %}
+                    <span class="badge-status active"><i class="fas fa-check-circle"></i> Active</span>
+                {% else %}
+                    <span class="badge-status error"><i class="fas fa-ban"></i> Suspended</span>
+                {% endif %}
+            </div>
+            <div class="text-muted small mt-1">
+                <i class="fas fa-envelope me-1"></i> {{ student.email }} &bull; 
+                Registered: {{ student.date_registered.strftime('%b %d, %Y') if student.date_registered else 'N/A' }}
+            </div>
+        </div>
     </div>
-    <div class="d-flex gap-2 flex-wrap">
+
+    <!-- Safe Admin Action Toolbar -->
+    <div class="d-flex flex-wrap gap-2">
         <form action="{{ url_for('admin.impersonate', student_id=student.id) }}" method="POST">
-            <button type="submit" class="btn btn-warning btn-sm text-dark fw-bold">
-                <i class="fas fa-user-secret me-1"></i> View as Student
+            <button type="submit" class="btn btn-admin btn-admin-secondary btn-admin-sm text-warning" title="View app as student">
+                <i class="fas fa-user-secret me-1"></i> Impersonate
             </button>
         </form>
+
         <form action="{{ url_for('admin.student_run_ml', student_id=student.id) }}" method="POST">
-            <button type="submit" class="btn btn-info btn-sm text-dark fw-bold">
+            <button type="submit" class="btn btn-admin btn-admin-secondary btn-admin-sm text-info" title="Re-calculate ML performance risk">
                 <i class="fas fa-robot me-1"></i> Re-run ML
             </button>
         </form>
-        <form action="{{ url_for('admin.student_regenerate_schedule', student_id=student.id) }}" method="POST" onsubmit="return confirm('Regenerate weekly study schedule for this student? This clears their current planner.')">
-            <button type="submit" class="btn btn-primary btn-sm fw-bold">
-                <i class="fas fa-calendar-sync me-1"></i> Regenerate Schedule
-            </button>
-        </form>
-        <form action="{{ url_for('admin.student_reset_assessment', student_id=student.id) }}" method="POST" onsubmit="return confirm('Reset assessment session?')">
-            <button type="submit" class="btn btn-secondary btn-sm">
-                <i class="fas fa-redo me-1"></i> Reset Assessment
-            </button>
-        </form>
-        <form action="{{ url_for('admin.student_toggle_active', student_id=student.id) }}" method="POST" onsubmit="return confirm('Toggle account status?')">
+
+        <button type="button" class="btn btn-admin btn-admin-secondary btn-admin-sm" data-bs-toggle="modal" data-bs-target="#scheduleModal">
+            <i class="fas fa-calendar-alt text-primary me-1"></i> Clear Schedule
+        </button>
+
+        <button type="button" class="btn btn-admin btn-admin-secondary btn-admin-sm" data-bs-toggle="modal" data-bs-target="#resetAssessmentModal">
+            <i class="fas fa-rotate-left text-warning me-1"></i> Reset Assessment
+        </button>
+
+        <form action="{{ url_for('admin.student_toggle_active', student_id=student.id) }}" method="POST" class="d-inline">
             {% if student.is_active %}
-            <button type="submit" class="btn btn-outline-danger btn-sm">
-                <i class="fas fa-ban me-1"></i> Suspend Account
+            <button type="submit" class="btn btn-admin btn-admin-danger btn-admin-sm" onclick="return confirm('Are you sure you want to suspend this student account?')">
+                <i class="fas fa-user-slash me-1"></i> Suspend Account
             </button>
             {% else %}
-            <button type="submit" class="btn btn-outline-success btn-sm">
-                <i class="fas fa-check-circle me-1"></i> Restore Account
+            <button type="submit" class="btn btn-admin btn-admin-primary btn-admin-sm">
+                <i class="fas fa-user-check me-1"></i> Restore Account
             </button>
             {% endif %}
         </form>
     </div>
 </div>
 
-<div class="row g-4">
-    <!-- Profile -->
+<!-- Grid Layout -->
+<div class="row g-3 mb-4">
+    <!-- Personal & Academic Profile Card -->
     <div class="col-lg-4">
-        <div class="card card-flat p-4">
-            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-id-card me-2"></i> Profile</h6>
+        <div class="admin-card h-100 mb-0">
+            <div class="admin-card-header">
+                <h2 class="admin-card-title"><i class="fas fa-id-card"></i> Academic Profile</h2>
+            </div>
             {% if profile %}
-            <div class="small">
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">Country</span><span class="text-white">{{ profile.country or '—' }}</span></div>
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">Level</span><span class="text-white">{{ profile.study_level or '—' }}</span></div>
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">Program</span><span class="text-white">{{ profile.program or '—' }}</span></div>
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">Semester</span><span class="text-white">{{ profile.semester or '—' }}</span></div>
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">University</span><span class="text-white">{{ profile.university or '—' }}</span></div>
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">GPA</span><span class="text-white">{{ profile.cumulative_gpa or '—' }}</span></div>
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">Attendance</span><span class="text-white">{{ profile.attendance_pct or '—' }}%</span></div>
-                <div class="d-flex justify-content-between py-2"><span class="text-muted">Assessed?</span><span>{% if profile.has_completed_assessment %}<i class="fas fa-check text-success"></i>{% else %}<i class="fas fa-times text-danger"></i>{% endif %}</span></div>
-            </div>
-            {% else %}
-            <p class="text-muted small">No profile found.</p>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- Subjects -->
-    <div class="col-lg-4">
-        <div class="card card-flat p-4">
-            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-book me-2"></i> Enrolled Subjects ({{ subjects|length }})</h6>
-            {% if subjects %}
-            <div class="d-flex flex-column gap-2">
-                {% for ss in subjects %}
-                <div class="d-flex align-items-center gap-2">
-                    <i class="fas fa-circle-dot text-primary small"></i>
-                    <span class="text-white small">{{ ss.subject.name }}</span>
+            <div class="d-flex flex-column gap-2" style="font-size: 0.85rem;">
+                <div class="d-flex justify-content-between py-2 border-bottom border-secondary-subtle">
+                    <span class="text-muted">Education Level</span>
+                    <span class="fw-semibold text-white">{{ profile.study_level or 'Not specified' }}</span>
                 </div>
-                {% endfor %}
+                <div class="d-flex justify-content-between py-2 border-bottom border-secondary-subtle">
+                    <span class="text-muted">Program</span>
+                    <span class="fw-semibold text-white text-truncate" style="max-width: 180px;">{{ profile.program or 'Not specified' }}</span>
+                </div>
+                <div class="d-flex justify-content-between py-2 border-bottom border-secondary-subtle">
+                    <span class="text-muted">Semester</span>
+                    <span class="fw-semibold text-white">{{ profile.semester or 'Not specified' }}</span>
+                </div>
+                <div class="d-flex justify-content-between py-2 border-bottom border-secondary-subtle">
+                    <span class="text-muted">University</span>
+                    <span class="fw-semibold text-white text-truncate" style="max-width: 180px;">{{ profile.university or 'Not specified' }}</span>
+                </div>
+                <div class="d-flex justify-content-between py-2 border-bottom border-secondary-subtle">
+                    <span class="text-muted">Country</span>
+                    <span class="fw-semibold text-white">{{ profile.country or 'Nepal' }}</span>
+                </div>
+                <div class="d-flex justify-content-between py-2 border-bottom border-secondary-subtle">
+                    <span class="text-muted">Cumulative GPA</span>
+                    <span class="fw-semibold text-white">{{ profile.cumulative_gpa if profile.cumulative_gpa is not none else 'N/A' }}</span>
+                </div>
+                <div class="d-flex justify-content-between py-2 border-bottom border-secondary-subtle">
+                    <span class="text-muted">Attendance Rate</span>
+                    <span class="fw-semibold text-white">{{ profile.attendance_pct if profile.attendance_pct is not none else '85' }}%</span>
+                </div>
+                <div class="d-flex justify-content-between py-2">
+                    <span class="text-muted">Diagnostic Assessment</span>
+                    {% if profile.has_completed_assessment %}
+                        <span class="badge-status active"><i class="fas fa-check"></i> Completed</span>
+                    {% else %}
+                        <span class="badge-status warning"><i class="fas fa-clock"></i> Pending</span>
+                    {% endif %}
+                </div>
             </div>
             {% else %}
-            <p class="text-muted small">No subjects configured.</p>
+            <div class="text-muted small py-4 text-center">No profile details configured for this student.</div>
             {% endif %}
         </div>
     </div>
 
-    <!-- Latest ML Prediction -->
+    <!-- ML Performance Risk & Assessment History -->
     <div class="col-lg-4">
-        <div class="card card-flat p-4">
-            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-robot me-2"></i> Latest ML Prediction</h6>
+        <div class="admin-card h-100 mb-0">
+            <div class="admin-card-header">
+                <h2 class="admin-card-title"><i class="fas fa-microchip"></i> ML Risk & Telemetry</h2>
+            </div>
             {% if latest_prediction %}
-            <div class="small">
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">Risk Level</span>
-                    <span class="badge {% if latest_prediction.predicted_risk_level == 'high' %}bg-danger{% elif latest_prediction.predicted_risk_level == 'medium' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ latest_prediction.predicted_risk_level | title }}</span>
+            <div class="p-3 rounded mb-3" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border);">
+                <div class="text-muted small fw-semibold">PREDICTED ACADEMIC RISK</div>
+                <div class="d-flex align-items-center justify-content-between mt-2">
+                    <span class="fs-4 fw-bold text-uppercase {% if latest_prediction.predicted_risk_level == 'high' %}text-danger{% elif latest_prediction.predicted_risk_level == 'medium' %}text-warning{% else %}text-success{% endif %}">
+                        <i class="fas fa-triangle-exclamation me-1"></i> {{ latest_prediction.predicted_risk_level or 'Low' }}
+                    </span>
+                    <span class="badge-status info">Grade: {{ latest_prediction.predicted_grade or 'B+' }}</span>
                 </div>
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">Predicted Grade</span><span class="text-white">{{ latest_prediction.predicted_grade or '—' }}</span></div>
-                <div class="d-flex justify-content-between py-2"><span class="text-muted">Date</span><span class="text-white">{{ latest_prediction.date.strftime('%Y-%m-%d') }}</span></div>
+                <div class="text-dim mt-2" style="font-size: 0.72rem;">Last predicted: {{ latest_prediction.date.strftime('%b %d, %Y %H:%M') if latest_prediction.date else 'N/A' }}</div>
             </div>
             {% else %}
-            <p class="text-muted small">No ML predictions yet.</p>
+            <div class="p-3 rounded mb-3 text-center text-muted small" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border);">
+                No ML predictions logged yet. Click "Re-run ML" to calculate performance risk.
+            </div>
             {% endif %}
+
+            <div class="border-top border-secondary-subtle pt-3">
+                <div class="fw-semibold text-white small mb-2"><i class="fas fa-book-bookmark me-1 text-primary"></i> Enrolled Subjects ({{ subjects|length }})</div>
+                {% if subjects %}
+                <div class="d-flex flex-wrap gap-1.5" style="max-height: 140px; overflow-y: auto;">
+                    {% for ss in subjects %}
+                    <span class="badge bg-secondary-subtle text-white border border-secondary px-2 py-1 small">{{ ss.subject.name }}</span>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-muted small">No subjects assigned.</div>
+                {% endif %}
+            </div>
         </div>
     </div>
 
-    <!-- Assessment History -->
-    <div class="col-lg-6">
-        <div class="card card-flat p-4">
-            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-brain me-2"></i> Assessment History ({{ assessments|length }})</h6>
+    <!-- Study Activity Summary & Documents -->
+    <div class="col-lg-4">
+        <div class="admin-card h-100 mb-0">
+            <div class="admin-card-header">
+                <h2 class="admin-card-title"><i class="fas fa-clock-rotate-left"></i> Study & Material Activity</h2>
+            </div>
+            <div class="row g-2 text-center mb-3">
+                <div class="col-6">
+                    <div class="p-2.5 rounded" style="background: rgba(255,255,255,0.03); border: 1px solid var(--admin-border);">
+                        <div class="text-muted small">Study Logs</div>
+                        <div class="fs-4 fw-bold text-white mt-1">{{ total_study_logs }}</div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="p-2.5 rounded" style="background: rgba(255,255,255,0.03); border: 1px solid var(--admin-border);">
+                        <div class="text-muted small">Total Hours</div>
+                        <div class="fs-4 fw-bold text-primary mt-1">{{ total_study_hours }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="border-top border-secondary-subtle pt-3">
+                <div class="fw-semibold text-white small mb-2"><i class="fas fa-file-pdf me-1 text-info"></i> Uploaded Documents ({{ academic_docs|length + uploaded_materials|length }})</div>
+                {% if academic_docs or uploaded_materials %}
+                <div class="d-flex flex-column gap-1.5" style="max-height: 120px; overflow-y: auto; font-size: 0.8rem;">
+                    {% for doc in academic_docs %}
+                    <div class="text-truncate text-muted"><i class="fas fa-file-lines me-1 text-primary"></i> {{ doc.document_name or doc.file_path }}</div>
+                    {% endfor %}
+                    {% for mat in uploaded_materials %}
+                    <div class="text-truncate text-muted"><i class="fas fa-file-alt me-1 text-info"></i> {{ mat.filename }}</div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-muted small">No uploaded materials found.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bottom Section: Assessment Results & Audit History -->
+<div class="row g-3">
+    <!-- Assessment History Table -->
+    <div class="col-lg-7">
+        <div class="admin-card mb-0">
+            <div class="admin-card-header">
+                <h2 class="admin-card-title"><i class="fas fa-list-check"></i> Assessment History</h2>
+            </div>
             {% if assessments %}
-            <div class="table-responsive">
-                <table class="table table-dark table-sm align-middle">
-                    <thead><tr><th>Subject</th><th>Score</th><th>Tier</th><th>Date</th></tr></thead>
+            <div class="admin-table-container">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Subject</th>
+                            <th>Weighted Score</th>
+                            <th>Knowledge Tier</th>
+                            <th>Completed Date</th>
+                        </tr>
+                    </thead>
                     <tbody>
                         {% for a in assessments %}
                         <tr>
-                            <td>{{ a.subject.name if a.subject else '—' }}</td>
-                            <td>{{ a.weighted_score | round(1) }}%</td>
-                            <td><span class="badge bg-secondary">{{ a.knowledge_tier }}</span></td>
-                            <td class="text-muted small">{{ a.completed_at.strftime('%Y-%m-%d') }}</td>
+                            <td class="fw-semibold text-white">{{ a.subject.name if a.subject else 'Subject #' ~ a.subject_id }}</td>
+                            <td><span class="text-primary fw-bold">{{ a.weighted_score | round(1) }}%</span></td>
+                            <td><span class="badge-status info">{{ a.knowledge_tier or 'Standard' }}</span></td>
+                            <td class="text-muted small">{{ a.completed_at.strftime('%b %d, %Y') if a.completed_at else '—' }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
             {% else %}
-            <p class="text-muted small">No assessments completed.</p>
+            <div class="text-center py-4 text-muted small">No assessment records logged for this student.</div>
             {% endif %}
         </div>
     </div>
 
-    <!-- Study Planner -->
-    <div class="col-lg-6">
-        <div class="card card-flat p-4">
-            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-calendar-alt me-2"></i> Study Planner</h6>
-            {% if study_plan %}
-            <div class="small">
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary"><span class="text-muted">Generated</span><span class="text-white">{{ study_plan.generated_at.strftime('%Y-%m-%d %H:%M') }}</span></div>
-                <div class="mt-2 text-muted">Plan data stored. Student can view and interact from their dashboard.</div>
+    <!-- Admin Actions Audit Log for this student -->
+    <div class="col-lg-5">
+        <div class="admin-card mb-0">
+            <div class="admin-card-header">
+                <h2 class="admin-card-title"><i class="fas fa-shield"></i> Account Audit History</h2>
+            </div>
+            {% if student_logs %}
+            <div class="d-flex flex-column gap-2" style="max-height: 220px; overflow-y: auto;">
+                {% for log in student_logs %}
+                <div class="p-2 rounded" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.8rem;">
+                    <div class="d-flex justify-content-between text-muted mb-0.5">
+                        <strong class="text-primary">{{ log.action }}</strong>
+                        <span class="text-dim" style="font-size: 0.7rem;">{{ log.timestamp.strftime('%b %d, %H:%M') }}</span>
+                    </div>
+                    <div class="text-truncate">{{ log.detail or 'Admin action executed' }}</div>
+                </div>
+                {% endfor %}
             </div>
             {% else %}
-            <p class="text-muted small">No study plan generated yet.</p>
+            <div class="text-center py-4 text-muted small">No specific admin audit records for this account.</div>
             {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Clear Schedule Confirmation -->
+<div class="modal fade admin-modal" id="scheduleModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold text-white"><i class="fas fa-calendar-xmark text-warning me-2"></i> Clear Study Schedule</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-muted small">
+                Are you sure you want to clear the study plan for <strong>{{ student.full_name or student.email }}</strong>?
+                The student's next visit to their Planner will generate a fresh schedule based on their current parameters.
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-admin btn-admin-secondary btn-admin-sm" data-bs-dismiss="modal">Cancel</button>
+                <form action="{{ url_for('admin.student_regenerate_schedule', student_id=student.id) }}" method="POST">
+                    <button type="submit" class="btn btn-admin btn-admin-primary btn-admin-sm">Confirm Clear Schedule</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Reset Assessment Confirmation -->
+<div class="modal fade admin-modal" id="resetAssessmentModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold text-white"><i class="fas fa-rotate-left text-warning me-2"></i> Reset Diagnostic Assessment</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-muted small">
+                Are you sure you want to reset the diagnostic assessment flag for <strong>{{ student.full_name or student.email }}</strong>?
+                This allows the student to retake their initial assessment from fresh.
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-admin btn-admin-secondary btn-admin-sm" data-bs-dismiss="modal">Cancel</button>
+                <form action="{{ url_for('admin.student_reset_assessment', student_id=student.id) }}" method="POST">
+                    <button type="submit" class="btn btn-admin btn-admin-warning btn-admin-sm">Confirm Reset Flag</button>
+                </form>
+            </div>
         </div>
     </div>
 </div>

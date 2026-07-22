@@ -5,8 +5,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    SECRET_KEY = os.getenv("SECRET_KEY", "SmartStudy@APU2025#NP069826")
+    SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE-ME-IN-PRODUCTION-SET-SECRET-KEY-ENV-VAR")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    
+    # Production Debug & Session Cookie Security Configuration
+    FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1", "yes")
+    DEBUG = FLASK_DEBUG
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "True").lower() in ("true", "1", "yes")
+    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
     
     # Check if configured for MySQL production or SQLite development
     DB_TYPE = os.getenv("DB_TYPE", "sqlite") # 'mysql' or 'sqlite'
@@ -23,7 +30,9 @@ class Config:
     else:
         # SQLite local development database file
         basedir = os.path.abspath(os.path.dirname(__file__))
-        SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(basedir, 'smart_study.db')}"
+        db_file = os.path.join(basedir, 'smart_study.db').replace('\\', '/')
+        SQLALCHEMY_DATABASE_URI = f"sqlite:///{db_file}"
+
     
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     ABSTRACT_API_KEY = os.getenv("ABSTRACT_API_KEY")

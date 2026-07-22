@@ -1,117 +1,146 @@
-{% extends 'base.html' %}
-{% block title %}System Health — Admin{% endblock %}
+{% extends 'admin/admin_base.html' %}
+{% block title %}AI & ML Management — System Telemetry{% endblock %}
 
-{% block content %}
-<div class="d-flex align-items-center justify-content-between mb-4">
+{% block breadcrumb_items %}
+    <span class="active-item">AI &amp; ML Telemetry</span>
+{% endblock %}
+
+{% block admin_content %}
+<!-- Header Bar -->
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
     <div>
-        <h1 class="page-title mb-1"><i class="fas fa-heartbeat me-2 text-gradient"></i> System Health</h1>
-        <p class="page-subtitle mb-0">Live status of all services, APIs, and ML models.</p>
+        <h1 class="h3 fw-bold text-white mb-1"><i class="fas fa-heartbeat me-2 text-primary"></i> AI &amp; ML Management &amp; System Health</h1>
+        <p class="text-muted small mb-0">Observability dashboard for 14 Random Forest ML models, Gemini API configuration, prediction risk distribution, and system diagnostics.</p>
     </div>
-    <div>
-        {% if overall == 'ok' %}
-        <span class="badge fs-6 bg-success px-3 py-2"><i class="fas fa-check-circle me-1"></i> All Systems Operational</span>
-        {% elif overall == 'warning' %}
-        <span class="badge fs-6 bg-warning text-dark px-3 py-2"><i class="fas fa-exclamation-triangle me-1"></i> Degraded</span>
-        {% else %}
-        <span class="badge fs-6 bg-danger px-3 py-2"><i class="fas fa-times-circle me-1"></i> Issues Detected</span>
-        {% endif %}
-        <a href="{{ url_for('admin.health') }}" class="btn btn-outline-secondary btn-sm ms-2"><i class="fas fa-sync me-1"></i> Refresh</a>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('admin.health') }}" class="btn btn-admin btn-admin-secondary btn-admin-sm">
+            <i class="fas fa-rotate me-1"></i> Refresh Diagnostics
+        </a>
     </div>
 </div>
 
-<!-- Service Checks -->
+<!-- KPI Cards Bar -->
 <div class="row g-3 mb-4">
-    <!-- DB -->
-    <div class="col-md-4">
-        <div class="card card-flat p-4 h-100">
-            <div class="d-flex align-items-center gap-3 mb-3">
-                <div class="rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;background:rgba(79,209,197,0.12);">
-                    <i class="fas fa-database text-info"></i>
-                </div>
+    <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card p-3">
+            <div class="d-flex align-items-center justify-content-between">
                 <div>
-                    <div class="fw-bold text-white">Database (SQLite)</div>
-                    <div class="small text-muted">Core data store</div>
+                    <div class="stat-label">Total ML Model Files</div>
+                    <div class="stat-value text-white">{{ ml_inventory|length }}</div>
                 </div>
+                <div class="stat-icon text-primary"><i class="fas fa-brain fs-4"></i></div>
             </div>
-            {% set db = checks.db %}
-            {% if db.status == 'ok' %}
-            <span class="badge bg-success mb-2"><i class="fas fa-check me-1"></i> OK — {{ db.latency_ms }}ms</span>
-            {% elif db.status == 'error' %}
-            <span class="badge bg-danger mb-2"><i class="fas fa-times me-1"></i> Error</span>
-            {% endif %}
-            <div class="small text-muted">{{ db.detail }}</div>
+            <div class="stat-subtext mt-1">
+                <span class="text-success"><i class="fas fa-circle-check me-1"></i> {{ active_ml_count }} Active</span>
+                {% if missing_ml_count > 0 %}
+                &bull; <span class="text-danger"><i class="fas fa-circle-exclamation me-1"></i> {{ missing_ml_count }} Missing</span>
+                {% endif %}
+            </div>
         </div>
     </div>
 
-    <!-- Gemini API -->
-    <div class="col-md-4">
-        <div class="card card-flat p-4 h-100">
-            <div class="d-flex align-items-center gap-3 mb-3">
-                <div class="rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;background:rgba(139,92,246,0.12);">
-                    <i class="fas fa-robot text-primary"></i>
-                </div>
+    <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card p-3">
+            <div class="d-flex align-items-center justify-content-between">
                 <div>
-                    <div class="fw-bold text-white">Gemini API</div>
-                    <div class="small text-muted">AI / MCQ service</div>
+                    <div class="stat-label">Total Predictions Logged</div>
+                    <div class="stat-value text-white">{{ total_predictions }}</div>
                 </div>
+                <div class="stat-icon text-info"><i class="fas fa-chart-line fs-4"></i></div>
             </div>
-            {% set g = checks.gemini %}
-            {% if g.status == 'ok' %}
-            <span class="badge bg-success mb-2"><i class="fas fa-check me-1"></i> OK — {{ g.latency_ms }}ms</span>
-            {% elif g.status == 'unconfigured' %}
-            <span class="badge bg-secondary mb-2"><i class="fas fa-minus me-1"></i> Unconfigured</span>
-            {% else %}
-            <span class="badge bg-danger mb-2"><i class="fas fa-times me-1"></i> Error</span>
-            {% endif %}
-            <div class="small text-muted text-truncate">{{ g.detail }}</div>
+            <div class="stat-subtext mt-1 text-muted">
+                {% if total_predictions > 0 %}
+                Real database predictions
+                {% else %}
+                No student predictions logged yet
+                {% endif %}
+            </div>
         </div>
     </div>
 
-    <!-- ML Model -->
-    <div class="col-md-4">
-        <div class="card card-flat p-4 h-100">
-            <div class="d-flex align-items-center gap-3 mb-3">
-                <div class="rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;background:rgba(245,158,11,0.12);">
-                    <i class="fas fa-brain text-warning"></i>
-                </div>
+    <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card p-3">
+            <div class="d-flex align-items-center justify-content-between">
                 <div>
-                    <div class="fw-bold text-white">ML Model (Random Forest)</div>
-                    <div class="small text-muted">Risk prediction</div>
+                    <div class="stat-label">Gemini API Status</div>
+                    <div class="stat-value fs-5 mt-1">
+                        {% if gemini_configured %}
+                        <span class="badge-status active"><i class="fas fa-check-circle"></i> CONFIGURED</span>
+                        {% else %}
+                        <span class="badge-status error"><i class="fas fa-circle-xmark"></i> UNCONFIGURED</span>
+                        {% endif %}
+                    </div>
                 </div>
+                <div class="stat-icon text-warning"><i class="fas fa-robot fs-4"></i></div>
             </div>
-            {% set ml = checks.ml %}
-            {% if ml.status == 'ok' %}
-            <span class="badge bg-success mb-2"><i class="fas fa-check me-1"></i> Loaded</span>
-            {% elif ml.status == 'missing' %}
-            <span class="badge bg-warning text-dark mb-2"><i class="fas fa-exclamation-triangle me-1"></i> Not Trained</span>
-            {% else %}
-            <span class="badge bg-danger mb-2"><i class="fas fa-times me-1"></i> Error</span>
-            {% endif %}
-            <div class="small text-muted">{{ ml.detail }}</div>
+            <div class="stat-subtext mt-1 text-muted">
+                Key: <code class="text-muted small">{{ masked_key }}</code>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card p-3">
+            <div class="d-flex align-items-center justify-content-between">
+                <div>
+                    <div class="stat-label">AI Study Materials</div>
+                    <div class="stat-value text-white">{{ total_ai_materials }}</div>
+                </div>
+                <div class="stat-icon text-success"><i class="fas fa-book-journal-whills fs-4"></i></div>
+            </div>
+            <div class="stat-subtext mt-1 text-muted">Generated across all subjects</div>
         </div>
     </div>
 </div>
 
-<!-- Model Config Table -->
-<div class="card card-flat p-4 mb-4">
-    <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-cogs me-2"></i> Configured Gemini Models</h6>
-    <div class="table-responsive">
-        <table class="table table-dark align-middle border-0">
-            <thead class="border-bottom border-secondary">
-                <tr class="text-muted small">
-                    <th>Role</th>
-                    <th>Model</th>
-                    <th>Daily Limit</th>
-                    <th>RPM Limit</th>
+<!-- 14 ML Model Inventory Table Card -->
+<div class="admin-card p-0 mb-4">
+    <div class="admin-card-header px-4 py-3 mb-0">
+        <div class="d-flex align-items-center justify-content-between">
+            <h2 class="admin-card-title fs-6"><i class="fas fa-cubes text-primary"></i> 14 Random Forest ML Models &amp; Scalers Inventory</h2>
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1 font-mono fw-bold">Total Size: {{ total_ml_size_formatted }}</span>
+        </div>
+    </div>
+
+    <div class="admin-table-container border-0">
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th class="ps-4">Model Filename</th>
+                    <th>Model Name</th>
+                    <th>Type</th>
+                    <th>Cohort / Target Scope</th>
+                    <th>File Size</th>
+                    <th>Last Modified</th>
+                    <th class="pe-4 text-end">Status</th>
                 </tr>
             </thead>
             <tbody>
-                {% for m in model_config %}
+                {% for m in ml_inventory %}
                 <tr>
-                    <td class="text-white fw-semibold">{{ m.label }}</td>
-                    <td><code class="text-info">{{ m.model }}</code></td>
-                    <td>{{ m.daily_limit }}</td>
-                    <td>{{ m.rpm }}</td>
+                    <td class="ps-4">
+                        <span class="badge bg-secondary-subtle text-white border border-secondary px-2 py-1 font-mono fw-bold">{{ m.filename }}</span>
+                    </td>
+                    <td class="fw-bold text-white fs-6">{{ m.name }}</td>
+                    <td>
+                        {% if m.type == 'Model' %}
+                        <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1 font-semibold"><i class="fas fa-brain me-1"></i> Classifier</span>
+                        {% else %}
+                        <span class="badge bg-info-subtle text-info border border-info-subtle px-2 py-1 font-semibold"><i class="fas fa-sliders me-1"></i> Scaler</span>
+                        {% endif %}
+                    </td>
+                    <td class="small text-muted">{{ m.cohort }}</td>
+                    <td class="small text-white font-mono">{{ m.size_formatted }}</td>
+                    <td class="small text-muted">{{ m.mtime_formatted }}</td>
+                    <td class="pe-4 text-end">
+                        {% if m.status == 'ACTIVE' %}
+                        <span class="badge-status active"><i class="fas fa-circle-check"></i> ACTIVE</span>
+                        {% elif m.status == 'WARNING' %}
+                        <span class="badge-status warning"><i class="fas fa-triangle-exclamation"></i> WARNING</span>
+                        {% else %}
+                        <span class="badge-status error"><i class="fas fa-ban"></i> {{ m.status }}</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -119,113 +148,231 @@
     </div>
 </div>
 
-<!-- API Usage & Content Issues -->
-<div class="row g-4 mb-4">
-    <!-- API Usage (Daily API Usage) -->
-    <div class="col-md-6">
-        <div class="card card-flat p-4">
-            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-chart-line me-2"></i> Today's Gemini API Usage</h6>
-            {% if api_usage %}
-            <div class="d-flex flex-column gap-3">
-                {% for r in api_usage %}
-                <div>
-                    <div class="d-flex justify-content-between small mb-1">
-                        <span class="text-white">
-                            {{ r.feature | upper }}
-                            <code class="text-muted small">({{ r.model }})</code>
-                        </span>
-                        <span class="text-muted">{{ r.count }} / {{ r.limit }} calls</span>
-                    </div>
-                    {% if r.pct is not none %}
-                    <div class="progress" style="height:6px;background:#1e293b;">
-                        <div class="progress-bar {% if r.pct > 90 %}bg-danger{% elif r.pct > 65 %}bg-warning{% else %}bg-success{% endif %}"
-                             style="width:{{ [r.pct, 100] | min }}%"></div>
-                    </div>
-                    {% endif %}
-                </div>
-                {% endfor %}
+<!-- ML Diagnostics & Risk Distribution Grid -->
+<div class="row g-3 mb-4">
+    <!-- Model File Diagnostics -->
+    <div class="col-lg-6">
+        <div class="admin-card h-100 mb-0">
+            <div class="admin-card-header">
+                <h2 class="admin-card-title"><i class="fas fa-microscope text-primary"></i> ML Filesystem Diagnostics</h2>
             </div>
-            {% else %}
-            <p class="text-muted small mb-0">No API calls recorded today yet.</p>
-            {% endif %}
+            
+            <div class="d-flex flex-column gap-2.5">
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold"><i class="fas fa-weight-hanging text-primary me-2"></i> Total Models Directory Size</span>
+                    <span class="fw-bold text-white font-mono">{{ total_ml_size_formatted }}</span>
+                </div>
+
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold"><i class="fas fa-maximize text-info me-2"></i> Largest Model File</span>
+                    <span class="fw-bold text-white font-mono">
+                        {% if largest_file %}{{ largest_file.filename }} ({{ largest_file.size_formatted }}){% else %}None{% endif %}
+                    </span>
+                </div>
+
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold"><i class="fas fa-minimize text-secondary me-2"></i> Smallest Scaler File</span>
+                    <span class="fw-bold text-white font-mono">
+                        {% if smallest_file %}{{ smallest_file.filename }} ({{ smallest_file.size_formatted }}){% else %}None{% endif %}
+                    </span>
+                </div>
+
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold"><i class="fas fa-clock text-warning me-2"></i> Last Modified File</span>
+                    <span class="fw-bold text-white font-mono">
+                        {% if last_modified_file %}{{ last_modified_file.filename }} ({{ last_modified_file.mtime_formatted }}){% else %}None{% endif %}
+                    </span>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- Content Diagnostics (Zero MCQ, Broken PDFs) -->
-    <div class="col-md-6">
-        <div class="card card-flat p-4">
-            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-stethoscope me-2"></i> Content Issues Monitor</h6>
-            <div class="small">
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary align-items-center">
-                    <span class="text-muted">Subjects w/ Zero MCQ Questions</span>
-                    {% if subjects_zero_q > 0 %}
-                    <span class="badge bg-danger">{{ subjects_zero_q }} subjects</span>
-                    {% else %}
-                    <span class="badge bg-success">0 (Healthy)</span>
-                    {% endif %}
+    <!-- ML Prediction Risk Distribution -->
+    <div class="col-lg-6">
+        <div class="admin-card h-100 mb-0">
+            <div class="admin-card-header">
+                <h2 class="admin-card-title"><i class="fas fa-chart-pie text-warning"></i> Student ML Risk Distribution</h2>
+                <span class="badge bg-secondary-subtle text-white border border-secondary px-2 py-0.5">DB Predictions</span>
+            </div>
+
+            {% if total_predictions > 0 %}
+            <div class="d-flex flex-column gap-3 py-2">
+                <div>
+                    <div class="d-flex justify-content-between small fw-semibold mb-1">
+                        <span class="text-success"><i class="fas fa-circle me-1"></i> Low Risk Students</span>
+                        <span class="text-white font-mono">{{ low_risk_count }} ({{ (low_risk_count / total_predictions * 100) | round(1) }}%)</span>
+                    </div>
+                    <div class="progress" style="height: 8px; background: rgba(255,255,255,0.05);">
+                        <div class="progress-bar bg-success" style="width: {{ (low_risk_count / total_predictions * 100) }}%;"></div>
+                    </div>
                 </div>
-                <div class="d-flex justify-content-between py-2 align-items-center">
-                    <span class="text-muted">Broken / Empty Cached PDFs (under 5KB)</span>
-                    {% if broken_pdfs_count > 0 %}
-                    <span class="badge bg-danger">{{ broken_pdfs_count }} files</span>
+
+                <div>
+                    <div class="d-flex justify-content-between small fw-semibold mb-1">
+                        <span class="text-warning"><i class="fas fa-circle me-1"></i> Medium Risk Students</span>
+                        <span class="text-white font-mono">{{ med_risk_count }} ({{ (med_risk_count / total_predictions * 100) | round(1) }}%)</span>
+                    </div>
+                    <div class="progress" style="height: 8px; background: rgba(255,255,255,0.05);">
+                        <div class="progress-bar bg-warning" style="width: {{ (med_risk_count / total_predictions * 100) }}%;"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="d-flex justify-content-between small fw-semibold mb-1">
+                        <span class="text-danger"><i class="fas fa-circle me-1"></i> High Risk Students</span>
+                        <span class="text-white font-mono">{{ high_risk_count }} ({{ (high_risk_count / total_predictions * 100) | round(1) }}%)</span>
+                    </div>
+                    <div class="progress" style="height: 8px; background: rgba(255,255,255,0.05);">
+                        <div class="progress-bar bg-danger" style="width: {{ (high_risk_count / total_predictions * 100) }}%;"></div>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="p-4 text-center text-muted">
+                <i class="fas fa-chart-line fs-2 text-dim mb-2 d-block"></i>
+                <div class="fw-bold text-white mb-1">No prediction data available</div>
+                <div class="small text-dim">Student risk levels will populate automatically as students run ML academic risk evaluations.</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Gemini API & Telemetry Unavailability Section -->
+<div class="row g-3 mb-4">
+    <!-- Gemini API Config Card -->
+    <div class="col-lg-6">
+        <div class="admin-card h-100 mb-0">
+            <div class="admin-card-header">
+                <h2 class="admin-card-title"><i class="fas fa-robot text-primary"></i> Gemini API Provider Health</h2>
+                {% if gemini_configured %}
+                <span class="badge-status active"><i class="fas fa-check"></i> CONFIGURED</span>
+                {% else %}
+                <span class="badge-status error"><i class="fas fa-ban"></i> UNCONFIGURED</span>
+                {% endif %}
+            </div>
+
+            <div class="d-flex flex-column gap-2.5">
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold">API Key Configuration</span>
+                    <code class="text-white font-mono">{{ masked_key }}</code>
+                </div>
+
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold">Configured Model Version</span>
+                    <span class="fw-bold text-white font-mono">{{ gemini_model_version }}</span>
+                </div>
+
+                {% set g_check = checks.gemini %}
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold">Live Connection Health Check</span>
+                    {% if g_check.status == 'ok' %}
+                    <span class="badge-status active"><i class="fas fa-bolt"></i> OK ({{ g_check.latency_ms }} ms)</span>
+                    {% elif g_check.status == 'unconfigured' %}
+                    <span class="badge-status warning"><i class="fas fa-ban"></i> Unconfigured</span>
                     {% else %}
-                    <span class="badge bg-success">0 (Healthy)</span>
+                    <span class="badge-status error"><i class="fas fa-exclamation-triangle"></i> Connection Error</span>
                     {% endif %}
                 </div>
             </div>
-            <div class="text-end mt-3">
-                <a href="{{ url_for('admin.content_stats') }}" class="btn btn-outline-primary btn-xs">
-                    <i class="fas fa-tools me-1"></i> Open Content Manager
-                </a>
+        </div>
+    </div>
+
+    <!-- Telemetry Unavailability Information Card -->
+    <div class="col-lg-6">
+        <div class="admin-card h-100 mb-0">
+            <div class="admin-card-header">
+                <h2 class="admin-card-title"><i class="fas fa-circle-info text-info"></i> API Quota &amp; Request Telemetry Status</h2>
+            </div>
+
+            <div class="p-3 rounded mb-3" style="background: rgba(59, 130, 246, 0.1); border: 1px solid var(--admin-info); font-size: 0.85rem; line-height: 1.5;">
+                <div class="fw-bold text-white mb-1"><i class="fas fa-info-circle text-info me-1"></i> Quota Telemetry Unavailable</div>
+                <div class="text-dim">Google Gemini API quota usage is not currently tracked by the application database or logging system. Real-time API consumption rate metrics will be displayed if a quota logging table is added in a future phase.</div>
+            </div>
+
+            <div class="p-3 rounded" style="background: rgba(245, 158, 11, 0.1); border: 1px solid var(--admin-warning); font-size: 0.85rem; line-height: 1.5;">
+                <div class="fw-bold text-white mb-1"><i class="fas fa-shield-halved text-warning me-1"></i> AI Tutor Request Telemetry</div>
+                <div class="text-dim">Request latency and per-prompt token usage logs are not currently persisted by the chat handler. All AI Tutor interactions operate live over official API endpoints.</div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="row g-4">
-    <!-- Disk Info -->
-    <div class="col-md-6">
-        <div class="card card-flat p-4">
-            <h6 class="fw-bold text-gradient mb-3"><i class="fas fa-hdd me-2"></i> Disk Usage</h6>
-            {% if disk %}
-            <div class="mb-2">
-                <div class="d-flex justify-content-between small mb-1">
-                    <span class="text-white">{{ disk.used_gb }} GB / {{ disk.total_gb }} GB used</span>
-                    <span class="{% if disk.pct_used > 85 %}text-danger{% elif disk.pct_used > 65 %}text-warning{% else %}text-success{% endif %}">{{ disk.pct_used }}%</span>
-                </div>
-                <div class="progress" style="height:8px;background:#1e293b;">
-                    <div class="progress-bar {% if disk.pct_used > 85 %}bg-danger{% elif disk.pct_used > 65 %}bg-warning{% else %}bg-success{% endif %}"
-                         style="width:{{ disk.pct_used }}%"></div>
-                </div>
-            </div>
-            <div class="small text-muted mt-2">Free: {{ disk.free_gb }} GB</div>
-            {% else %}
-            <p class="text-muted small">Disk info unavailable.</p>
-            {% endif %}
+<!-- System Diagnostic Error Scanner -->
+<div class="admin-card p-0 mb-4">
+    <div class="admin-card-header px-4 py-3 mb-0">
+        <div class="d-flex align-items-center justify-content-between">
+            <h2 class="admin-card-title fs-6"><i class="fas fa-stethoscope text-danger"></i> System Diagnostic Error Scanner</h2>
+            <span class="badge-status {% if missing_ml_count > 0 or subjects_zero_q > 0 or broken_pdfs_count > 0 %}warning{% else %}active{% endif %}">
+                {% if missing_ml_count > 0 or subjects_zero_q > 0 or broken_pdfs_count > 0 %}Warnings Detected{% else %}All Diagnostics Clean{% endif %}
+            </span>
         </div>
     </div>
 
-    <!-- Python / Runtime -->
-    <div class="col-md-6">
-        <div class="card card-flat p-4">
-            <h6 class="fw-bold text-gradient mb-3"><i class="fab fa-python me-2"></i> Python Runtime</h6>
-            {% if python_info %}
-            <div class="small">
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary">
-                    <span class="text-muted">Python Version</span>
-                    <code class="text-info">{{ python_info.version }}</code>
-                </div>
-                <div class="d-flex justify-content-between py-2 border-bottom border-secondary">
-                    <span class="text-muted">Platform</span>
-                    <code class="text-info">{{ python_info.platform }}</code>
-                </div>
-                <div class="py-2">
-                    <span class="text-muted">Executable</span><br>
-                    <code class="text-info small" style="word-break:break-all;">{{ python_info.executable }}</code>
-                </div>
-            </div>
-            {% endif %}
-        </div>
+    <div class="admin-table-container border-0">
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th class="ps-4">Diagnostic Target</th>
+                    <th>Target Scope</th>
+                    <th>Detected Metric</th>
+                    <th class="pe-4 text-end">Diagnostic Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="ps-4 fw-bold text-white">Random Forest ML Models</td>
+                    <td class="small text-muted">14 Binary Files in <code>/models/</code></td>
+                    <td class="small text-white font-mono">{{ active_ml_count }} Active / {{ missing_ml_count }} Missing</td>
+                    <td class="pe-4 text-end">
+                        {% if missing_ml_count == 0 %}
+                        <span class="badge-status active"><i class="fas fa-check-circle"></i> 14/14 Present</span>
+                        {% else %}
+                        <span class="badge-status error"><i class="fas fa-triangle-exclamation"></i> {{ missing_ml_count }} Missing</span>
+                        {% endif %}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td class="ps-4 fw-bold text-white">Gemini API Key Configuration</td>
+                    <td class="small text-muted">Environment / App Config</td>
+                    <td class="small text-white font-mono">Key: {{ masked_key }}</td>
+                    <td class="pe-4 text-end">
+                        {% if gemini_configured %}
+                        <span class="badge-status active"><i class="fas fa-check-circle"></i> Configured</span>
+                        {% else %}
+                        <span class="badge-status error"><i class="fas fa-ban"></i> Unconfigured</span>
+                        {% endif %}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td class="ps-4 fw-bold text-white">Cached PDF File Integrity</td>
+                    <td class="small text-muted"><code>static/cache/pdfs/</code></td>
+                    <td class="small text-white font-mono">{{ broken_pdfs_count }} Truncated (&lt; 5KB)</td>
+                    <td class="pe-4 text-end">
+                        {% if broken_pdfs_count == 0 %}
+                        <span class="badge-status active"><i class="fas fa-check-circle"></i> Healthy</span>
+                        {% else %}
+                        <span class="badge-status warning"><i class="fas fa-triangle-exclamation"></i> {{ broken_pdfs_count }} Truncated</span>
+                        {% endif %}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td class="ps-4 fw-bold text-white">Subject MCQ Inventory Coverage</td>
+                    <td class="small text-muted">Global Subjects Catalog</td>
+                    <td class="small text-white font-mono">{{ subjects_zero_q }} Subjects w/ 0 MCQs</td>
+                    <td class="pe-4 text-end">
+                        {% if subjects_zero_q == 0 %}
+                        <span class="badge-status active"><i class="fas fa-check-circle"></i> 100% Covered</span>
+                        {% else %}
+                        <span class="badge-status warning"><i class="fas fa-triangle-exclamation"></i> {{ subjects_zero_q }} Zero-MCQ</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
     </div>
 </div>
 {% endblock %}

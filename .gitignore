@@ -14,6 +14,7 @@ instance/
 
 # Databases
 *.db
+*.sqlite
 *.sqlite3
 
 # ML models (large binaries) and training datasets (large text files)
@@ -36,3 +37,10 @@ Thumbs.db
 
 # Scratch/debug scripts
 scratch/
+
+# Application logs
+*.log
+logs/
+
+# Auto-generated PDF cache (regenerated at runtime, not source files)
+app/static/cache/

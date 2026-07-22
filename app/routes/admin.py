@@ -3,7 +3,8 @@ from flask_login import login_required, current_user
 from app import db
 from app.models import (
     User, Prediction, StudyLog, StudentProfile, StudentSubject,
-    EducationLevel, University, Faculty, CurriculumProgram, Subject, AdminActivityLog
+    EducationLevel, University, Faculty, CurriculumProgram, Subject, AdminActivityLog,
+    ProgramSubject, ImportSession, ImportItem
 )
 from datetime import datetime, timedelta
 import json
@@ -33,10 +34,41 @@ def log_admin_action(action, entity_type=None, entity_id=None, detail=None):
 
 @admin_bp.route("/dashboard")
 def dashboard():
+    from app.models import (
+        User, Prediction, StudyLog, EducationLevel, University, Faculty,
+        CurriculumProgram, Subject, Chapter, Topic, AssessmentQuestion,
+        ImportSession, AdminActivityLog
+    )
     total_students = User.query.filter_by(role='student').count()
+    active_students = User.query.filter_by(role='student', is_active=True).count()
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    recent_students = User.query.filter(User.role == 'student', User.date_registered >= seven_days_ago).count()
+    
     total_predictions = Prediction.query.count()
-    total_study_hours = sum(log.duration_hours for log in StudyLog.query.all())
+    total_study_hours = round(db.session.query(db.func.sum(StudyLog.duration_hours)).scalar() or 0.0, 1)
 
+    # Curriculum metrics
+    levels_count = EducationLevel.query.filter_by(is_active=True).count()
+    universities_count = University.query.filter_by(is_active=True).count()
+    faculties_count = Faculty.query.filter_by(is_active=True).count()
+    programs_count = CurriculumProgram.query.filter_by(is_active=True).count()
+    subjects_count = Subject.query.filter_by(is_active=True).count()
+    chapters_count = Chapter.query.count()
+    topics_count = Topic.query.count()
+
+    # Content & Ingestion
+    mcq_count = AssessmentQuestion.query.count()
+    import_sessions_count = ImportSession.query.count()
+
+    # System Health Telemetry Summary
+    db_status = "ok"
+    gemini_status = "configured" if current_app.config.get("GEMINI_API_KEY") else "unconfigured"
+    ml_status = _check_ml_model().get("status", "missing")
+
+    # Recent Audit Activity
+    recent_activities = AdminActivityLog.query.order_by(AdminActivityLog.timestamp.desc()).limit(8).all()
+
+    # Weekly Predictions Chart Data
     chart_labels = []
     chart_data = []
     for i in range(3, -1, -1):
@@ -49,12 +81,30 @@ def dashboard():
         chart_labels.append(f"Week {4 - i}")
         chart_data.append(count)
     
-    return render_template("admin/dashboard.html", 
-                           total_students=total_students,
-                           total_predictions=total_predictions,
-                           total_study_hours=total_study_hours,
-                           chart_labels=chart_labels,
-                           chart_data=chart_data)
+    return render_template(
+        "admin/dashboard.html", 
+        total_students=total_students,
+        active_students=active_students,
+        recent_students=recent_students,
+        total_predictions=total_predictions,
+        total_study_hours=total_study_hours,
+        levels_count=levels_count,
+        universities_count=universities_count,
+        faculties_count=faculties_count,
+        programs_count=programs_count,
+        subjects_count=subjects_count,
+        chapters_count=chapters_count,
+        topics_count=topics_count,
+        mcq_count=mcq_count,
+        import_sessions_count=import_sessions_count,
+        db_status=db_status,
+        gemini_status=gemini_status,
+        ml_status=ml_status,
+        recent_activities=recent_activities,
+        chart_labels=chart_labels,
+        chart_data=chart_data
+    )
+
 
 
 # ── SECTION 1: CURRICULUM LEVELS CRUD ─────────────────────────────────────────
@@ -99,10 +149,16 @@ def curriculum_levels_edit(level_id):
 def curriculum_levels_toggle(level_id):
     level = EducationLevel.query.get_or_404(level_id)
     level.is_active = not level.is_active
+    if not level.is_active:
+        level.deleted_at = datetime.utcnow()
+        level.deleted_by = current_user.id
+    else:
+        level.deleted_at = None
+        level.deleted_by = None
     db.session.commit()
-    action_str = "activated" if level.is_active else "deactivated"
+    action_str = "reactivated" if level.is_active else "archived"
     log_admin_action(f"{action_str}_education_level", "EducationLevel", level.id, f"Set is_active={level.is_active} for '{level.name}'")
-    flash(f"Education level '{level.name}' {action_str} successfully!", "success")
+    flash(f"Education level '{level.name}' {action_str}.", "success")
     return redirect(url_for("admin.curriculum_levels"))
 
 
@@ -150,10 +206,16 @@ def curriculum_universities_edit(uni_id):
 def curriculum_universities_toggle(uni_id):
     uni = University.query.get_or_404(uni_id)
     uni.is_active = not uni.is_active
+    if not uni.is_active:
+        uni.deleted_at = datetime.utcnow()
+        uni.deleted_by = current_user.id
+    else:
+        uni.deleted_at = None
+        uni.deleted_by = None
     db.session.commit()
-    action_str = "activated" if uni.is_active else "deactivated"
+    action_str = "reactivated" if uni.is_active else "archived"
     log_admin_action(f"{action_str}_university", "University", uni.id, f"Set is_active={uni.is_active} for '{uni.name}'")
-    flash(f"University '{uni.name}' {action_str} successfully!", "success")
+    flash(f"University '{uni.name}' {action_str}.", "success")
     return redirect(url_for("admin.curriculum_universities"))
 
 
@@ -198,10 +260,16 @@ def curriculum_faculties_edit(fac_id):
 def curriculum_faculties_toggle(fac_id):
     fac = Faculty.query.get_or_404(fac_id)
     fac.is_active = not fac.is_active
+    if not fac.is_active:
+        fac.deleted_at = datetime.utcnow()
+        fac.deleted_by = current_user.id
+    else:
+        fac.deleted_at = None
+        fac.deleted_by = None
     db.session.commit()
-    action_str = "activated" if fac.is_active else "deactivated"
+    action_str = "reactivated" if fac.is_active else "archived"
     log_admin_action(f"{action_str}_faculty", "Faculty", fac.id, f"Set is_active={fac.is_active} for '{fac.name}'")
-    flash(f"Faculty '{fac.name}' {action_str} successfully!", "success")
+    flash(f"Faculty '{fac.name}' {action_str}.", "success")
     return redirect(url_for("admin.curriculum_faculties"))
 
 
@@ -292,11 +360,572 @@ def curriculum_programs_edit(prog_id):
 def curriculum_programs_toggle(prog_id):
     prog = CurriculumProgram.query.get_or_404(prog_id)
     prog.is_active = not prog.is_active
+    if not prog.is_active:
+        prog.deleted_at = datetime.utcnow()
+        prog.deleted_by = current_user.id
+        # Soft-deactivate this program's ProgramSubject mappings ONLY
+        # Global Subject records are NOT touched
+        ProgramSubject.query.filter_by(program_id=prog.id, is_active=True).update(
+            {"is_active": False, "deleted_at": datetime.utcnow(), "deleted_by": current_user.id}
+        )
+    else:
+        prog.deleted_at = None
+        prog.deleted_by = None
+        # Reactivate this program's ProgramSubject mappings
+        ProgramSubject.query.filter_by(program_id=prog.id, is_active=False).update(
+            {"is_active": True, "deleted_at": None, "deleted_by": None}
+        )
     db.session.commit()
-    action_str = "activated" if prog.is_active else "deactivated"
+    action_str = "reactivated" if prog.is_active else "archived"
     log_admin_action(f"{action_str}_program", "CurriculumProgram", prog.id, f"Set is_active={prog.is_active} for '{prog.name}'")
-    flash(f"Program '{prog.name}' {action_str} successfully!", "success")
+    flash(f"Program '{prog.name}' {action_str}. Shared global subjects were NOT affected.", "success")
     return redirect(url_for("admin.curriculum_programs"))
+
+
+# ── PROGRAM DETAIL — Subject Management ────────────────────────────────────────
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>")
+def curriculum_program_detail(prog_id):
+    """Program detail page showing all mapped subjects grouped by semester."""
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    # Load active mappings, ordered by semester then sort_order
+    mappings = (
+        ProgramSubject.query
+        .filter_by(program_id=prog.id, is_active=True)
+        .join(Subject, ProgramSubject.subject_id == Subject.id)
+        .order_by(ProgramSubject.semester, ProgramSubject.sort_order, Subject.name)
+        .all()
+    )
+    # Group by semester
+    from collections import defaultdict
+    by_semester = defaultdict(list)
+    for m in mappings:
+        key = m.semester or "Unassigned"
+        by_semester[key].append(m)
+    # Sorted semester keys (Semester 1 < Semester 2 < ... < Core < Unassigned)
+    def sem_sort_key(s):
+        if s.startswith("Semester "):
+            try: return (0, int(s.split()[1]))
+            except: pass
+        return (1, s)
+    semesters_ordered = sorted(by_semester.keys(), key=sem_sort_key)
+
+    # All active global subjects for the Attach modal
+    all_subjects = Subject.query.filter_by(is_active=True).order_by(Subject.name).all()
+    # Exclude already-attached subject IDs
+    attached_ids = {m.subject_id for m in mappings}
+    available_subjects = [s for s in all_subjects if s.id not in attached_ids]
+
+    # All programs for Copy-from dropdown
+    other_programs = CurriculumProgram.query.filter(
+        CurriculumProgram.id != prog.id, CurriculumProgram.is_active == True
+    ).order_by(CurriculumProgram.name).all()
+
+    usage_count = StudentProfile.query.filter_by(program=prog.name).count()
+
+    return render_template(
+        "admin/curriculum/program_detail.html",
+        prog=prog,
+        by_semester=by_semester,
+        semesters_ordered=semesters_ordered,
+        available_subjects=available_subjects,
+        other_programs=other_programs,
+        usage_count=usage_count,
+        total_subjects=len(mappings),
+    )
+
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>/subjects/attach", methods=["POST"])
+def curriculum_program_attach_subject(prog_id):
+    """Attach an existing global Subject to this program."""
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    subject_id = request.form.get("subject_id", type=int)
+    semester = request.form.get("semester", "").strip() or None
+    term = request.form.get("term", "").strip() or None
+
+    if not subject_id:
+        flash("Please select a subject to attach.", "warning")
+        return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+    subject = Subject.query.get_or_404(subject_id)
+
+    # Check for existing active mapping
+    existing = ProgramSubject.query.filter_by(program_id=prog.id, subject_id=subject_id).first()
+    if existing:
+        if existing.is_active:
+            flash(f"'{subject.name}' is already attached to this program.", "warning")
+        else:
+            # Reactivate it
+            existing.is_active = True
+            existing.deleted_at = None
+            existing.deleted_by = None
+            existing.semester = semester or existing.semester
+            db.session.commit()
+            log_admin_action("reattach_subject", "ProgramSubject", existing.id,
+                             f"Reattached '{subject.name}' to program '{prog.name}'")
+            flash(f"'{subject.name}' reattached to program '{prog.name}'.", "success")
+        return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+    # Get max sort_order for this semester in this program
+    max_order = db.session.query(db.func.max(ProgramSubject.sort_order)).filter_by(
+        program_id=prog.id, semester=semester
+    ).scalar() or 0
+
+    mapping = ProgramSubject(
+        program_id=prog.id,
+        subject_id=subject_id,
+        semester=semester,
+        term=term,
+        sort_order=max_order + 1,
+        is_active=True
+    )
+    db.session.add(mapping)
+    db.session.commit()
+    log_admin_action("attach_subject", "ProgramSubject", mapping.id,
+                     f"Attached '{subject.name}' to program '{prog.name}' (semester={semester})")
+    flash(f"'{subject.name}' attached to program '{prog.name}'.", "success")
+    return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>/subjects/create", methods=["POST"])
+def curriculum_program_create_subject(prog_id):
+    """Create a new global Subject and immediately attach it to this program."""
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    name = request.form.get("name", "").strip()
+    code = request.form.get("code", "").strip() or None
+    credit_hours = int(request.form.get("credit_hours", 3))
+    difficulty = int(request.form.get("difficulty_level", 3))
+    semester = request.form.get("semester", "").strip() or None
+    term = request.form.get("term", "").strip() or None
+
+    if not name:
+        flash("Subject name is required.", "danger")
+        return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+    # Check for duplicate code
+    if code and Subject.query.filter_by(code=code).first():
+        flash(f"Subject code '{code}' already exists. Use a different code.", "danger")
+        return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+    subj = Subject(
+        name=name, code=code,
+        level_of_study=prog.level_name,
+        program=prog.name,
+        semester=semester,
+        credit_hours=credit_hours,
+        difficulty_level=difficulty,
+        country="Nepal",
+        curriculum="LBEF (APU)" if "APU" in prog.name or "LBEF" in prog.name else "National",
+        is_active=True
+    )
+    db.session.add(subj)
+    db.session.flush()  # get subj.id
+
+    max_order = db.session.query(db.func.max(ProgramSubject.sort_order)).filter_by(
+        program_id=prog.id, semester=semester
+    ).scalar() or 0
+
+    mapping = ProgramSubject(
+        program_id=prog.id, subject_id=subj.id,
+        semester=semester, term=term,
+        sort_order=max_order + 1, is_active=True
+    )
+    db.session.add(mapping)
+    db.session.commit()
+    log_admin_action("create_attach_subject", "Subject", subj.id,
+                     f"Created and attached '{name}' ({code}) to program '{prog.name}'")
+    flash(f"Subject '{name}' created and attached to '{prog.name}'.", "success")
+    return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>/subjects/<int:ps_id>/detach", methods=["POST"])
+def curriculum_program_detach_subject(prog_id, ps_id):
+    """
+    Detach a subject from this program.
+
+    IMPORTANT: Only the ProgramSubject mapping is soft-deleted.
+    The global Subject record is NEVER deleted here.
+    Other programs that use the same Subject are completely unaffected.
+    """
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    mapping = ProgramSubject.query.filter_by(id=ps_id, program_id=prog.id).first_or_404()
+    subj_name = mapping.subject.name if mapping.subject else f"ID={mapping.subject_id}"
+
+    mapping.is_active = False
+    mapping.deleted_at = datetime.utcnow()
+    mapping.deleted_by = current_user.id
+    db.session.commit()
+    log_admin_action("detach_subject", "ProgramSubject", ps_id,
+                     f"Detached '{subj_name}' from program '{prog.name}' (global Subject preserved)")
+    flash(f"'{subj_name}' detached from '{prog.name}'. The global subject record is preserved.", "success")
+    return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>/subjects/<int:ps_id>/edit", methods=["POST"])
+def curriculum_program_edit_mapping(prog_id, ps_id):
+    """Edit the semester/term/sort_order of a ProgramSubject mapping."""
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    mapping = ProgramSubject.query.filter_by(id=ps_id, program_id=prog.id).first_or_404()
+    mapping.semester = request.form.get("semester", "").strip() or mapping.semester
+    mapping.term = request.form.get("term", "").strip() or mapping.term
+    sort_val = request.form.get("sort_order", type=int)
+    if sort_val is not None:
+        mapping.sort_order = sort_val
+    db.session.commit()
+    log_admin_action("edit_mapping", "ProgramSubject", ps_id,
+                     f"Updated mapping for subject_id={mapping.subject_id} in program '{prog.name}'")
+    flash("Subject mapping updated.", "success")
+    return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>/subjects/reorder", methods=["POST"])
+def curriculum_program_reorder(prog_id):
+    """AJAX endpoint: receive ordered list of ProgramSubject IDs and update sort_order."""
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    data = request.get_json(silent=True) or {}
+    ordered_ids = data.get("ordered_ids", [])  # list of ps_id in display order
+    for i, ps_id in enumerate(ordered_ids, start=1):
+        ProgramSubject.query.filter_by(id=int(ps_id), program_id=prog.id).update({"sort_order": i})
+    db.session.commit()
+    return jsonify({"status": "ok", "updated": len(ordered_ids)})
+
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>/subjects/bulk-attach", methods=["POST"])
+def curriculum_program_bulk_attach(prog_id):
+    """Attach multiple existing subjects to this program at once."""
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    subject_ids = request.form.getlist("subject_ids", type=int)
+    semester = request.form.get("semester", "").strip() or None
+    attached = 0
+    skipped = 0
+    for sid in subject_ids:
+        existing = ProgramSubject.query.filter_by(program_id=prog.id, subject_id=sid).first()
+        if existing:
+            if not existing.is_active:
+                existing.is_active = True
+                existing.deleted_at = None
+                existing.deleted_by = None
+                attached += 1
+            else:
+                skipped += 1
+            continue
+        max_order = db.session.query(db.func.max(ProgramSubject.sort_order)).filter_by(
+            program_id=prog.id, semester=semester
+        ).scalar() or 0
+        db.session.add(ProgramSubject(
+            program_id=prog.id, subject_id=sid,
+            semester=semester, sort_order=max_order + 1, is_active=True
+        ))
+        attached += 1
+    db.session.commit()
+    log_admin_action("bulk_attach_subjects", "CurriculumProgram", prog.id,
+                     f"Bulk attached {attached} subjects, skipped {skipped} duplicates")
+    flash(f"Attached {attached} subjects. {skipped} already present.", "success")
+    return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>/subjects/bulk-detach", methods=["POST"])
+def curriculum_program_bulk_detach(prog_id):
+    """Soft-detach multiple ProgramSubject mappings at once."""
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    ps_ids = request.form.getlist("ps_ids", type=int)
+    now = datetime.utcnow()
+    detached = 0
+    for ps_id in ps_ids:
+        mapping = ProgramSubject.query.filter_by(id=ps_id, program_id=prog.id, is_active=True).first()
+        if mapping:
+            mapping.is_active = False
+            mapping.deleted_at = now
+            mapping.deleted_by = current_user.id
+            detached += 1
+    db.session.commit()
+    log_admin_action("bulk_detach_subjects", "CurriculumProgram", prog.id,
+                     f"Bulk detached {detached} subject mappings (global subjects preserved)")
+    flash(f"{detached} subjects detached. Global subject records are preserved.", "success")
+    return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>/subjects/copy-preview", methods=["POST"])
+def curriculum_program_copy_preview(prog_id):
+    """Show a preview of subjects to copy from a source program."""
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    source_id = request.form.get("source_program_id", type=int)
+    if not source_id:
+        flash("Please select a source program.", "warning")
+        return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+    source_prog = CurriculumProgram.query.get_or_404(source_id)
+    source_mappings = ProgramSubject.query.filter_by(program_id=source_id, is_active=True).all()
+    existing_subject_ids = {
+        m.subject_id for m in ProgramSubject.query.filter_by(program_id=prog.id, is_active=True).all()
+    }
+
+    new_mappings = [m for m in source_mappings if m.subject_id not in existing_subject_ids]
+    existing_mappings = [m for m in source_mappings if m.subject_id in existing_subject_ids]
+
+    return render_template(
+        "admin/curriculum/copy_preview.html",
+        prog=prog,
+        source_prog=source_prog,
+        new_mappings=new_mappings,
+        existing_mappings=existing_mappings,
+    )
+
+
+@admin_bp.route("/curriculum/programs/<int:prog_id>/subjects/copy-confirm", methods=["POST"])
+def curriculum_program_copy_confirm(prog_id):
+    """Commit copying selected subject mappings from source program."""
+    prog = CurriculumProgram.query.get_or_404(prog_id)
+    source_id = request.form.get("source_program_id", type=int)
+    conflict_mode = request.form.get("conflict_mode", "skip")  # skip | replace
+
+    if not source_id:
+        flash("Invalid source program.", "danger")
+        return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+    source_mappings = ProgramSubject.query.filter_by(program_id=source_id, is_active=True).all()
+    created = 0
+    skipped = 0
+    replaced = 0
+
+    for sm in source_mappings:
+        existing = ProgramSubject.query.filter_by(
+            program_id=prog.id, subject_id=sm.subject_id
+        ).first()
+        if existing:
+            if conflict_mode == "replace":
+                existing.semester = sm.semester
+                existing.term = sm.term
+                existing.sort_order = sm.sort_order
+                existing.is_active = True
+                existing.deleted_at = None
+                existing.deleted_by = None
+                replaced += 1
+            else:
+                skipped += 1
+            continue
+
+        db.session.add(ProgramSubject(
+            program_id=prog.id,
+            subject_id=sm.subject_id,
+            semester=sm.semester,
+            term=sm.term,
+            sort_order=sm.sort_order,
+            is_active=True
+        ))
+        created += 1
+
+    db.session.commit()
+    source_prog = CurriculumProgram.query.get(source_id)
+    log_admin_action("copy_subjects", "CurriculumProgram", prog.id,
+                     f"Copied {created} new mappings from '{source_prog.name}'; skipped={skipped}, replaced={replaced}")
+    flash(f"Copied {created} subjects from '{source_prog.name}'. {skipped} skipped, {replaced} replaced.", "success")
+    return redirect(url_for("admin.curriculum_program_detail", prog_id=prog_id))
+
+
+# ── HARD-DELETE SAFETY HELPER ──────────────────────────────────────────────────
+
+def _count_subject_references(subject_id):
+    """Returns total number of references to a subject across all dependent tables."""
+    from app.models import (
+        StudentSubject, StudentAssessment, AssessmentQuestion,
+        Chapter, ChapterQuizScore, ChapterQuizResult, TopicSeenQuestion, StudentSeenQuestion
+    )
+    ref_checks = [
+        StudentSubject.query.filter_by(subject_id=subject_id).count(),
+        AssessmentQuestion.query.filter_by(subject_id=subject_id).count(),
+        Chapter.query.filter_by(subject_id=subject_id).count(),
+        ProgramSubject.query.filter_by(subject_id=subject_id).count(),
+    ]
+    return sum(ref_checks)
+
+
+@admin_bp.route("/curriculum/subjects/<int:subject_id>/hard-delete", methods=["POST"])
+def curriculum_subjects_hard_delete(subject_id):
+    """Permanently delete a subject — only allowed if zero historical references exist."""
+    subj = Subject.query.get_or_404(subject_id)
+    confirmed = request.form.get("confirm") == "PERMANENTLY DELETE"
+    if not confirmed:
+        flash("Hard delete requires typing 'PERMANENTLY DELETE' to confirm.", "danger")
+        return redirect(url_for("admin.curriculum_subjects"))
+
+    ref_count = _count_subject_references(subj.id)
+    if ref_count > 0:
+        flash(
+            f"Cannot permanently delete '{subj.name}': {ref_count} dependent records exist "
+            f"(student subjects, questions, chapters, or program mappings). "
+            f"Deactivate or archive it instead.",
+            "danger"
+        )
+        return redirect(url_for("admin.curriculum_subjects"))
+
+    subj_name = subj.name
+    db.session.delete(subj)
+    db.session.commit()
+    log_admin_action("hard_delete_subject", "Subject", subject_id,
+                     f"Permanently deleted subject '{subj_name}' (no references found)")
+    flash(f"Subject '{subj_name}' permanently deleted.", "success")
+    return redirect(url_for("admin.curriculum_subjects"))
+
+
+# ── PHASE 4: DOCUMENT INGESTION ROUTES ──────────────────────────────────────────
+
+@admin_bp.route("/curriculum/import")
+def curriculum_import():
+    """Import Syllabus main upload page & session history."""
+    sessions = ImportSession.query.order_by(ImportSession.created_at.desc()).all()
+    return render_template("admin/curriculum/import.html", sessions=sessions)
+
+
+@admin_bp.route("/curriculum/import/upload", methods=["POST"])
+def curriculum_import_upload():
+    """Handles syllabus file upload, extraction, and staging session creation."""
+    if "syllabus_file" not in request.files:
+        flash("No file was uploaded.", "danger")
+        return redirect(url_for("admin.curriculum_import"))
+
+    file_obj = request.files["syllabus_file"]
+    if not file_obj or file_obj.filename == "":
+        flash("Please select a file to upload.", "warning")
+        return redirect(url_for("admin.curriculum_import"))
+
+    from app.services.ingestion_service import process_upload
+    try:
+        session_obj = process_upload(file_obj, current_user.id)
+        log_admin_action("upload_syllabus", "ImportSession", session_obj.id, f"Uploaded '{session_obj.source_file}' ({session_obj.file_size} bytes)")
+        flash(f"Document '{session_obj.source_file}' extracted successfully! Review and confirm mappings below.", "success")
+        return redirect(url_for("admin.curriculum_import_preview", session_id=session_obj.id))
+    except Exception as e:
+        flash(f"Upload failed: {str(e)}", "danger")
+        return redirect(url_for("admin.curriculum_import"))
+
+
+@admin_bp.route("/curriculum/import/<int:session_id>")
+def curriculum_import_preview(session_id):
+    """Preview extracted syllabus items and match settings."""
+    import_session = ImportSession.query.get_or_404(session_id)
+    items = ImportItem.query.filter_by(session_id=import_session.id).order_by(ImportItem.sort_order).all()
+    all_programs = CurriculumProgram.query.filter_by(is_active=True).order_by(CurriculumProgram.name).all()
+    all_subjects = Subject.query.filter_by(is_active=True).order_by(Subject.name).all()
+
+    return render_template(
+        "admin/curriculum/import_preview.html",
+        import_session=import_session,
+        items=items,
+        all_programs=all_programs,
+        all_subjects=all_subjects
+    )
+
+
+@admin_bp.route("/curriculum/import/<int:session_id>/commit", methods=["POST"])
+def curriculum_import_commit(session_id):
+    """Applies admin choices from preview and executes transactional ingestion."""
+    import_session = ImportSession.query.get_or_404(session_id)
+    target_program_id = request.form.get("target_program_id", type=int)
+    ingestion_mode = request.form.get("ingestion_mode", "append")
+
+    if not target_program_id:
+        flash("Please select a target Curriculum Program.", "danger")
+        return redirect(url_for("admin.curriculum_import_preview", session_id=session_id))
+
+    items = ImportItem.query.filter_by(session_id=import_session.id).all()
+
+    # Update item user decisions from form
+    for item in items:
+        action_val = request.form.get(f"action_{item.id}", item.action)
+        sem_val = request.form.get(f"semester_{item.id}", item.final_semester)
+        code_val = request.form.get(f"code_{item.id}", item.final_code)
+        name_val = request.form.get(f"name_{item.id}", item.final_name)
+        credits_val = request.form.get(f"credits_{item.id}", type=int) or item.final_credits
+        subj_id_val = request.form.get(f"matched_subject_id_{item.id}", type=int)
+
+        item.action = action_val
+        item.final_semester = sem_val or None
+        item.final_code = code_val or None
+        item.final_name = name_val
+        item.final_credits = credits_val
+        if subj_id_val:
+            item.final_subject_id = subj_id_val
+
+    db.session.commit()
+
+    from app.services.ingestion_service import commit_ingestion
+    try:
+        stats = commit_ingestion(session_id, current_user.id, target_program_id, mode=ingestion_mode)
+        log_admin_action("commit_ingestion", "ImportSession", session_id, f"Committed session in mode '{ingestion_mode}' for program_id={target_program_id}: {stats}")
+        flash(
+            f"Ingestion committed successfully! Mode: {ingestion_mode.upper()} &bull; "
+            f"Created Subjects: {stats['created_subjects']}, Reused Subjects: {stats['reused_subjects']}, "
+            f"Created Mappings: {stats['created_mappings']}, Reactivated: {stats['reactivated_mappings']}, "
+            f"Skipped: {stats['skipped_items']}.",
+            "success"
+        )
+        return redirect(url_for("admin.curriculum_program_detail", prog_id=target_program_id))
+    except Exception as e:
+        flash(str(e), "danger")
+        return redirect(url_for("admin.curriculum_import_preview", session_id=session_id))
+
+
+@admin_bp.route("/curriculum/import/<int:session_id>/cancel", methods=["POST"])
+def curriculum_import_cancel(session_id):
+    """Cancels an uncommitted import session."""
+    import_session = ImportSession.query.get_or_404(session_id)
+    if import_session.status != "committed":
+        import_session.status = "cancelled"
+        db.session.commit()
+        log_admin_action("cancel_ingestion", "ImportSession", session_id, "Cancelled import session.")
+        flash("Import session cancelled.", "info")
+    return redirect(url_for("admin.curriculum_import"))
+
+
+# ── PHASE 4K: UNMAPPED SUBJECTS FILTER & ATTACH ────────────────────────────────
+
+@admin_bp.route("/curriculum/unmapped-subjects")
+def unmapped_subjects():
+    """Lists global subjects that have no active ProgramSubject mapping."""
+    mapped_subject_ids = db.session.query(ProgramSubject.subject_id).filter_by(is_active=True)
+    unmapped = Subject.query.filter(Subject.is_active == True, ~Subject.id.in_(mapped_subject_ids)).order_by(Subject.name).all()
+    all_programs = CurriculumProgram.query.filter_by(is_active=True).order_by(CurriculumProgram.name).all()
+
+    return render_template(
+        "admin/curriculum/unmapped_subjects.html",
+        unmapped_subjects=unmapped,
+        all_programs=all_programs
+    )
+
+
+
+@admin_bp.route("/curriculum/unmapped-subjects/<int:subject_id>/attach", methods=["POST"])
+def unmapped_subjects_attach(subject_id):
+    """Attaches an unmapped global subject to a selected program."""
+    subj = Subject.query.get_or_404(subject_id)
+    program_id = request.form.get("program_id", type=int)
+    semester = request.form.get("semester", "").strip() or None
+
+    if not program_id:
+        flash("Please select a target program.", "warning")
+        return redirect(url_for("admin.unmapped_subjects"))
+
+    prog = CurriculumProgram.query.get_or_404(program_id)
+
+    max_order = db.session.query(db.func.max(ProgramSubject.sort_order)).filter_by(
+        program_id=prog.id, semester=semester
+    ).scalar() or 0
+
+    mapping = ProgramSubject(
+        program_id=prog.id,
+        subject_id=subj.id,
+        semester=semester,
+        sort_order=max_order + 1,
+        is_active=True
+    )
+    db.session.add(mapping)
+    db.session.commit()
+    log_admin_action("attach_unmapped_subject", "ProgramSubject", mapping.id, f"Attached unmapped subject '{subj.name}' to program '{prog.name}'")
+    flash(f"Attached '{subj.name}' to program '{prog.name}'.", "success")
+    return redirect(url_for("admin.unmapped_subjects"))
+
+
 
 
 # ── SECTION 1: SUBJECTS CRUD ──────────────────────────────────────────────────
@@ -382,25 +1011,6 @@ def curriculum_subjects_toggle(subject_id):
     return redirect(url_for("admin.curriculum_subjects", level=lvl_filter))
 
 
-# ── SECTION 6: ACTIVITY LOG VIEW ──────────────────────────────────────────────
-
-@admin_bp.route("/activity-log")
-def activity_log():
-    page = request.args.get("page", 1, type=int)
-    per_page = 20
-    
-    pagination = AdminActivityLog.query.order_by(AdminActivityLog.timestamp.desc()).paginate(
-        page=page, per_page=per_page, error_out=False
-    )
-    
-    return render_template(
-        "admin/activity_log.html",
-        logs=pagination.items,
-        page=page,
-        pages=pagination.pages,
-        total=pagination.total
-    )
-
 
 # ── SECTION 3: STUDENT MANAGEMENT ─────────────────────────────────────────────
 
@@ -408,15 +1018,18 @@ from math import ceil
 
 @admin_bp.route("/students")
 def students():
-    from app.models import StudyPlan, StudentAssessment
+    from app.models import StudyPlan, StudentAssessment, EducationLevel, University, CurriculumProgram
     page = request.args.get("page", 1, type=int)
-    per_page = 25
+    per_page = 20
     search_q = request.args.get("q", "").strip()
     selected_level = request.args.get("level", "").strip()
+    selected_university = request.args.get("university", "").strip()
+    selected_program = request.args.get("program", "").strip()
     selected_status = request.args.get("status", "").strip()
 
-    from app.models import EducationLevel
     levels = EducationLevel.query.filter_by(is_active=True).order_by(EducationLevel.sort_order).all()
+    universities = University.query.filter_by(is_active=True).order_by(University.sort_order).all()
+    programs = CurriculumProgram.query.filter_by(is_active=True).order_by(CurriculumProgram.sort_order).all()
 
     query = User.query.filter_by(role="student")
     if search_q:
@@ -427,8 +1040,17 @@ def students():
         ))
     if selected_status == "active":
         query = query.filter_by(is_active=True)
-    elif selected_status == "inactive":
+    elif selected_status == "inactive" or selected_status == "suspended":
         query = query.filter_by(is_active=False)
+
+    if selected_level or selected_university or selected_program:
+        query = query.join(StudentProfile, User.id == StudentProfile.user_id)
+        if selected_level:
+            query = query.filter(StudentProfile.study_level == selected_level)
+        if selected_university:
+            query = query.filter(StudentProfile.university == selected_university)
+        if selected_program:
+            query = query.filter(StudentProfile.program == selected_program)
 
     total = query.count()
     pages = ceil(total / per_page) if total else 1
@@ -439,12 +1061,15 @@ def students():
         prof = u.profile
         profile_complete = bool(prof and prof.country and prof.study_level)
         assessed = bool(prof and prof.has_completed_assessment)
-        has_subjects = StudentSubject.query.filter_by(user_id=u.id).count() > 0
+        subjects_count = StudentSubject.query.filter_by(user_id=u.id).count()
         has_planner = StudyPlan.query.filter_by(student_id=u.id).count() > 0
         rows.append({
-            "user": u, "profile": prof,
+            "user": u, 
+            "profile": prof,
             "profile_complete": profile_complete,
-            "assessed": assessed, "has_subjects": has_subjects, "has_planner": has_planner,
+            "assessed": assessed, 
+            "subjects_count": subjects_count, 
+            "has_planner": has_planner,
         })
 
     stats = {
@@ -457,30 +1082,57 @@ def students():
     return render_template(
         "admin/students/list.html",
         students=rows, page=page, pages=pages,
-        stats=stats, levels=levels,
-        search_q=search_q, selected_level=selected_level, selected_status=selected_status,
+        stats=stats, levels=levels, universities=universities, programs=programs,
+        search_q=search_q, selected_level=selected_level, 
+        selected_university=selected_university, selected_program=selected_program,
+        selected_status=selected_status,
     )
 
 
 @admin_bp.route("/students/<int:student_id>")
 def student_detail(student_id):
-    from app.models import Prediction, StudentAssessment, Subject as SubjectModel, StudyPlan
+    from app.models import (
+        Prediction, StudentAssessment, Subject as SubjectModel, StudyPlan,
+        AcademicDocument, UploadedMaterial, StudyLog, AdminActivityLog
+    )
     student = User.query.get_or_404(student_id)
     profile = student.profile
     subjects = StudentSubject.query.filter_by(user_id=student_id).all()
     latest_prediction = Prediction.query.filter_by(user_id=student_id).order_by(Prediction.date.desc()).first()
     assessments = StudentAssessment.query.filter_by(student_id=student_id).order_by(StudentAssessment.completed_at.desc()).limit(10).all()
-    # attach subject name
+    
     for a in assessments:
         a.subject = SubjectModel.query.get(a.subject_id) if a.subject_id else None
+        
     study_plan = StudyPlan.query.filter_by(student_id=student_id).order_by(StudyPlan.generated_at.desc()).first()
+    
+    # Uploads & Docs
+    academic_docs = AcademicDocument.query.filter_by(student_id=student_id).all()
+    uploaded_materials = UploadedMaterial.query.filter_by(user_id=student_id).all()
+
+    # Study Logs summary
+    total_study_logs = StudyLog.query.filter_by(user_id=student_id).count()
+    total_study_hours = round(db.session.query(db.func.sum(StudyLog.duration_hours)).filter_by(user_id=student_id).scalar() or 0.0, 1)
+
+    # Activity history
+    student_logs = AdminActivityLog.query.filter(
+        AdminActivityLog.entity_type == 'User',
+        AdminActivityLog.entity_id == student_id
+    ).order_by(AdminActivityLog.timestamp.desc()).all()
+
     return render_template(
         "admin/students/detail.html",
         student=student, profile=profile, subjects=subjects,
         latest_prediction=latest_prediction,
         assessments=assessments,
         study_plan=study_plan,
+        academic_docs=academic_docs,
+        uploaded_materials=uploaded_materials,
+        total_study_logs=total_study_logs,
+        total_study_hours=total_study_hours,
+        student_logs=student_logs
     )
+
 
 
 @admin_bp.route("/students/<int:student_id>/impersonate", methods=["POST"])
@@ -602,42 +1254,113 @@ def student_toggle_active(student_id):
 # ── SECTION 4 STUB: HEALTH ────────────────────────────────────────────────────
 @admin_bp.route("/health")
 def health():
+    """AI & ML Management + System Health Dashboard."""
+    import os, sys, time, datetime
     from flask import current_app
-    checks = {
-        "db": _check_db(),
-        "gemini": _check_gemini_api(),
-        "ml": _check_ml_model(),
-    }
-    disk = _get_disk_info()
-    python_info = _get_python_info()
-    model_config = _get_model_config()
-    overall = "ok"
-    for v in checks.values():
-        if v.get("status") == "error":
-            overall = "degraded"
-            break
-        elif v.get("status") in ("missing", "unconfigured") and overall != "degraded":
-            overall = "warning"
+    from app.models import (
+        User, Prediction, StudentProfile, LearningMaterial, 
+        AssessmentQuestion, Subject as SubjectModel
+    )
 
-    # Today's API usage (Section 4 requirement)
-    api_usage = _get_daily_api_usage()
+    # 1. Audit all 14 ML model and scaler files from filesystem
+    models_dir = os.path.join(current_app.root_path, "..", "models")
+    if not os.path.exists(models_dir):
+        models_dir = os.path.join(current_app.root_path, "models")
+        if not os.path.exists(models_dir):
+            models_dir = "models"
 
-    # Count subjects with zero assessment questions
-    from app.models import AssessmentQuestion
-    from app.models import Subject as _Subj
+    ml_inventory = [
+        {"filename": "random_forest.pkl", "name": "Global Random Forest Classifier", "type": "Model", "cohort": "Global / All Levels"},
+        {"filename": "rf_bachelors.pkl", "name": "Bachelors Cohort Classifier", "type": "Model", "cohort": "Bachelors Degree"},
+        {"filename": "rf_class11.pkl", "name": "Class 11 NEB Classifier", "type": "Model", "cohort": "Class 11"},
+        {"filename": "rf_class12.pkl", "name": "Class 12 NEB Classifier", "type": "Model", "cohort": "Class 12"},
+        {"filename": "rf_class8.pkl", "name": "Class 8 Classifier", "type": "Model", "cohort": "Class 8"},
+        {"filename": "rf_masters.pkl", "name": "Masters Cohort Classifier", "type": "Model", "cohort": "Masters Degree"},
+        {"filename": "rf_see.pkl", "name": "SEE Class 10 Classifier", "type": "Model", "cohort": "SEE / Class 10"},
+        {"filename": "scaler.pkl", "name": "Global Standard Scaler", "type": "Scaler", "cohort": "Global / All Levels"},
+        {"filename": "scaler_bachelors.pkl", "name": "Bachelors Standard Scaler", "type": "Scaler", "cohort": "Bachelors Degree"},
+        {"filename": "scaler_class11.pkl", "name": "Class 11 Standard Scaler", "type": "Scaler", "cohort": "Class 11"},
+        {"filename": "scaler_class12.pkl", "name": "Class 12 Standard Scaler", "type": "Scaler", "cohort": "Class 12"},
+        {"filename": "scaler_class8.pkl", "name": "Class 8 Standard Scaler", "type": "Scaler", "cohort": "Class 8"},
+        {"filename": "scaler_masters.pkl", "name": "Masters Standard Scaler", "type": "Scaler", "cohort": "Masters Degree"},
+        {"filename": "scaler_see.pkl", "name": "SEE Class 10 Standard Scaler", "type": "Scaler", "cohort": "SEE / Class 10"},
+    ]
+
+    total_ml_size = 0
+    active_ml_count = 0
+    missing_ml_count = 0
+    largest_file = None
+    smallest_file = None
+    last_modified_file = None
+
+    for m in ml_inventory:
+        file_path = os.path.join(models_dir, m["filename"])
+        if os.path.exists(file_path):
+            m["exists"] = True
+            size = os.path.getsize(file_path)
+            m["size"] = size
+            m["size_formatted"] = f"{size / 1024:.1f} KB" if size < 1024*1024 else f"{size / (1024*1024):.2f} MB"
+            mtime = os.path.getmtime(file_path)
+            m["mtime"] = mtime
+            m["mtime_formatted"] = datetime.datetime.fromtimestamp(mtime).strftime("%b %d, %Y %H:%M")
+            
+            if size == 0:
+                m["status"] = "ERROR"
+                missing_ml_count += 1
+            elif size < 100:
+                m["status"] = "WARNING"
+                active_ml_count += 1
+            else:
+                m["status"] = "ACTIVE"
+                active_ml_count += 1
+                
+            total_ml_size += size
+            
+            if largest_file is None or size > largest_file["size"]:
+                largest_file = m
+            if smallest_file is None or size < smallest_file["size"]:
+                smallest_file = m
+            if last_modified_file is None or mtime > last_modified_file["mtime"]:
+                last_modified_file = m
+        else:
+            m["exists"] = False
+            m["size"] = 0
+            m["size_formatted"] = "0 B"
+            m["mtime"] = 0
+            m["mtime_formatted"] = "N/A"
+            m["status"] = "MISSING"
+            missing_ml_count += 1
+
+    # 2. Real Prediction & Risk Distribution Stats
+    total_predictions = Prediction.query.count()
+    low_risk_count = Prediction.query.filter_by(predicted_risk_level="Low Risk").count()
+    med_risk_count = Prediction.query.filter_by(predicted_risk_level="Medium Risk").count()
+    high_risk_count = Prediction.query.filter_by(predicted_risk_level="High Risk").count()
+
+    # 3. Gemini API Health Configuration Check
+    raw_api_key = os.environ.get("GEMINI_API_KEY") or current_app.config.get("GEMINI_API_KEY") or ""
+    gemini_configured = bool(raw_api_key.strip())
+    masked_key = f"••••••••••••{raw_api_key[-4:]}" if len(raw_api_key) >= 4 else ("••••••••••••" if gemini_configured else "Not set")
+    
+    gemini_model_version = current_app.config.get("GEMINI_MODEL") or os.environ.get("GEMINI_MODEL")
+    if not gemini_model_version:
+        gemini_model_version = "Model version not configured in env"
+
+    # 4. Content & Material Telemetry
+    total_ai_materials = LearningMaterial.query.count()
+
+    # 5. Diagnostic scanner checks
     subjects_zero_q = 0
     try:
-        all_subjects = _Subj.query.filter_by(is_active=True).all()
+        all_subjects = SubjectModel.query.filter_by(is_active=True).all()
         for s in all_subjects:
             if AssessmentQuestion.query.filter_by(subject_id=s.id).count() == 0:
                 subjects_zero_q += 1
     except Exception:
         subjects_zero_q = 0
 
-    # Count broken cached PDFs (< 5KB check)
     broken_pdfs_count = 0
     try:
-        import os
         cache_dir = os.path.join(current_app.root_path, "static", "cache", "pdfs")
         if os.path.exists(cache_dir):
             for f in os.listdir(cache_dir):
@@ -647,167 +1370,663 @@ def health():
     except Exception:
         broken_pdfs_count = 0
 
+    # System services live checks
+    checks = {
+        "db": _check_db(),
+        "gemini": _check_gemini_api(),
+        "ml": _check_ml_model(),
+    }
+    disk = _get_disk_info()
+    python_info = _get_python_info()
+
     return render_template(
         "admin/health.html",
-        checks=checks, disk=disk, python_info=python_info,
-        model_config=model_config, overall=overall,
-        api_usage=api_usage, subjects_zero_q=subjects_zero_q,
+        ml_inventory=ml_inventory,
+        active_ml_count=active_ml_count,
+        missing_ml_count=missing_ml_count,
+        total_ml_size_formatted=f"{total_ml_size / (1024*1024):.2f} MB",
+        largest_file=largest_file,
+        smallest_file=smallest_file,
+        last_modified_file=last_modified_file,
+        total_predictions=total_predictions,
+        low_risk_count=low_risk_count,
+        med_risk_count=med_risk_count,
+        high_risk_count=high_risk_count,
+        gemini_configured=gemini_configured,
+        masked_key=masked_key,
+        gemini_model_version=gemini_model_version,
+        total_ai_materials=total_ai_materials,
+        subjects_zero_q=subjects_zero_q,
         broken_pdfs_count=broken_pdfs_count,
+        checks=checks,
+        disk=disk,
+        python_info=python_info
     )
 
 
 
+
 # ── SECTION 2 STUB: CONTENT ──────────────────────────────────────────────────
+@admin_bp.route("/curriculum/integrity")
+def curriculum_integrity():
+    """Read-only Admin Curriculum Integrity Checker & Health Scanner."""
+    from app.models import (
+        Subject, ProgramSubject, CurriculumProgram, EducationLevel, University, Faculty,
+        Chapter, Topic, LearningMaterial, AssessmentQuestion, User, StudentProfile, StudentSubject
+    )
+    
+    total_subjects = Subject.query.count()
+    mapped_subject_ids = set(r[0] for r in db.session.query(ProgramSubject.subject_id).filter(ProgramSubject.is_active==True).all())
+    mapped_count = len(mapped_subject_ids)
+    unmapped_count = total_subjects - mapped_count
+    pct_mapped = round((mapped_count / total_subjects * 100), 1) if total_subjects > 0 else 0.0
+
+    unmapped_subjects = db.session.query(Subject).filter(~Subject.id.in_(mapped_subject_ids)).all() if mapped_subject_ids else Subject.query.all()
+    
+    all_programs = CurriculumProgram.query.all()
+    program_audit = []
+    
+    for p in all_programs:
+        level = EducationLevel.query.get(p.education_level_id) if getattr(p, 'education_level_id', None) else None
+        uni = University.query.get(p.university_id) if getattr(p, 'university_id', None) else None
+        
+        mappings = ProgramSubject.query.filter_by(program_id=p.id, is_active=True).all()
+        total_p_mapped = len(mappings)
+        
+        sem_counts = {f"Semester {s}": 0 for s in range(1, 7)}
+        for m in mappings:
+            sem_key = (m.semester or "").strip()
+            if sem_key in sem_counts:
+                sem_counts[sem_key] += 1
+        
+        status = "HEALTHY" if total_p_mapped > 0 else "CRITICAL"
+        if total_p_mapped > 0 and any(cnt == 0 for cnt in sem_counts.values()):
+            status = "WARNING"
+            
+        program_audit.append({
+            "program": p,
+            "level_name": level.name if level else "N/A",
+            "uni_name": uni.name if uni else "N/A",
+            "total_mapped": total_p_mapped,
+            "sem_counts": sem_counts,
+            "status": status
+        })
+    
+    subjects_no_chaps = db.session.query(Subject).outerjoin(Chapter).filter(Chapter.id == None).count()
+    chaps_no_topics = db.session.query(Chapter).outerjoin(Topic).filter(Topic.id == None).count()
+    topics_no_mat = db.session.query(Topic).outerjoin(LearningMaterial).filter(LearningMaterial.id == None).count()
+    subjects_no_mcq = db.session.query(Subject).outerjoin(AssessmentQuestion).filter(AssessmentQuestion.id == None).count()
+    
+    students_with_prog = db.session.query(User).join(StudentProfile).filter(User.role == 'student', StudentProfile.program != None, StudentProfile.program != '').all()
+    students_zero_subjs = []
+    for st in students_with_prog:
+        st_sub_cnt = StudentSubject.query.filter_by(user_id=st.id).count()
+        if st_sub_cnt == 0:
+            sp = StudentProfile.query.filter_by(user_id=st.id).first()
+            students_zero_subjs.append({
+                "user": st,
+                "profile": sp
+            })
+            
+    return render_template(
+        "admin/curriculum/integrity.html",
+        total_subjects=total_subjects,
+        mapped_count=mapped_count,
+        unmapped_count=unmapped_count,
+        pct_mapped=pct_mapped,
+        unmapped_subjects=unmapped_subjects[:30],
+        program_audit=program_audit,
+        subjects_no_chaps=subjects_no_chaps,
+        chaps_no_topics=chaps_no_topics,
+        topics_no_mat=topics_no_mat,
+        subjects_no_mcq=subjects_no_mcq,
+        students_zero_subjs=students_zero_subjs
+    )
+
+
 @admin_bp.route("/content")
 def content_subjects():
     """Redirect main /content to the stats overview."""
     return redirect(url_for("admin.content_stats"))
 
 
-# ── SECTION 5: COHORT ANALYTICS ──────────────────────────────────────────────
+# ── SECTION 6: COHORT ANALYTICS & AUDIT LOGS ───────────────────────────────────
+
 @admin_bp.route("/analytics")
 def analytics():
-    from app.models import StudentProfile, Prediction, StudyLog, StudentAssessment, EducationLevel
+
+    """Cohort Analytics & Risk Reporting Dashboard."""
+    from app.models import (
+        User, StudentProfile, Prediction, StudyLog, StudentAssessment,
+        EducationLevel, University, Faculty, CurriculumProgram, LearningMaterial, Subject as SubjectModel
+    )
     from sqlalchemy import func
-    
-    # Get all active cohorts (Education Levels)
-    levels = [l.name for l in EducationLevel.query.filter_by(is_active=True).order_by(EducationLevel.sort_order).all()]
-    
-    # Fallback to distinct study_levels if EducationLevel is empty
-    if not levels:
-        levels = [r[0] for r in db.session.query(StudentProfile.study_level).distinct().all() if r[0]]
-        
-    cohort_data = {}
-    for lvl in levels:
-        # Get student profiles in this cohort
-        profiles = StudentProfile.query.filter_by(study_level=lvl).all()
-        student_ids = [p.user_id for p in profiles]
-        
-        if not student_ids:
-            cohort_data[lvl] = {
-                "student_count": 0,
-                "high_risk": 0, "medium_risk": 0, "low_risk": 0, "unknown_risk": 0,
-                "avg_gpa": 0.0, "avg_study_hours": 0.0, "avg_assessment": 0.0
-            }
-            continue
-            
-        # Risk distribution (using latest prediction for each student)
-        high = 0
-        medium = 0
-        low = 0
-        unknown = 0
-        for sid in student_ids:
-            pred = Prediction.query.filter_by(user_id=sid).order_by(Prediction.date.desc()).first()
-            if pred:
-                risk = (pred.predicted_risk_level or "").lower()
-                if "high" in risk: high += 1
-                elif "medium" in risk: medium += 1
-                elif "low" in risk: low += 1
-                else: unknown += 1
-            else:
-                unknown += 1
-                
-        # Metrics
-        gpas = [p.cumulative_gpa for p in profiles if p.cumulative_gpa is not None]
-        avg_gpa = round(sum(gpas) / len(gpas), 2) if gpas else 0.0
-        
-        # Study Hours
-        total_hours = db.session.query(func.sum(StudyLog.duration_hours)).filter(StudyLog.user_id.in_(student_ids)).scalar() or 0.0
-        avg_study_hours = round(total_hours / len(student_ids), 1)
-        
-        # Assessment
-        scores = db.session.query(func.avg(StudentAssessment.weighted_score)).filter(StudentAssessment.student_id.in_(student_ids)).scalar() or 0.0
-        avg_assessment = round(scores, 1)
-        
-        cohort_data[lvl] = {
-            "student_count": len(student_ids),
-            "high_risk": high,
-            "medium_risk": medium,
-            "low_risk": low,
-            "unknown_risk": unknown,
+
+    # Filter parameters
+    sel_level = request.args.get("level", "").strip()
+    sel_university = request.args.get("university", "").strip()
+    sel_faculty = request.args.get("faculty", "").strip()
+    sel_program = request.args.get("program", "").strip()
+    sel_status = request.args.get("status", "").strip()
+
+    # Query base students
+    sq = User.query.filter_by(role="student")
+
+    if sel_status == "active":
+        sq = sq.filter_by(is_active=True)
+    elif sel_status == "inactive":
+        sq = sq.filter_by(is_active=False)
+
+    if sel_level or sel_university or sel_program:
+        sq = sq.join(StudentProfile)
+        if sel_level:
+            sq = sq.filter(StudentProfile.study_level == sel_level)
+        if sel_university:
+            sq = sq.filter(StudentProfile.university == sel_university)
+        if sel_program:
+            sq = sq.filter(StudentProfile.program == sel_program)
+
+    filtered_students = sq.all()
+    student_ids = [u.id for u in filtered_students]
+    total_monitored = len(filtered_students)
+    active_students = sum(1 for u in filtered_students if u.is_active)
+    inactive_students = total_monitored - active_students
+
+    # Calculate real profile completion rate
+    if student_ids:
+        profiles = StudentProfile.query.filter(StudentProfile.user_id.in_(student_ids)).all()
+        comp_scores = []
+        for p in profiles:
+            fields = [p.study_level, p.university or p.country, p.program, p.cumulative_gpa or p.prior_academic_score, p.country]
+            filled = sum(1 for f in fields if f is not None and str(f).strip() != "")
+            comp_scores.append((filled / len(fields)) * 100)
+        profile_completion_rate = round(sum(comp_scores) / len(comp_scores), 1) if comp_scores else 0.0
+    else:
+        profile_completion_rate = 0.0
+
+    # Total AI Study Materials
+    total_ai_materials = LearningMaterial.query.count()
+
+    # Group analytics by Education Level
+    all_levels = EducationLevel.query.filter_by(is_active=True).order_by(EducationLevel.sort_order).all()
+    cohort_list = []
+
+    for lvl in all_levels:
+        lvl_name = lvl.name
+        # Query profiles in this level matching global filter student IDs
+        if student_ids:
+            lvl_profiles = StudentProfile.query.filter(
+                StudentProfile.user_id.in_(student_ids),
+                StudentProfile.study_level == lvl_name
+            ).all()
+        else:
+            lvl_profiles = []
+
+        lvl_student_ids = [p.user_id for p in lvl_profiles]
+        lvl_student_count = len(lvl_student_ids)
+
+        if lvl_student_count > 0:
+            lvl_users = [u for u in filtered_students if u.id in lvl_student_ids]
+            lvl_active = sum(1 for u in lvl_users if u.is_active)
+            lvl_inactive = lvl_student_count - lvl_active
+
+            # GPA
+            gpas = [p.cumulative_gpa for p in lvl_profiles if p.cumulative_gpa is not None]
+            avg_gpa = round(sum(gpas) / len(gpas), 2) if gpas else None
+
+            # Attendance
+            atts = [p.attendance_pct for p in lvl_profiles if p.attendance_pct is not None]
+            avg_attendance = round(sum(atts) / len(atts), 1) if atts else None
+
+            # Study Hours (Check if StudyLog records exist)
+            s_hours = db.session.query(func.sum(StudyLog.duration_hours)).filter(StudyLog.user_id.in_(lvl_student_ids)).scalar()
+            avg_study_hours = round(s_hours / lvl_student_count, 1) if s_hours is not None else None
+
+            # Assessment
+            s_assess = db.session.query(func.avg(StudentAssessment.weighted_score)).filter(StudentAssessment.student_id.in_(lvl_student_ids)).scalar()
+            avg_assessment = round(s_assess, 1) if s_assess is not None else None
+        else:
+            lvl_active = 0
+            lvl_inactive = 0
+            avg_gpa = None
+            avg_attendance = None
+            avg_study_hours = None
+            avg_assessment = None
+
+        cohort_list.append({
+            "level": lvl_name,
+            "student_count": lvl_student_count,
+            "active_count": lvl_active,
+            "inactive_count": lvl_inactive,
             "avg_gpa": avg_gpa,
+            "avg_attendance": avg_attendance,
             "avg_study_hours": avg_study_hours,
             "avg_assessment": avg_assessment
-        }
-        
-    # Overall summary metrics
-    total_students = User.query.filter_by(role="student").count()
-    overall_high = 0
-    overall_medium = 0
-    overall_low = 0
-    # Query latest predictions for all students
-    all_student_ids = [u.id for u in User.query.filter_by(role="student").all()]
-    for sid in all_student_ids:
-        pred = Prediction.query.filter_by(user_id=sid).order_by(Prediction.date.desc()).first()
-        if pred:
-            risk = (pred.predicted_risk_level or "").lower()
-            if "high" in risk: overall_high += 1
-            elif "medium" in risk: overall_medium += 1
-            else: overall_low += 1
-        else:
-            overall_low += 1
-            
-    # Format a list of cohort dicts for easy rendering in jinja2
-    cohort_list = []
-    for lvl, metrics in cohort_data.items():
-        metrics["level"] = lvl
-        cohort_list.append(metrics)
-        
+        })
+
+    # Risk Distribution calculation
+    total_predictions = Prediction.query.filter(Prediction.user_id.in_(student_ids)).count() if student_ids else 0
+    if total_predictions > 0:
+        low_risk = Prediction.query.filter(Prediction.user_id.in_(student_ids), Prediction.predicted_risk_level == "Low Risk").count()
+        med_risk = Prediction.query.filter(Prediction.user_id.in_(student_ids), Prediction.predicted_risk_level == "Medium Risk").count()
+        high_risk = Prediction.query.filter(Prediction.user_id.in_(student_ids), Prediction.predicted_risk_level == "High Risk").count()
+        has_predictions = True
+    else:
+        low_risk = 0
+        med_risk = 0
+        high_risk = 0
+        has_predictions = False
+
+    # AI Materials by Subject breakdown
+    ai_materials_by_subject = []
+    from app.models import Topic, Chapter
+    subjects_all = SubjectModel.query.filter_by(is_active=True).order_by(SubjectModel.name).all()
+    for s in subjects_all:
+        m_count = LearningMaterial.query.join(Topic).join(Chapter).filter(Chapter.subject_id == s.id).count()
+        if m_count > 0:
+            ai_materials_by_subject.append({"subject": s.name, "count": m_count})
+    ai_materials_by_subject.sort(key=lambda x: x["count"], reverse=True)
+
+
+    # Filter dropdown choices
+    education_levels = EducationLevel.query.filter_by(is_active=True).order_by(EducationLevel.sort_order).all()
+    universities = University.query.filter_by(is_active=True).order_by(University.name).all()
+    faculties = Faculty.query.filter_by(is_active=True).order_by(Faculty.name).all()
+    programs = CurriculumProgram.query.filter_by(is_active=True).order_by(CurriculumProgram.name).all()
+
     return render_template(
         "admin/analytics.html",
+        total_monitored=total_monitored,
+        active_students=active_students,
+        inactive_students=inactive_students,
+        profile_completion_rate=profile_completion_rate,
+        total_ai_materials=total_ai_materials,
         cohorts=cohort_list,
-        total_students=total_students,
-        overall_high=overall_high,
-        overall_medium=overall_medium,
-        overall_low=overall_low
+        has_predictions=has_predictions,
+        low_risk=low_risk,
+        med_risk=med_risk,
+        high_risk=high_risk,
+        ai_materials_by_subject=ai_materials_by_subject,
+        education_levels=education_levels,
+        universities=universities,
+        faculties=faculties,
+        programs=programs,
+        sel_level=sel_level,
+        sel_university=sel_university,
+        sel_faculty=sel_faculty,
+        sel_program=sel_program,
+        sel_status=sel_status
     )
+
+
+@admin_bp.route("/activity-log")
+def activity_log():
+    """System Audit Logs & Security History Center."""
+    from app.models import AdminActivityLog, User
+    import datetime
+
+    action_filter = request.args.get("action", "").strip()
+    q = request.args.get("q", "").strip()
+    from_date_str = request.args.get("from_date", "").strip()
+    to_date_str = request.args.get("to_date", "").strip()
+    page = request.args.get("page", 1, type=int)
+    per_page = 20
+
+    query = AdminActivityLog.query
+
+    if action_filter:
+        query = query.filter_by(action=action_filter)
+
+    if q:
+        query = query.filter(
+            (AdminActivityLog.action.ilike(f"%{q}%")) |
+            (AdminActivityLog.entity_type.ilike(f"%{q}%")) |
+            (AdminActivityLog.detail.ilike(f"%{q}%"))
+        )
+
+    if from_date_str:
+        try:
+            from_dt = datetime.datetime.strptime(from_date_str, "%Y-%m-%d")
+            query = query.filter(AdminActivityLog.timestamp >= from_dt)
+        except ValueError:
+            pass
+
+    if to_date_str:
+        try:
+            to_dt = datetime.datetime.strptime(to_date_str, "%Y-%m-%d") + datetime.timedelta(days=1)
+            query = query.filter(AdminActivityLog.timestamp < to_dt)
+        except ValueError:
+            pass
+
+    total = query.count()
+    from math import ceil
+    pages = ceil(total / per_page) if total else 1
+
+    logs = query.order_by(AdminActivityLog.timestamp.desc()).offset((page - 1) * per_page).limit(per_page).all()
+
+    # Pre-fetch admin emails
+    admin_users = {u.id: u for u in User.query.filter_by(role="admin").all()}
+
+    # Dynamic action list for filter dropdown
+    distinct_actions = [r[0] for r in db.session.query(AdminActivityLog.action).distinct().all() if r[0]]
+
+    return render_template(
+        "admin/activity_log.html",
+        logs=logs,
+        admin_users=admin_users,
+        page=page,
+        pages=pages,
+        total=total,
+        actions=distinct_actions,
+        action_filter=action_filter,
+        q=q,
+        from_date=from_date_str,
+        to_date=to_date_str
+    )
+
 
 
 # ── SECTION 7: RESTART-FREE LIVE CONFIGURATION ────────────────────────────────
 @admin_bp.route("/config", methods=["GET", "POST"])
 def config():
-    from app.models import AppSetting
+    """System Configuration & Maintenance Control Center."""
+    import os, sys, datetime
+    from flask import current_app
+    from app.models import AppSetting, AdminActivityLog, User, Subject as SubjectModel, ProgramSubject, Chapter, Topic, LearningMaterial, AssessmentQuestion
     from app.live_config import load_live_config
     
     if request.method == "POST":
-        # Save all configs
+        # Save all configs securely
         keys = [
             "GEMINI_API_KEY", "ANTHROPIC_API_KEY",
             "GEMINI_MODEL_MCQ", "GEMINI_MODEL_ASSISTANT_PRIMARY", "GEMINI_MODEL_ASSISTANT_FALLBACK",
             "GEMINI_DAILY_LIMIT_MCQ", "GEMINI_RPM_LIMIT_MCQ",
             "GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", "GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK",
             "GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY",
-            "PLANNER_SESSION_MINUTES", "PLANNER_BREAK_MINUTES", "PLANNER_SESSIONS_PER_DAY"
+            "PLANNER_SESSION_MINUTES", "PLANNER_BREAK_MINUTES", "PLANNER_SESSIONS_PER_DAY",
+            "MAINTENANCE_MESSAGE"
         ]
         for k in keys:
-            val = request.form.get(k, "").strip()
-            setting = AppSetting.query.get(k)
-            if setting:
-                setting.value = val
-            else:
-                setting = AppSetting(key=k, value=val)
-                db.session.add(setting)
+            if k in request.form:
+                val = request.form.get(k, "").strip()
+                setting = AppSetting.query.get(k)
+                if setting:
+                    setting.value = val
+                else:
+                    setting = AppSetting(key=k, value=val)
+                    db.session.add(setting)
                 
         # Billing switch
-        billing = "True" if request.form.get("GEMINI_BILLING_ENABLED") else "False"
-        setting = AppSetting.query.get("GEMINI_BILLING_ENABLED")
-        if setting:
-            setting.value = billing
-        else:
-            setting = AppSetting(key="GEMINI_BILLING_ENABLED", value=billing)
-            db.session.add(setting)
+        if "GEMINI_BILLING_ENABLED" in request.form or "save_general" in request.form:
+            billing = "True" if request.form.get("GEMINI_BILLING_ENABLED") else "False"
+            setting = AppSetting.query.get("GEMINI_BILLING_ENABLED")
+            if setting:
+                setting.value = billing
+            else:
+                setting = AppSetting(key="GEMINI_BILLING_ENABLED", value=billing)
+                db.session.add(setting)
             
         db.session.commit()
-        
-        # Instantly reload config cache
         load_live_config(current_app._get_current_object(), force=True)
-        
         log_admin_action("update_config", "AppSetting", None, "Updated application settings and flushed config cache")
         flash("Configuration updated and cache reloaded successfully.", "success")
         return redirect(url_for("admin.config"))
         
     settings = {s.key: s.value for s in AppSetting.query.all()}
-    return render_template("admin/config.html", settings=settings)
+
+    # Mail configuration inspection
+    mail_config = {
+        "server": current_app.config.get("MAIL_SERVER", "smtp.gmail.com"),
+        "port": current_app.config.get("MAIL_PORT", 587),
+        "use_tls": current_app.config.get("MAIL_USE_TLS", True),
+        "username": current_app.config.get("MAIL_USERNAME", "hemantsah123456789@gmail.com"),
+        "configured": bool(current_app.config.get("MAIL_USERNAME") and current_app.config.get("MAIL_PASSWORD")),
+        "password_masked": "••••••••••••" if current_app.config.get("MAIL_PASSWORD") else "Not set"
+    }
+
+    # Gemini configuration inspection
+    raw_api_key = settings.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY") or current_app.config.get("GEMINI_API_KEY") or ""
+    gemini_config = {
+        "configured": bool(raw_api_key.strip()),
+        "masked_key": f"••••••••••••{raw_api_key[-4:]}" if len(raw_api_key) >= 4 else ("••••••••••••" if raw_api_key else "Not set"),
+        "billing_enabled": settings.get("GEMINI_BILLING_ENABLED", "False") == "True",
+        "mcq_model": settings.get("GEMINI_MODEL_MCQ") or current_app.config.get("GEMINI_MODEL_MCQ", "gemini-2.0-flash-lite"),
+        "assistant_model": settings.get("GEMINI_MODEL_ASSISTANT_PRIMARY") or current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.0-flash-lite"),
+        "mcq_daily_limit": settings.get("GEMINI_DAILY_LIMIT_MCQ") or current_app.config.get("GEMINI_DAILY_LIMIT_MCQ", "450"),
+        "assistant_daily_limit": settings.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY") or current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", "1000")
+    }
+
+    # Maintenance mode state
+    m_setting = AppSetting.query.get("MAINTENANCE_MODE")
+    maintenance_active = (m_setting.value == "True") if m_setting else current_app.config.get("MAINTENANCE_MODE", False)
+    m_msg_setting = AppSetting.query.get("MAINTENANCE_MESSAGE")
+    maintenance_message = m_msg_setting.value if m_msg_setting else "Smart Study is currently undergoing scheduled maintenance. Please check back shortly."
+
+    # Workspace backups inventory
+    backups = []
+    root_dir = current_app.root_path
+    ws_dir = os.path.dirname(root_dir) if os.path.basename(root_dir) == "app" else root_dir
+    active_db_path = os.path.join(ws_dir, "smart_study.db")
+    active_db_size = os.path.getsize(active_db_path) if os.path.exists(active_db_path) else 0
+    active_db_size_mb = round(active_db_size / (1024 * 1024), 2)
+
+    try:
+        for f in os.listdir(ws_dir):
+            if f.endswith(".db") and f != "smart_study.db":
+                b_path = os.path.join(ws_dir, f)
+                b_size = os.path.getsize(b_path)
+                b_mtime = os.path.getmtime(b_path)
+                backups.append({
+                    "filename": f,
+                    "size_mb": round(b_size / (1024 * 1024), 2),
+                    "mtime_formatted": datetime.datetime.fromtimestamp(b_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                })
+        backups.sort(key=lambda x: x["filename"], reverse=True)
+    except Exception:
+        backups = []
+
+    # System metrics summary
+    system_info = {
+        "flask_env": current_app.config.get("ENV", "production"),
+        "debug": current_app.config.get("DEBUG", False),
+        "python_version": sys.version.split(" ")[0],
+        "db_type": "SQLite (Local File Storage)",
+        "active_db_size_mb": active_db_size_mb,
+        "admin_count": User.query.filter_by(role="admin").count(),
+        "student_count": User.query.filter_by(role="student").count(),
+        "last_backup": backups[0]["mtime_formatted"] if backups else "No backups created yet"
+    }
+
+    return render_template(
+        "admin/config.html",
+        settings=settings,
+        mail_config=mail_config,
+        gemini_config=gemini_config,
+        maintenance_active=maintenance_active,
+        maintenance_message=maintenance_message,
+        backups=backups,
+        active_db_size_mb=active_db_size_mb,
+        system_info=system_info
+    )
+
+
+@admin_bp.route("/config/test-gemini", methods=["POST"])
+def config_test_gemini():
+    """Safe Gemini API connection test with logging (credentials masked)."""
+    try:
+        res = _check_gemini_api()
+        if res.get("status") == "ok":
+            log_admin_action("test_gemini_api", "GeminiAPI", None, f"Executed Gemini API connection test: OK ({res.get('latency_ms')}ms)")
+            flash(f"Gemini API connection test SUCCESSFUL ({res.get('latency_ms')}ms latency).", "success")
+        else:
+            log_admin_action("test_gemini_api", "GeminiAPI", None, f"Executed Gemini API connection test: {res.get('status')} - {res.get('detail')}")
+            flash(f"Gemini API test WARNING: {res.get('detail')}", "warning")
+    except Exception as e:
+        log_admin_action("test_gemini_api", "GeminiAPI", None, f"Gemini API test failed: {str(e)[:100]}")
+        flash(f"Gemini API connection test failed: {e}", "danger")
+    return redirect(url_for("admin.config"))
+
+
+@admin_bp.route("/config/test-email", methods=["POST"])
+def config_test_email():
+    """Send test email via Flask-Mail to specified destination with validation."""
+    from flask_mail import Message
+    from app import mail
+    dest_email = request.form.get("destination_email", "").strip()
+    if not dest_email or "@" not in dest_email:
+        flash("Please enter a valid destination email address.", "danger")
+        return redirect(url_for("admin.config"))
+        
+    try:
+        sender = current_app.config.get("MAIL_USERNAME") or "hemantsah123456789@gmail.com"
+        msg = Message(
+            subject="Smart Study Admin — Mail Configuration Test",
+            sender=sender,
+            recipients=[dest_email],
+            body=f"Hello,\n\nThis is a test notification from the Smart Study Admin Control Center.\nSent at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\nIf you received this email, your Flask-Mail SMTP configuration is working perfectly.\n\nRegards,\nSmart Study System Administrator"
+        )
+        mail.send(msg)
+        log_admin_action("send_test_email", "FlaskMail", None, f"Sent SMTP test email to {dest_email}")
+        flash(f"Test email successfully sent to {dest_email}.", "success")
+    except Exception as e:
+        log_admin_action("send_test_email", "FlaskMail", None, f"Failed sending test email to {dest_email}: {str(e)[:100]}")
+        flash(f"Failed sending test email: {e}", "danger")
+        
+    return redirect(url_for("admin.config"))
+
+
+@admin_bp.route("/config/maintenance", methods=["POST"])
+def config_toggle_maintenance():
+    """Toggle maintenance mode setting in AppSetting."""
+    from app.models import AppSetting
+    from app.live_config import load_live_config
+    
+    enable = request.form.get("enable") == "true"
+    message = request.form.get("maintenance_message", "").strip() or "Smart Study is currently undergoing scheduled maintenance. Please check back shortly."
+    
+    s_mode = AppSetting.query.get("MAINTENANCE_MODE")
+    if s_mode:
+        s_mode.value = "True" if enable else "False"
+    else:
+        db.session.add(AppSetting(key="MAINTENANCE_MODE", value="True" if enable else "False"))
+        
+    s_msg = AppSetting.query.get("MAINTENANCE_MESSAGE")
+    if s_msg:
+        s_msg.value = message
+    else:
+        db.session.add(AppSetting(key="MAINTENANCE_MESSAGE", value=message))
+        
+    db.session.commit()
+    load_live_config(current_app._get_current_object(), force=True)
+    
+    status_str = "ENABLED" if enable else "DISABLED"
+    log_admin_action("toggle_maintenance", "AppSetting", None, f"Maintenance Mode {status_str}: {message}")
+    flash(f"Maintenance Mode has been {status_str}. Administrator access remains active.", "warning" if enable else "success")
+    return redirect(url_for("admin.config"))
+
+
+@admin_bp.route("/config/create-backup", methods=["POST"])
+def config_create_backup():
+    """Create timestamped copy of smart_study.db with verification and logging."""
+    import shutil
+    try:
+        root_dir = current_app.root_path
+        ws_dir = os.path.dirname(root_dir) if os.path.basename(root_dir) == "app" else root_dir
+        src_path = os.path.join(ws_dir, "smart_study.db")
+        
+        if not os.path.exists(src_path):
+            flash("Database file smart_study.db not found.", "danger")
+            return redirect(url_for("admin.config"))
+            
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        dst_filename = f"smart_study_backup_{timestamp}.db"
+        dst_path = os.path.join(ws_dir, dst_filename)
+        
+        shutil.copy2(src_path, dst_path)
+        
+        if os.path.exists(dst_path) and os.path.getsize(dst_path) > 0:
+            size_mb = round(os.path.getsize(dst_path) / (1024 * 1024), 2)
+            log_admin_action("create_backup", "Database", None, f"Created database backup: {dst_filename} ({size_mb} MB)")
+            flash(f"Database backup created successfully: {dst_filename} ({size_mb} MB).", "success")
+        else:
+            flash("Backup file created but appeared empty. Please verify file integrity.", "danger")
+    except Exception as e:
+        log_admin_action("create_backup", "Database", None, f"Backup creation error: {str(e)[:100]}")
+        flash(f"Error creating database backup: {e}", "danger")
+        
+    return redirect(url_for("admin.config"))
+
+
+@admin_bp.route("/config/export-curriculum")
+def config_export_curriculum():
+    """Safe read-only CSV export of Curriculum Subjects & ProgramSubject mappings."""
+    import csv, io
+    from flask import Response
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "subject_id", "subject_code", "subject_name", "level_of_study",
+        "program_tag", "credit_hours", "difficulty_level", "is_active"
+    ])
+    
+    subjects = SubjectModel.query.order_by(SubjectModel.id).all()
+    for s in subjects:
+        writer.writerow([
+            s.id, s.code or "", s.name, s.level_of_study or "",
+            s.program or "", s.credit_hours or 3, s.difficulty_level or 3, s.is_active
+        ])
+        
+    log_admin_action("export_curriculum_csv", "Subject", None, f"Exported {len(subjects)} subjects to CSV")
+    output.seek(0)
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=curriculum_subjects_export.csv"}
+    )
+
+
+@admin_bp.route("/config/export-curriculum-json")
+def config_export_curriculum_json():
+    """Safe read-only JSON export of Curriculum Subjects."""
+    subjects = SubjectModel.query.order_by(SubjectModel.id).all()
+    data = []
+    for s in subjects:
+        data.append({
+            "id": s.id, "code": s.code, "name": s.name,
+            "level_of_study": s.level_of_study, "program": s.program,
+            "credit_hours": s.credit_hours, "difficulty_level": s.difficulty_level,
+            "is_active": s.is_active
+        })
+    log_admin_action("export_curriculum_json", "Subject", None, f"Exported {len(subjects)} subjects to JSON")
+    return jsonify(data)
+
+
+@admin_bp.route("/config/export-audit-logs")
+def config_export_audit_logs():
+    """Safe read-only CSV export of Admin Activity Audit Logs."""
+    import csv, io
+    from flask import Response
+    from app.models import AdminActivityLog
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["log_id", "timestamp", "admin_user_id", "action", "entity_type", "entity_id", "detail"])
+    
+    logs = AdminActivityLog.query.order_by(AdminActivityLog.id.desc()).all()
+    for l in logs:
+        writer.writerow([
+            l.id, l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "",
+            l.admin_user_id, l.action, l.entity_type or "", l.entity_id or "", l.detail or ""
+        ])
+        
+    log_admin_action("export_audit_logs_csv", "AdminActivityLog", None, f"Exported {len(logs)} audit logs to CSV")
+    output.seek(0)
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=admin_audit_logs.csv"}
+    )
+
 
 
 # ── SECTION 8: BULK OPERATIONS ────────────────────────────────────────────────
@@ -1101,28 +2320,123 @@ def content_chapters():
     )
 
 
+@admin_bp.route("/content/materials")
+def content_materials():
+    """Searchable & filterable Learning Materials directory with server-side pagination."""
+    from app.models import LearningMaterial, Topic, Chapter, Subject, EducationLevel
+    
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 15, type=int)
+    q = request.args.get("q", "").strip()
+    subject_id = request.args.get("subject_id", type=int)
+    level = request.args.get("level", "").strip()
+    difficulty = request.args.get("difficulty", "").strip()
+    
+    query = LearningMaterial.query.join(Topic).join(Chapter).join(Subject)
+    
+    if q:
+        query = query.filter(
+            (LearningMaterial.title.ilike(f"%{q}%")) |
+            (LearningMaterial.introduction.ilike(f"%{q}%")) |
+            (LearningMaterial.concepts.ilike(f"%{q}%"))
+        )
+    if subject_id:
+        query = query.filter(Chapter.subject_id == subject_id)
+    if level:
+        query = query.filter(Subject.level_of_study == level)
+    if difficulty:
+        query = query.filter(LearningMaterial.difficulty_level == difficulty)
+        
+    pagination = query.order_by(LearningMaterial.id.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    materials = pagination.items
+    
+    # Pre-attach hierarchy metadata for each material
+    for m in materials:
+        m.topic_obj = Topic.query.get(m.topic_id) if m.topic_id else None
+        if m.topic_obj:
+            m.chapter_obj = m.topic_obj.chapter
+            m.subject_obj = m.chapter_obj.subject if m.chapter_obj else None
+        else:
+            m.chapter_obj = None
+            m.subject_obj = None
+
+    subjects = SubjectModel.query.order_by(SubjectModel.name).all()
+    levels = EducationLevel.query.filter_by(is_active=True).order_by(EducationLevel.sort_order).all()
+    total_materials = LearningMaterial.query.count()
+
+    return render_template(
+        "admin/content/materials.html",
+        materials=materials,
+        pagination=pagination,
+        page=page,
+        q=q,
+        subject_id=subject_id,
+        level=level,
+        difficulty=difficulty,
+        subjects=subjects,
+        levels=levels,
+        total_materials=total_materials
+    )
+
+
+@admin_bp.route("/content/materials/<int:material_id>/preview")
+def content_material_preview(material_id):
+    """Read-only Admin preview of a learning material."""
+    from app.models import LearningMaterial, Topic
+    material = LearningMaterial.query.get_or_404(material_id)
+    topic = Topic.query.get(material.topic_id) if material.topic_id else None
+    chapter = topic.chapter if topic else None
+    subject = chapter.subject if chapter else None
+
+    # Calculate content length
+    content_len = len(material.introduction or "") + len(material.concepts or "") + len(material.detailed_explanation or "")
+
+    return render_template(
+        "admin/content/preview.html",
+        material=material,
+        topic=topic,
+        chapter=chapter,
+        subject=subject,
+        content_len=content_len
+    )
+
+
 @admin_bp.route("/content/stats")
 def content_stats():
-    """Content overview stats: subject/chapter/question counts + difficulty breakdown + broken PDFs check."""
+    """Content overview stats: subject/chapter/topic/material counts, broken PDFs check, recent materials."""
     import os
-    from app.models import Chapter, AssessmentQuestion, Topic
+    from app.models import Chapter, AssessmentQuestion, Topic, LearningMaterial, UploadedMaterial, AcademicDocument
     from sqlalchemy import func
+    
     subjects = SubjectModel.query.order_by(SubjectModel.name).all()
     rows = []
     for s in subjects:
         ch_count = Chapter.query.filter_by(subject_id=s.id).count()
         q_count = AssessmentQuestion.query.filter_by(subject_id=s.id).count()
-        # Difficulty breakdown
+        
+        ch_ids = [ch.id for ch in Chapter.query.filter_by(subject_id=s.id).all()]
+        tp_count = Topic.query.filter(Topic.chapter_id.in_(ch_ids)).count() if ch_ids else 0
+        
         diff_counts = {}
         for diff in ("beginner", "intermediate", "advanced"):
             diff_counts[diff] = AssessmentQuestion.query.filter_by(
                 subject_id=s.id, difficulty=diff
             ).count()
+            
         rows.append({
-            "subject": s, "chapters": ch_count, "questions": q_count,
+            "subject": s,
+            "chapters": ch_count,
+            "topics": tp_count,
+            "questions": q_count,
             "diff_counts": diff_counts,
         })
+        
+    total_chapters = Chapter.query.count()
+    total_topics = Topic.query.count()
+    total_materials = LearningMaterial.query.count()
     total_questions = AssessmentQuestion.query.count()
+    total_uploaded = UploadedMaterial.query.count()
+    total_documents = AcademicDocument.query.count()
     subjects_zero_q = sum(1 for r in rows if r["questions"] == 0)
 
     # Broken/Blank PDFs scan (< 5KB check)
@@ -1147,12 +2461,26 @@ def content_stats():
                     except Exception:
                         pass
 
+    recent_materials = LearningMaterial.query.order_by(LearningMaterial.id.desc()).limit(5).all()
+    for m in recent_materials:
+        t = Topic.query.get(m.topic_id) if m.topic_id else None
+        m.topic_obj = t
+        m.subject_obj = t.chapter.subject if t and t.chapter else None
+
     return render_template(
         "admin/content/stats.html",
-        rows=rows, total_questions=total_questions,
+        rows=rows,
+        total_chapters=total_chapters,
+        total_topics=total_topics,
+        total_materials=total_materials,
+        total_questions=total_questions,
+        total_uploaded=total_uploaded,
+        total_documents=total_documents,
         subjects_zero_q=subjects_zero_q,
         broken_pdfs=broken_pdfs,
+        recent_materials=recent_materials
     )
+
 
 
 @admin_bp.route("/content/pdfs/regenerate/<int:topic_id>", methods=["POST"])
@@ -1600,3 +2928,219 @@ def bulk_import_curriculum():
                          f"CSV import: {added} added, {skipped} skipped")
         flash(f"Import complete: {added} subjects added, {skipped} skipped.", "success")
     return render_template("admin/bulk_import.html", results=results)
+
+
+# ── SECTION 9: UNIFIED GLOBAL SEARCH & ADMIN PROFILE ────────────────────────────
+
+@admin_bp.route("/search")
+def search():
+    """Unified Global Admin Search across Students, Programs, Subjects, Chapters, Topics, Materials, Universities, Faculties."""
+    from app.models import (
+        User, StudentProfile, CurriculumProgram, Subject as SubjectModel,
+        Chapter, Topic, LearningMaterial, University, Faculty
+    )
+
+    q = request.args.get("q", "").strip()
+    category = request.args.get("category", "all").strip()
+
+    results = {
+        "students": [],
+        "programs": [],
+        "subjects": [],
+        "chapters": [],
+        "topics": [],
+        "materials": [],
+        "universities": [],
+        "faculties": [],
+    }
+    total_matches = 0
+
+    if q and len(q) >= 2:
+        wildcard = f"%{q}%"
+
+        # 1. Students
+        if category in ("all", "students"):
+            student_users = User.query.filter(
+                User.role == "student",
+                (User.full_name.ilike(wildcard)) | (User.email.ilike(wildcard))
+            ).limit(10).all()
+            for u in student_users:
+                p = StudentProfile.query.filter_by(user_id=u.id).first()
+                results["students"].append({
+                    "id": u.id,
+                    "name": u.full_name or u.email,
+                    "email": u.email,
+                    "level": p.study_level if p else "Unassigned",
+                    "url": url_for("admin.student_detail", student_id=u.id)
+                })
+
+        # 2. Programs
+        if category in ("all", "programs"):
+            progs = CurriculumProgram.query.filter(
+                CurriculumProgram.name.ilike(wildcard)
+            ).limit(10).all()
+            for p in progs:
+                results["programs"].append({
+                    "id": p.id,
+                    "name": p.name,
+                    "code": "",
+                    "level": p.education_level.name if p.education_level else "",
+                    "url": url_for("admin.curriculum_program_detail", program_id=p.id)
+                })
+
+
+        # 3. Subjects
+        if category in ("all", "subjects"):
+            subjs = SubjectModel.query.filter(
+                (SubjectModel.name.ilike(wildcard)) | (SubjectModel.code.ilike(wildcard))
+            ).limit(10).all()
+            for s in subjs:
+                results["subjects"].append({
+                    "id": s.id,
+                    "name": s.name,
+                    "code": s.code or "",
+                    "level": s.level_of_study or "",
+                    "url": url_for("admin.curriculum_subjects", q=s.name)
+                })
+
+        # 4. Chapters
+        if category in ("all", "chapters"):
+            chaps = Chapter.query.filter(Chapter.name.ilike(wildcard)).limit(10).all()
+            for c in chaps:
+                results["chapters"].append({
+                    "id": c.id,
+                    "name": c.name,
+                    "chapter_number": c.chapter_number,
+                    "subject": c.subject.name if c.subject else "",
+                    "url": url_for("admin.content_chapters", subject_id=c.subject_id) if c.subject_id else url_for("admin.content_chapters")
+                })
+
+        # 5. Topics
+        if category in ("all", "topics"):
+            topcs = Topic.query.filter(Topic.name.ilike(wildcard)).limit(10).all()
+            for t in topcs:
+                results["topics"].append({
+                    "id": t.id,
+                    "name": t.name,
+                    "chapter": t.chapter.name if t.chapter else "",
+                    "url": url_for("admin.content_materials", q=t.name)
+                })
+
+        # 6. Learning Materials
+        if category in ("all", "materials"):
+            mats = LearningMaterial.query.filter(
+                (LearningMaterial.title.ilike(wildcard)) | (LearningMaterial.introduction.ilike(wildcard))
+            ).limit(10).all()
+            for m in mats:
+                t_obj = Topic.query.get(m.topic_id) if m.topic_id else None
+                sub_name = t_obj.chapter.subject.name if (t_obj and t_obj.chapter and t_obj.chapter.subject) else ""
+                results["materials"].append({
+                    "id": m.id,
+                    "title": m.title or "Untitled Material",
+                    "topic": t_obj.name if t_obj else "",
+                    "subject": sub_name,
+                    "url": url_for("admin.content_material_preview", material_id=m.id)
+                })
+
+
+        # 7. Universities
+        if category in ("all", "universities"):
+            unis = University.query.filter(
+                (University.name.ilike(wildcard)) | (University.country.ilike(wildcard))
+            ).limit(10).all()
+            for u in unis:
+                results["universities"].append({
+                    "id": u.id,
+                    "name": u.name,
+                    "country": u.country or "",
+                    "url": url_for("admin.curriculum_universities")
+                })
+
+        # 8. Faculties
+        if category in ("all", "faculties"):
+            facs = Faculty.query.filter(Faculty.name.ilike(wildcard)).limit(10).all()
+            for f in facs:
+                results["faculties"].append({
+                    "id": f.id,
+                    "name": f.name,
+                    "university": f.university.name if f.university else "",
+                    "url": url_for("admin.curriculum_faculties")
+                })
+
+        total_matches = sum(len(v) for v in results.values())
+
+    return render_template(
+        "admin/search.html",
+        q=q,
+        category=category,
+        results=results,
+        total_matches=total_matches
+    )
+
+
+@admin_bp.route("/profile", methods=["GET", "POST"])
+def profile():
+    """Admin Profile & Account Security Management."""
+    from app.models import AdminActivityLog, User
+    from app import bcrypt, db
+    from werkzeug.security import check_password_hash, generate_password_hash
+    import re
+
+    if request.method == "POST":
+        action_type = request.form.get("action_type")
+
+        if action_type == "change_password":
+            current_pw = request.form.get("current_password", "").strip()
+            new_pw = request.form.get("new_password", "").strip()
+            confirm_pw = request.form.get("confirm_password", "").strip()
+
+            # 1. Verify current password
+            if not current_user.password_hash:
+                flash("Admin password hash is not configured.", "danger")
+                return redirect(url_for("admin.profile"))
+
+            # Check password hash using bcrypt or Werkzeug
+            valid_pw = False
+            try:
+                valid_pw = bcrypt.check_password_hash(current_user.password_hash, current_pw)
+            except Exception:
+                try:
+                    valid_pw = check_password_hash(current_user.password_hash, current_pw)
+                except Exception:
+                    valid_pw = False
+
+            if not valid_pw:
+                flash("Current password verification failed. Please check your password and try again.", "danger")
+                return redirect(url_for("admin.profile"))
+
+            # 2. Check confirmation match
+            if new_pw != confirm_pw:
+                flash("New password and confirmation password do not match.", "danger")
+                return redirect(url_for("admin.profile"))
+
+            # 3. Strong password validation (min 8 chars, uppercase, lowercase, number)
+            if len(new_pw) < 8 or not re.search(r"[A-Z]", new_pw) or not re.search(r"[a-z]", new_pw) or not re.search(r"[0-9]", new_pw):
+                flash("New password must be at least 8 characters long and include uppercase letters, lowercase letters, and numbers.", "danger")
+                return redirect(url_for("admin.profile"))
+
+            # 4. Hash new password & save
+            try:
+                current_user.password_hash = bcrypt.generate_password_hash(new_pw).decode("utf-8")
+            except Exception:
+                current_user.password_hash = generate_password_hash(new_pw)
+
+            db.session.commit()
+
+            # 5. Log action without credentials
+            log_admin_action("change_admin_password", "User", current_user.id, f"Updated admin password for account {current_user.email} (ID {current_user.id})")
+            flash("Admin password updated successfully! Please use your new password for future logins.", "success")
+            return redirect(url_for("admin.profile"))
+
+    # Recent activity logs specific to this admin
+    recent_logs = AdminActivityLog.query.filter_by(admin_user_id=current_user.id).order_by(AdminActivityLog.timestamp.desc()).limit(10).all()
+
+    return render_template(
+        "admin/profile.html",
+        recent_logs=recent_logs
+    )
+

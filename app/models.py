@@ -94,6 +94,8 @@ class EducationLevel(db.Model):
     sort_order  = db.Column(db.Integer, nullable=False, default=0)
     is_active   = db.Column(db.Boolean, nullable=False, default=True)
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at  = db.Column(db.DateTime, nullable=True)          # soft-delete timestamp
+    deleted_by  = db.Column(db.Integer, nullable=True)           # admin user_id who deactivated
     __table_args__ = (db.UniqueConstraint("name", "country", name="uq_education_level_name_country"),)
 
 
@@ -110,6 +112,8 @@ class University(db.Model):
     is_active    = db.Column(db.Boolean, nullable=False, default=True)
     sort_order   = db.Column(db.Integer, nullable=False, default=0)
     created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at   = db.Column(db.DateTime, nullable=True)
+    deleted_by   = db.Column(db.Integer, nullable=True)
     __table_args__ = (db.UniqueConstraint("name", "country", name="uq_university_name_country"),)
 
 
@@ -126,6 +130,8 @@ class Faculty(db.Model):
     is_active   = db.Column(db.Boolean, nullable=False, default=True)
     sort_order  = db.Column(db.Integer, nullable=False, default=0)
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at  = db.Column(db.DateTime, nullable=True)
+    deleted_by  = db.Column(db.Integer, nullable=True)
 
 
 class CurriculumProgram(db.Model):
@@ -145,7 +151,47 @@ class CurriculumProgram(db.Model):
     is_active            = db.Column(db.Boolean, nullable=False, default=True)
     sort_order           = db.Column(db.Integer, nullable=False, default=0)
     created_at           = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at           = db.Column(db.DateTime, nullable=True)
+    deleted_by           = db.Column(db.Integer, nullable=True)
     __table_args__ = (db.UniqueConstraint("name", "level_name", "country", name="uq_program_name_level_country"),)
+
+
+class ProgramSubject(db.Model):
+    """
+    Many-to-many association between CurriculumProgram and Subject.
+
+    A single global Subject can be shared by multiple Programs (e.g. Mathematics
+    used by BSc CSIT, BSc IT Core, and BSc IT Cloud simultaneously).
+
+    Detaching a subject ONLY removes/deactivates this mapping row.
+    The global Subject record is NEVER deleted via this mechanism.
+
+    Fields:
+        semester   - where in the program the subject appears (e.g. "Semester 1")
+        term       - optional sub-grouping (e.g. "Core", "Elective", "Dissertation")
+        sort_order - display order within that semester (program-specific)
+        is_active  - soft-disable mapping without touching the global Subject
+        deleted_at / deleted_by - soft-delete audit trail
+    """
+    __tablename__ = "program_subjects"
+    id         = db.Column(db.Integer, primary_key=True)
+    program_id = db.Column(db.Integer, db.ForeignKey('curriculum_programs.id', ondelete='CASCADE'), nullable=False)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id', ondelete='RESTRICT'), nullable=False)
+    semester   = db.Column(db.String(50), nullable=True)    # e.g. "Semester 1", "Core"
+    term       = db.Column(db.String(50), nullable=True)    # optional sub-grouping
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    is_active  = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    deleted_by = db.Column(db.Integer, nullable=True)
+
+    # Relationships — read-only joins for convenience
+    program = db.relationship('CurriculumProgram', backref=db.backref('program_subjects', lazy='dynamic'))
+    subject = db.relationship('Subject', backref=db.backref('program_subjects', lazy='dynamic'))
+
+    __table_args__ = (
+        db.UniqueConstraint('program_id', 'subject_id', name='uq_program_subject'),
+    )
 
 
 class StudentSubject(db.Model):
@@ -165,11 +211,13 @@ class Subject(db.Model):
     difficulty_level = db.Column(db.Integer, default=3) # 1-5
     semester_tag = db.Column(db.String(20))
     level_of_study = db.Column(db.String(50))
-    program = db.Column(db.String(100))
+    program = db.Column(db.String(100))      # legacy: kept for back-compat; new logic uses program_subjects
     semester = db.Column(db.String(50))
     country = db.Column(db.String(100), default="Nepal")
     curriculum = db.Column(db.String(100), default="National")
     is_active = db.Column(db.Boolean, nullable=False, default=True)  # Deactivate instead of deleting
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    deleted_by = db.Column(db.Integer, nullable=True)
 
 class Prediction(db.Model):
     __tablename__ = "predictions"
@@ -706,6 +754,88 @@ class EmailVerificationCode(db.Model):
     expires_at = db.Column(db.DateTime, nullable=False)
     verified = db.Column(db.Boolean, default=False, nullable=False)
     attempts = db.Column(db.Integer, default=0, nullable=False)
+
+
+# ── Phase 4: Document Ingestion (staging area) ────────────────────────────────
+
+class ImportSession(db.Model):
+    """
+    Tracks a single document-ingestion batch.
+
+    Lifecycle:
+        pending  -> Files uploaded, extraction not yet run.
+        extracted -> Extraction complete, items ready for review.
+        reviewing -> Admin reviewing the preview page.
+        committed -> Ingestion confirmed and written to DB.
+        cancelled -> Admin cancelled or an error occurred.
+
+    No curriculum data is modified until status == 'committed'.
+    """
+    __tablename__ = "import_sessions"
+    id            = db.Column(db.Integer, primary_key=True)
+    admin_id      = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    status        = db.Column(db.String(20), nullable=False, default='pending')
+    source_file   = db.Column(db.String(255), nullable=False)   # original filename
+    stored_file   = db.Column(db.String(255), nullable=False)   # uuid-based safe name
+    doc_type      = db.Column(db.String(10), nullable=False)    # docx / pdf / pptx
+    file_size     = db.Column(db.Integer, nullable=True)        # bytes
+    detected_program    = db.Column(db.String(200), nullable=True)
+    detected_program_id = db.Column(db.Integer, db.ForeignKey('curriculum_programs.id'), nullable=True)
+    ingestion_mode      = db.Column(db.String(20), nullable=False, default='append')  # append | replace
+    notes         = db.Column(db.Text, nullable=True)           # admin notes
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+    committed_at  = db.Column(db.DateTime, nullable=True)
+
+    admin   = db.relationship('User', backref=db.backref('import_sessions', lazy='dynamic'))
+    program = db.relationship('CurriculumProgram', backref=db.backref('import_sessions', lazy='dynamic'))
+    items   = db.relationship('ImportItem', backref='session', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class ImportItem(db.Model):
+    """
+    A single detected subject row within an ImportSession.
+
+    action values (admin-chosen):
+        LINK_EXISTING  -> reuse matched_subject_id
+        CREATE_NEW     -> create a new global Subject
+        SKIP           -> ignore this row
+        NEEDS_REVIEW   -> admin has not yet resolved ambiguity
+
+    status values:
+        pending    -> not yet committed
+        committed  -> written to DB successfully
+        skipped    -> skipped by admin
+        failed     -> an error occurred during commit
+    """
+    __tablename__ = "import_items"
+    id                  = db.Column(db.Integer, primary_key=True)
+    session_id          = db.Column(db.Integer, db.ForeignKey('import_sessions.id', ondelete='CASCADE'), nullable=False)
+    # Extracted raw values
+    extracted_program   = db.Column(db.String(200), nullable=True)
+    extracted_semester  = db.Column(db.String(50),  nullable=True)
+    extracted_term      = db.Column(db.String(50),  nullable=True)
+    extracted_code      = db.Column(db.String(30),  nullable=True)
+    extracted_name      = db.Column(db.String(200), nullable=True)
+    extracted_credits   = db.Column(db.Integer, nullable=True)
+    # Matching result
+    match_confidence    = db.Column(db.Float, nullable=True)   # 0.0 – 1.0
+    matched_subject_id  = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=True)
+    # Admin decision
+    action              = db.Column(db.String(20), nullable=False, default='NEEDS_REVIEW')
+    final_subject_id    = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=True)
+    final_semester      = db.Column(db.String(50),  nullable=True)
+    final_term          = db.Column(db.String(50),  nullable=True)
+    final_code          = db.Column(db.String(30),  nullable=True)
+    final_name          = db.Column(db.String(200), nullable=True)
+    final_credits       = db.Column(db.Integer, nullable=True)
+    sort_order          = db.Column(db.Integer, nullable=False, default=0)
+    # Commit result
+    status              = db.Column(db.String(20), nullable=False, default='pending')
+    program_subject_id  = db.Column(db.Integer, db.ForeignKey('program_subjects.id'), nullable=True)
+
+    matched_subject = db.relationship('Subject', foreign_keys=[matched_subject_id])
+    final_subject   = db.relationship('Subject', foreign_keys=[final_subject_id])
+
 
 
 
