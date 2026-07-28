@@ -1084,6 +1084,90 @@ def study_log():
 
     return render_template("student/study_log.html", logs=logs, total_logged=total_logged, subjects=subjects)
 
+# ── Study Planner Input Validation Constants ─────────────────────────────────────
+MIN_ATTENDANCE_PCT = 0.0
+MAX_ATTENDANCE_PCT = 100.0
+
+MIN_DAYS_UNTIL_EXAM = 1
+MAX_DAYS_UNTIL_EXAM = 365
+
+MIN_STUDY_HOURS_PER_WEEK = 0.0
+MAX_STUDY_HOURS_PER_WEEK = 168.0
+
+ALLOWED_SESSION_LENGTHS = {30, 45, 60, 90, 120}
+
+def validate_study_planner_subject_input(name, previous_grade, attendance, study_hours, days_until_exam, user_id=None):
+    """
+    Sanitizes and validates individual subject input fields for Study Planner.
+    Returns (is_valid, sanitized_dict, error_message).
+    """
+    if not name or not str(name).strip():
+        return False, None, "Subject selection is required."
+
+    name = str(name).strip()
+
+    # Validate subject exists globally or in user's curriculum
+    subj_obj = Subject.query.filter_by(name=name).first()
+    if not subj_obj:
+        return False, None, f"Invalid subject selection '{name}'. Subject does not exist."
+
+    # Validate previous grade
+    try:
+        grade = float(previous_grade)
+        if grade < 0.0 or grade > 100.0:
+            return False, None, f"Validation failed: Grade % for '{name}' must be between 0 and 100."
+    except (TypeError, ValueError):
+        return False, None, f"Validation failed: Invalid Grade % value for '{name}'."
+
+    # Validate attendance %
+    try:
+        att = float(attendance)
+        if att < MIN_ATTENDANCE_PCT or att > MAX_ATTENDANCE_PCT:
+            return False, None, f"Validation failed: Attendance % for '{name}' must be between 0 and 100."
+    except (TypeError, ValueError):
+        return False, None, f"Validation failed: Invalid Attendance % value for '{name}'."
+
+    # Validate current study hours / week
+    try:
+        hrs = float(study_hours)
+        if hrs < MIN_STUDY_HOURS_PER_WEEK or hrs > MAX_STUDY_HOURS_PER_WEEK:
+            return False, None, f"Validation failed: Study hrs/wk for '{name}' must be between 0 and 168."
+    except (TypeError, ValueError):
+        return False, None, f"Validation failed: Invalid Study hrs/wk value for '{name}'."
+
+    # Validate days until exam (must be positive integer between 1 and 365)
+    try:
+        days_str = str(days_until_exam).strip()
+        if not days_str.isdigit() or "." in days_str:
+            return False, None, f"Validation failed: Days until exam for '{name}' must be a positive whole number between 1 and 365."
+        days_int = int(days_str)
+        if days_int < MIN_DAYS_UNTIL_EXAM or days_int > MAX_DAYS_UNTIL_EXAM:
+            return False, None, f"Validation failed: Days until exam for '{name}' must be between {MIN_DAYS_UNTIL_EXAM} and {MAX_DAYS_UNTIL_EXAM} days."
+    except (TypeError, ValueError):
+        return False, None, f"Validation failed: Invalid Days until exam value for '{name}'."
+
+    return True, {
+        "name": name,
+        "previous_grade": grade,
+        "attendance": att,
+        "study_hours": hrs,
+        "days_until_exam": days_int,
+    }, None
+
+def validate_session_length(session_len_raw):
+    """
+    Validates session_length in minutes against allowed options {30, 45, 60, 90, 120}.
+    Returns (is_valid, sanitized_int, error_message).
+    """
+    try:
+        sess = int(session_len_raw)
+        if sess in ALLOWED_SESSION_LENGTHS:
+            return True, sess, None
+        return False, None, f"Validation failed: Invalid session length '{session_len_raw}'. Allowed options: 30 min, 45 min, 60 min, 90 min, 2 h."
+    except (TypeError, ValueError):
+        return False, None, f"Validation failed: Invalid session length '{session_len_raw}'."
+
+
 @student_bp.route("/schedule", methods=["GET"])
 @login_required
 def schedule():
@@ -1117,7 +1201,7 @@ def schedule():
 def risk_analysis():
     if request.is_json:
         data = request.json
-        subjects_list = data.get("subjects", [])
+        raw_subjects = data.get("subjects", [])
     else:
         subject_names = request.form.getlist("subject_name[]")
         previous_grades = request.form.getlist("previous_grade[]")
@@ -1126,45 +1210,40 @@ def risk_analysis():
         difficulties = request.form.getlist("difficulty[]")
         exam_days_list = request.form.getlist("days_until_exam[]")
         
-        subjects_list = []
+        raw_subjects = []
         for i in range(len(subject_names)):
-            subjects_list.append({
+            raw_subjects.append({
                 "name": subject_names[i],
-                "previous_grade": float(previous_grades[i]) if previous_grades[i] else 70.0,
-                "attendance": float(attendances[i]) if attendances[i] else 85.0,
-                "study_hours": float(study_hours[i]) if study_hours[i] else 6.0,
-                "difficulty": float(difficulties[i]) if difficulties[i] else 3.0,
-                "days_until_exam": int(exam_days_list[i]) if i < len(exam_days_list) and exam_days_list[i] else 30,
+                "previous_grade": previous_grades[i] if i < len(previous_grades) else 70.0,
+                "attendance": attendances[i] if i < len(attendances) else 85.0,
+                "study_hours": study_hours[i] if i < len(study_hours) else 6.0,
+                "difficulty": difficulties[i] if i < len(difficulties) else 3.0,
+                "days_until_exam": exam_days_list[i] if i < len(exam_days_list) else 30,
             })
             
-    if not subjects_list:
+    if not raw_subjects:
         return jsonify({"status": "error", "message": "No subjects provided for analysis."}), 400
 
-    # Server-side range checks
-    for s in subjects_list:
+    subjects_list = []
+    # Server-side validation before ML prediction pipeline
+    for s in raw_subjects:
         name = s.get("name")
         if not name:
-            continue
-        try:
-            grade = float(s.get("previous_grade", 70.0))
-            if grade < 0 or grade > 100:
-                return jsonify({"status": "error", "message": f"Validation failed: Grade % for '{name}' must be between 0 and 100."}), 400
-        except (TypeError, ValueError):
-            return jsonify({"status": "error", "message": f"Validation failed: Invalid Grade % value for '{name}'."}), 400
-
-        try:
-            att = float(s.get("attendance", 85.0))
-            if att < 0 or att > 100:
-                return jsonify({"status": "error", "message": f"Validation failed: Attendance % for '{name}' must be between 0 and 100."}), 400
-        except (TypeError, ValueError):
-            return jsonify({"status": "error", "message": f"Validation failed: Invalid Attendance % value for '{name}'."}), 400
-
-        try:
-            hrs = float(s.get("study_hours", 6.0))
-            if hrs < 0 or hrs > 168:
-                return jsonify({"status": "error", "message": f"Validation failed: Study hrs/wk for '{name}' must be between 0 and 168."}), 400
-        except (TypeError, ValueError):
-            return jsonify({"status": "error", "message": f"Validation failed: Invalid Study hrs/wk value for '{name}'."}), 400
+            return jsonify({"status": "error", "message": "Validation failed: Subject selection is required for all rows."}), 400
+        
+        is_ok, sanitized, err_msg = validate_study_planner_subject_input(
+            name=name,
+            previous_grade=s.get("previous_grade", 70.0),
+            attendance=s.get("attendance", 85.0),
+            study_hours=s.get("study_hours", 6.0),
+            days_until_exam=s.get("days_until_exam", 30),
+            user_id=current_user.id
+        )
+        if not is_ok:
+            return jsonify({"status": "error", "message": err_msg}), 400
+        
+        sanitized["difficulty"] = float(s.get("difficulty", 3.0))
+        subjects_list.append(sanitized)
         
     model = load_ml_model('random_forest')
     scaler = load_ml_model('scaler')
@@ -1340,6 +1419,7 @@ def generate_schedule():
     study_hours     = request.form.getlist("study_hours[]")
     difficulties    = request.form.getlist("difficulty[]")
     exam_days_list  = request.form.getlist("days_until_exam[]")
+    session_length_raw = request.form.get("session_length", "60")
 
     if not subject_names:
         rows = latest_prediction_rows(current_user.id)
@@ -1371,30 +1451,32 @@ def generate_schedule():
         flash(msg, "danger")
         return redirect(url_for('student.schedule'))
 
-    # Server-side range checks
+    # Validate session length
+    sess_ok, sess_val, sess_err = validate_session_length(session_length_raw)
+    if not sess_ok:
+        return fail_validation(sess_err)
+
+    # Server-side validation of subject inputs
     for i, name in enumerate(subject_names):
         if not name:
-            continue
-        try:
-            grade = float(previous_grades[i])
-            if grade < 0 or grade > 100:
-                return fail_validation(f"Validation failed: Grade % for '{name}' must be between 0 and 100.")
-        except (TypeError, ValueError, IndexError):
-            return fail_validation(f"Validation failed: Invalid Grade % value for '{name}'.")
+            return fail_validation("Validation failed: Subject selection is required for all rows.")
 
-        try:
-            att = float(attendances[i])
-            if att < 0 or att > 100:
-                return fail_validation(f"Validation failed: Attendance % for '{name}' must be between 0 and 100.")
-        except (TypeError, ValueError, IndexError):
-            return fail_validation(f"Validation failed: Invalid Attendance % value for '{name}'.")
+        raw_grade = previous_grades[i] if i < len(previous_grades) else ""
+        raw_att = attendances[i] if i < len(attendances) else ""
+        raw_hrs = study_hours[i] if i < len(study_hours) else ""
+        raw_days = exam_days_list[i] if i < len(exam_days_list) else ""
 
-        try:
-            hrs = float(study_hours[i])
-            if hrs < 0 or hrs > 168:
-                return fail_validation(f"Validation failed: Study hrs/wk for '{name}' must be between 0 and 168.")
-        except (TypeError, ValueError, IndexError):
-            return fail_validation(f"Validation failed: Invalid Study hrs/wk value for '{name}'.")
+        is_ok, _, err_msg = validate_study_planner_subject_input(
+            name=name,
+            previous_grade=raw_grade,
+            attendance=raw_att,
+            study_hours=raw_hrs,
+            days_until_exam=raw_days,
+            user_id=current_user.id
+        )
+        if not is_ok:
+            return fail_validation(err_msg)
+
 
     # ── 1. Snapshot previous week actual hours for feedback loop ──────────────
     today_local = local_today_for_user(current_user.id)
