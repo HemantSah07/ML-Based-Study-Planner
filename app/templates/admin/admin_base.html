@@ -48,7 +48,14 @@
         // ── Shared Super Admin Permanent Delete Confirmation Handler ─────────────
         function normalizeConfirmText(str) {
             if (str === null || str === undefined) return '';
-            return String(str)
+            let txt = String(str);
+            try {
+                const parser = new DOMParser();
+                const decoded = parser.parseFromString(txt, 'text/html').body.textContent;
+                if (decoded) txt = decoded;
+            } catch (err) {}
+
+            return txt
                 .replace(/\u00A0/g, ' ')  // convert non-breaking spaces
                 .replace(/\s+/g, ' ')     // collapse multiple spaces/newlines
                 .trim()
@@ -57,7 +64,15 @@
 
         function handleConfirmDeleteInput(inputEl) {
             if (!inputEl) return;
-            const rawTarget = inputEl.getAttribute('data-target') || inputEl.dataset.target || inputEl.dataset.expected || '';
+
+            const modalOrForm = inputEl.closest('.modal') || inputEl.closest('form') || document;
+            const codeEl = modalOrForm ? modalOrForm.querySelector('code') : null;
+
+            const rawTarget = inputEl.getAttribute('data-target') ||
+                            inputEl.dataset.target ||
+                            inputEl.dataset.expected ||
+                            (codeEl ? codeEl.textContent : '') || '';
+
             const target = normalizeConfirmText(rawTarget);
             const val = normalizeConfirmText(inputEl.value);
 
@@ -71,16 +86,22 @@
             if (!btn && inputEl.getAttribute('data-btn-id')) {
                 btn = document.getElementById(inputEl.getAttribute('data-btn-id'));
             }
+            if (!btn && modalOrForm && modalOrForm !== document) {
+                btn = modalOrForm.querySelector('button[type="submit"]');
+            }
 
             if (btn) {
-                const isMatched = (val.length > 0 && val === target);
-                btn.disabled = !isMatched;
+                const isMatched = (val.length > 0 && target.length > 0 && val === target);
                 if (isMatched) {
+                    btn.disabled = false;
+                    btn.removeAttribute('disabled');
                     btn.classList.remove('disabled');
                     btn.style.opacity = '1';
                     btn.style.cursor = 'pointer';
                     btn.style.pointerEvents = 'auto';
                 } else {
+                    btn.disabled = true;
+                    btn.setAttribute('disabled', 'disabled');
                     btn.classList.add('disabled');
                     btn.style.opacity = '0.5';
                     btn.style.cursor = 'not-allowed';
@@ -90,32 +111,23 @@
         }
 
         // Global Event Delegation for ALL confirmation input elements
-        document.addEventListener('input', function(e) {
-            if (e.target && e.target.matches && e.target.matches('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput')) {
-                handleConfirmDeleteInput(e.target);
-            }
-        });
-
-        document.addEventListener('change', function(e) {
-            if (e.target && e.target.matches && e.target.matches('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput')) {
-                handleConfirmDeleteInput(e.target);
-            }
-        });
-
-        document.addEventListener('keyup', function(e) {
-            if (e.target && e.target.matches && e.target.matches('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput')) {
-                handleConfirmDeleteInput(e.target);
-            }
+        ['input', 'change', 'keyup', 'paste', 'blur'].forEach(function(evtType) {
+            document.addEventListener(evtType, function(e) {
+                if (e.target && e.target.matches && e.target.matches('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput')) {
+                    handleConfirmDeleteInput(e.target);
+                }
+            });
         });
 
         // Reset inputs and buttons when any modal is opened
-        document.addEventListener('show.bs.modal', function(e) {
+        document.addEventListener('shown.bs.modal', function(e) {
             const modal = e.target;
             if (!modal) return;
             const inputEl = modal.querySelector('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput');
             if (inputEl) {
                 inputEl.value = '';
                 handleConfirmDeleteInput(inputEl);
+                setTimeout(() => inputEl.focus(), 50);
             }
         });
 
