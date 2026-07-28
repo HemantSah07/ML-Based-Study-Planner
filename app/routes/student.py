@@ -1092,7 +1092,7 @@ MIN_DAYS_UNTIL_EXAM = 1
 MAX_DAYS_UNTIL_EXAM = 365
 
 MIN_STUDY_HOURS_PER_WEEK = 0.0
-MAX_STUDY_HOURS_PER_WEEK = 80.0
+MAX_STUDY_HOURS_PER_WEEK = 84.0
 
 ALLOWED_SESSION_LENGTHS = {30, 45, 60, 90, 120}
 
@@ -1131,7 +1131,7 @@ def validate_study_planner_subject_input(name, previous_grade, attendance, study
     try:
         hrs = float(study_hours)
         if hrs < MIN_STUDY_HOURS_PER_WEEK or hrs > MAX_STUDY_HOURS_PER_WEEK:
-            return False, None, f"Validation failed: Study hrs/wk for '{name}' must be between 0 and 80."
+            return False, None, f"Validation failed: Study hrs/wk for '{name}' must be between 0 and 84."
     except (TypeError, ValueError):
         return False, None, f"Validation failed: Invalid Study hrs/wk value for '{name}'."
 

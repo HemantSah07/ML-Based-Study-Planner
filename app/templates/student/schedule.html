@@ -400,9 +400,9 @@
             </div>
             <div class="col-6">
                 <label class="form-label text-muted small fw-semibold">Current Study Hours/Week *</label>
-                <input type="number" name="study_hours[]" class="form-control form-control-sm hours-input" required min="0" max="80" step="0.5" value="6" placeholder="0–80" inputmode="decimal">
+                <input type="number" name="study_hours[]" class="form-control form-control-sm hours-input" required min="0" max="84" step="0.5" value="6" placeholder="0–84" inputmode="decimal">
                 <div class="form-text text-muted" style="font-size:11px; line-height:1.2;">This is how much you currently study. The model uses it to calculate what you actually need.</div>
-                <div class="invalid-feedback hours-feedback">⚠ Study hours per week must be between 0 and 80.</div>
+                <div class="invalid-feedback hours-feedback">⚠ Study hours per week must be between 0 and 84.</div>
             </div>
             <div class="col-6">
                 <label class="form-label text-muted small fw-semibold">Days until Exam *</label>
@@ -717,8 +717,8 @@
         const validateHours = () => validateField(hoursInput, hoursFeedback, val => {
             if (val === "") return false;
             const num = parseFloat(val);
-            return !isNaN(num) && num >= 0 && num <= 80;
-        }, "⚠ Study hours per week must be between 0 and 80.");
+            return !isNaN(num) && num >= 0 && num <= 84;
+        }, "⚠ Study hours per week must be between 0 and 84.");
         const validateDays = () => validateField(daysInput, daysFeedback, val => {
             if (val === "") return false;
             if (!/^\d+$/.test(val)) return false;
@@ -793,8 +793,8 @@
             const vHours = validateField(hoursInput, hoursFeedback, val => {
                 if (val === "") return false;
                 const num = parseFloat(val);
-                return !isNaN(num) && num >= 0 && num <= 80;
-            }, "⚠ Study hours per week must be between 0 and 80.");
+                return !isNaN(num) && num >= 0 && num <= 84;
+            }, "⚠ Study hours per week must be between 0 and 84.");
 
             const vDays = validateField(daysInput, daysFeedback, val => {
                 if (val === "") return false;
