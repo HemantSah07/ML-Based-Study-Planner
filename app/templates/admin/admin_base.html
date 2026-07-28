@@ -45,6 +45,80 @@
     
     <!-- Admin Sidebar Mobile Toggle & Interactive Helpers -->
     <script>
+        // ── Shared Super Admin Permanent Delete Confirmation Handler ─────────────
+        function normalizeConfirmText(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/\u00A0/g, ' ')  // convert non-breaking spaces
+                .replace(/\s+/g, ' ')     // collapse multiple spaces/newlines
+                .trim()
+                .toLowerCase();
+        }
+
+        function handleConfirmDeleteInput(inputEl) {
+            if (!inputEl) return;
+            const rawTarget = inputEl.getAttribute('data-target') || inputEl.dataset.target || inputEl.dataset.expected || '';
+            const target = normalizeConfirmText(rawTarget);
+            const val = normalizeConfirmText(inputEl.value);
+
+            // Find nearest form and confirm submit button
+            const form = inputEl.closest('form');
+            let btn = null;
+            if (form) {
+                btn = form.querySelector('button[type="submit"]') ||
+                      form.querySelector('.confirm-delete-btn, .confirm-level-btn, .confirm-uni-btn, .confirm-fac-btn, .confirm-prog-btn, .confirm-subj-btn, #confirmStudentDeleteBtn');
+            }
+            if (!btn && inputEl.getAttribute('data-btn-id')) {
+                btn = document.getElementById(inputEl.getAttribute('data-btn-id'));
+            }
+
+            if (btn) {
+                const isMatched = (val.length > 0 && val === target);
+                btn.disabled = !isMatched;
+                if (isMatched) {
+                    btn.classList.remove('disabled');
+                    btn.style.opacity = '1';
+                    btn.style.cursor = 'pointer';
+                    btn.style.pointerEvents = 'auto';
+                } else {
+                    btn.classList.add('disabled');
+                    btn.style.opacity = '0.5';
+                    btn.style.cursor = 'not-allowed';
+                    btn.style.pointerEvents = 'none';
+                }
+            }
+        }
+
+        // Global Event Delegation for ALL confirmation input elements
+        document.addEventListener('input', function(e) {
+            if (e.target && e.target.matches && e.target.matches('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput')) {
+                handleConfirmDeleteInput(e.target);
+            }
+        });
+
+        document.addEventListener('change', function(e) {
+            if (e.target && e.target.matches && e.target.matches('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput')) {
+                handleConfirmDeleteInput(e.target);
+            }
+        });
+
+        document.addEventListener('keyup', function(e) {
+            if (e.target && e.target.matches && e.target.matches('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput')) {
+                handleConfirmDeleteInput(e.target);
+            }
+        });
+
+        // Reset inputs and buttons when any modal is opened
+        document.addEventListener('show.bs.modal', function(e) {
+            const modal = e.target;
+            if (!modal) return;
+            const inputEl = modal.querySelector('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput');
+            if (inputEl) {
+                inputEl.value = '';
+                handleConfirmDeleteInput(inputEl);
+            }
+        });
+
         document.addEventListener('DOMContentLoaded', function() {
             const sidebar = document.getElementById('adminSidebar');
             const toggleBtn = document.getElementById('adminSidebarToggle');
@@ -71,8 +145,14 @@
                     setTimeout(() => t.remove(), 500);
                 });
             }, 6000);
+
+            // Initial check for any inputs already rendered
+            document.querySelectorAll('.confirm-level-input, .confirm-uni-input, .confirm-fac-input, .confirm-prog-input, .confirm-subj-input, .confirm-delete-input, .confirm-student-input, #confirmStudentEmailInput').forEach(function(inputEl) {
+                handleConfirmDeleteInput(inputEl);
+            });
         });
     </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
+
