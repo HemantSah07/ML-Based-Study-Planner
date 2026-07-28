@@ -29,17 +29,17 @@
                 </div>
 
                 <!-- Step progress indicators -->
-                <div class="step-indicator">
+                <div class="step-indicator" id="stepIndicatorsContainer">
                     <div class="step-indicator-item active" id="indicator-1">1</div>
                     <div class="step-indicator-item" id="indicator-2">2</div>
                     <div class="step-indicator-item" id="indicator-3">3</div>
                 </div>
 
-                <form id="registerForm" method="POST" novalidate>
+                <form id="registerForm" method="POST" novalidate autocomplete="off">
                     
                     <!-- STEP 1: ACCOUNT DETAILS -->
                     <div class="form-step active" id="step-panel-1">
-                        <h5 class="fw-bold text-white mb-3"><i class="fas fa-user text-primary me-2"></i> Step 1: Account Info</h5>
+                        <h5 class="fw-bold text-white mb-3" id="stepTitle"><i class="fas fa-user text-primary me-2"></i> Step 1: Account Info</h5>
                         
                         <!-- Account Role Selector -->
                         <div class="mb-4">
@@ -63,32 +63,34 @@
                             <p class="small mb-2">
                                 Selecting Admin does <strong>NOT</strong> create an active Admin account immediately.
                             </p>
-                            <ul class="small mb-2 ps-3">
-                                <li>Destination Approval Email: <strong class="text-warning">hemantsah123456789@gmail.com</strong> (Primary Super Admin)</li>
-                                <li>Your personal email will be submitted to the Super Admin for review.</li>
+                            <ul class="small mb-0 ps-3">
+                                <li>Your request will be submitted to the Super Admin for review.</li>
                                 <li>Upon Super Admin approval, a single-use 24-hour verification code will be sent to your personal email address.</li>
                             </ul>
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label">Full Name *</label>
-                            <input type="text" id="full_name" name="full_name" class="form-control bg-dark border-secondary text-white" placeholder="John Doe" required>
+                            <label class="form-label" id="nameLabel">Full Name *</label>
+                            <input type="text" id="full_name" name="full_name" class="form-control bg-dark border-secondary text-white" placeholder="John Doe" autocomplete="off" required>
                             <div class="invalid-feedback text-danger small mt-1" id="nameError">Full name must be at least 3 letters (no numbers or special characters).</div>
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label">Email Address *</label>
+                            <label class="form-label" id="emailLabel">Email Address *</label>
                             <div class="input-group">
-                                <input type="email" id="email" name="email" class="form-control bg-dark border-secondary text-white" placeholder="name@gmail.com" required>
+                                <input type="email" id="email" name="email" class="form-control bg-dark border-secondary text-white" placeholder="name@gmail.com" value="" autocomplete="off" required>
                                 <button type="button" id="sendVerificationBtn" class="btn btn-outline-primary" disabled>Send Verification</button>
                                 <button type="button" id="changeEmailBtn" class="btn btn-outline-secondary d-none">Change</button>
                             </div>
-                            <div class="invalid-feedback text-danger small mt-1" id="emailError">Please enter a valid, unregistered email address.</div>
+                            <small class="text-muted d-block mt-1 d-none" id="adminEmailNotice">
+                                <i class="fas fa-info-circle me-1 text-warning"></i>Your request will be reviewed by the Super Admin. If approved, a verification code will be sent to this email address.
+                            </small>
+                            <div class="invalid-feedback text-danger small mt-1" id="emailError">Please enter a valid, unregistered personal email address.</div>
                             <div class="text-success small mt-1 d-none" id="verificationSentMsg">Verification email sent. Please check your inbox.</div>
                             <div class="badge badge-verified py-2 px-3 rounded mt-2 d-none" id="verifiedStatusBadge">✓ Email Verified</div>
                         </div>
 
-                        <!-- Verification Code Box (Visible only after sending verification code) -->
+                        <!-- Verification Code Box (Visible only after sending verification code for student) -->
                         <div class="mb-4 d-none" id="verificationCodeGroup">
                             <label class="form-label">Verification Code (6 Digits) *</label>
                             <div class="input-group">
@@ -98,10 +100,31 @@
                             <div class="text-danger small mt-1 d-none" id="codeError">Invalid or expired code. Please try again.</div>
                         </div>
 
+                        <!-- Admin Request Password Block (Shown only when Admin Request is selected) -->
+                        <div id="adminPasswordGroup" class="d-none mt-3">
+                            <div class="mb-3">
+                                <label class="form-label">Password *</label>
+                                <div class="input-group">
+                                    <input type="password" id="admin_password" name="admin_password" class="form-control bg-dark border-secondary text-white" placeholder="Min 8 characters" autocomplete="new-password">
+                                    <button class="btn btn-outline-primary border-secondary" type="button" id="toggleAdminPassword" style="border-top-right-radius: 10px; border-bottom-right-radius: 10px;">👁️</button>
+                                </div>
+                                <div class="invalid-feedback text-danger small mt-1" id="adminPasswordError">Must contain 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special character.</div>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <label class="form-label">Confirm Password *</label>
+                                <div class="input-group">
+                                    <input type="password" id="admin_confirm_password" name="admin_confirm_password" class="form-control bg-dark border-secondary text-white" placeholder="Confirm your password" autocomplete="new-password">
+                                    <span class="input-group-text bg-dark border-secondary text-white" id="adminMatchIcon" style="border-top-right-radius: 10px; border-bottom-right-radius: 10px;"></span>
+                                </div>
+                                <div class="invalid-feedback text-danger small mt-1" id="adminConfirmError">Passwords do not match.</div>
+                            </div>
+                        </div>
+
                         <div class="d-flex justify-content-end mt-4">
                             <button type="button" class="btn btn-primary px-4 py-2" id="nextBtn1" disabled>Next <i class="fas fa-arrow-right ms-1"></i></button>
-                            <button type="submit" class="btn btn-warning px-4 py-2 fw-bold text-dark d-none" id="submitAdminBtn">
-                                <i class="fas fa-paper-plane me-1"></i> Submit Admin Request
+                            <button type="submit" class="btn btn-warning px-5 py-2.5 fw-bold text-dark d-none" id="submitAdminBtn" disabled>
+                                <i class="fas fa-paper-plane me-1"></i> Request Admin Approval
                             </button>
                         </div>
                     </div>
@@ -238,11 +261,12 @@
                         <div class="d-flex justify-content-between mt-4">
                             <button type="button" class="btn btn-outline-secondary px-4 py-2" id="backBtn3"><i class="fas fa-arrow-left me-1"></i> Back</button>
                             <button type="submit" id="submitBtn" class="btn btn-primary px-5 py-2.5" disabled>
-                                <span id="btnText">Register</span>
+                                <span id="btnText">Create Student Account</span>
                                 <span id="loadingSpinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
                             </button>
                         </div>
                     </div>
+
 
                 </form>
 
@@ -777,30 +801,102 @@ document.addEventListener('DOMContentLoaded', function() {
         return allValid;
     }
 
-    // Role toggle handling (Student vs. Admin Request)
+    // Role toggle & Admin Request validation elements
     const roleStudentBtn = document.getElementById('roleStudent');
     const roleAdminBtn = document.getElementById('roleAdmin');
     const adminNoticeBox = document.getElementById('adminNoticeBox');
     const submitAdminBtn = document.getElementById('submitAdminBtn');
-    const stepIndicators = document.querySelector('.step-indicator');
+    const adminPassword = document.getElementById('admin_password');
+    const adminConfirmPassword = document.getElementById('admin_confirm_password');
+    const adminMatchIcon = document.getElementById('adminMatchIcon');
+    const stepTitle = document.getElementById('stepTitle');
+    const emailLabel = document.getElementById('emailLabel');
+    const adminEmailNotice = document.getElementById('adminEmailNotice');
+    const adminPasswordGroup = document.getElementById('adminPasswordGroup');
+    const stepIndicatorsContainer = document.getElementById('stepIndicatorsContainer');
+    const toggleAdminPasswordBtn = document.getElementById('toggleAdminPassword');
+
+    function validateAdminForm() {
+        if (!roleAdminBtn || !roleAdminBtn.checked) return false;
+
+        const nameVal = fullName.value.trim();
+        const validName = nameRegex.test(nameVal);
+        fullName.classList.toggle('is-invalid', nameVal.length > 0 && !validName);
+        fullName.classList.toggle('is-valid', validName);
+
+        const emailVal = email.value.trim().toLowerCase();
+        const validEmail = emailRegex.test(emailVal) && emailVal !== 'hemantsah123456789@gmail.com';
+        email.classList.toggle('is-invalid', emailVal.length > 0 && !validEmail);
+        email.classList.toggle('is-valid', validEmail);
+
+        const adminPassVal = adminPassword ? adminPassword.value : '';
+        const pStrength = checkPasswordStrength(adminPassVal);
+        const validPass = (adminPassVal.length >= 8 && pStrength >= 4);
+        if (adminPassword) setValidationClass(adminPassword, validPass, 'adminPasswordError');
+
+        const adminConfirmVal = adminConfirmPassword ? adminConfirmPassword.value : '';
+        const validConfirm = (adminConfirmVal.length > 0 && adminConfirmVal === adminPassVal);
+        if (adminConfirmPassword) setValidationClass(adminConfirmPassword, validConfirm, 'adminConfirmError');
+
+        if (adminMatchIcon) {
+            if (adminConfirmVal.length > 0) {
+                adminMatchIcon.innerHTML = validConfirm ? '<span class="text-success">✔️</span>' : '<span class="text-danger">❌</span>';
+            } else {
+                adminMatchIcon.innerHTML = '';
+            }
+        }
+
+        const allValid = validName && validEmail && validPass && validConfirm;
+        if (submitAdminBtn) submitAdminBtn.disabled = !allValid;
+        return allValid;
+    }
+
+    if (adminPassword) adminPassword.addEventListener('input', validateAdminForm);
+    if (adminConfirmPassword) adminConfirmPassword.addEventListener('input', validateAdminForm);
 
     function updateRoleUI() {
-        if (roleAdminBtn && roleAdminBtn.checked) {
-            adminNoticeBox.classList.remove('d-none');
-            submitAdminBtn.classList.remove('d-none');
-            nextBtn1.classList.add('d-none');
-            if (stepIndicators) stepIndicators.style.display = 'none';
+        const isAdmin = roleAdminBtn && roleAdminBtn.checked;
+        if (isAdmin) {
+            if (stepTitle) stepTitle.innerHTML = '<i class="fas fa-user-shield text-warning me-2"></i> Admin Registration Request';
+            if (emailLabel) emailLabel.innerText = 'Personal Email Address *';
+            if (adminEmailNotice) adminEmailNotice.classList.remove('d-none');
+            if (adminNoticeBox) adminNoticeBox.classList.remove('d-none');
+            if (adminPasswordGroup) adminPasswordGroup.classList.remove('d-none');
+            if (submitAdminBtn) submitAdminBtn.classList.remove('d-none');
+            if (nextBtn1) nextBtn1.classList.add('d-none');
+            if (sendVerificationBtn) sendVerificationBtn.classList.add('d-none');
+            if (stepIndicatorsContainer) stepIndicatorsContainer.style.display = 'none';
+
+            // Clear email if prefilled with super admin email
+            if (email.value.trim().toLowerCase() === 'hemantsah123456789@gmail.com') {
+                email.value = '';
+            }
+            validateAdminForm();
         } else {
-            adminNoticeBox.classList.add('d-none');
-            submitAdminBtn.classList.add('d-none');
-            nextBtn1.classList.remove('d-none');
-            if (stepIndicators) stepIndicators.style.display = 'flex';
+            if (stepTitle) stepTitle.innerHTML = '<i class="fas fa-user text-primary me-2"></i> Step 1: Account Info';
+            if (emailLabel) emailLabel.innerText = 'Email Address *';
+            if (adminEmailNotice) adminEmailNotice.classList.add('d-none');
+            if (adminNoticeBox) adminNoticeBox.classList.add('d-none');
+            if (adminPasswordGroup) adminPasswordGroup.classList.add('d-none');
+            if (submitAdminBtn) submitAdminBtn.classList.add('d-none');
+            if (nextBtn1) nextBtn1.classList.remove('d-none');
+            if (sendVerificationBtn) sendVerificationBtn.classList.remove('d-none');
+            if (stepIndicatorsContainer) stepIndicatorsContainer.style.display = 'flex';
+            validateStep1();
         }
     }
 
     if (roleStudentBtn && roleAdminBtn) {
         roleStudentBtn.addEventListener('change', updateRoleUI);
         roleAdminBtn.addEventListener('change', updateRoleUI);
+    }
+
+    if (toggleAdminPasswordBtn) {
+        toggleAdminPasswordBtn.addEventListener('click', function() {
+            const type = adminPassword.getAttribute('type') === 'password' ? 'text' : 'password';
+            adminPassword.setAttribute('type', type);
+            this.innerHTML = type === 'password' ? '👁️' : '🙈';
+        });
     }
 
     password.addEventListener('input', validateStep3);
@@ -813,8 +909,17 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     form.addEventListener('submit', function(e) {
-        // If submitting an Admin Request, skip steps 2 & 3 checks
+        // If submitting an Admin Request
         if (roleAdminBtn && roleAdminBtn.checked) {
+            if (!validateAdminForm()) {
+                e.preventDefault();
+                alert("Please fill all required Admin Request fields (Full Name, Personal Email, Password, Confirm Password) accurately.");
+                return false;
+            }
+            password.value = adminPassword.value;
+            confirmPassword.value = adminConfirmPassword.value;
+            submitAdminBtn.disabled = true;
+            submitAdminBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Submitting Request...';
             return true;
         }
 
@@ -829,6 +934,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('btnText').classList.add('d-none');
         document.getElementById('loadingSpinner').classList.remove('d-none');
     });
+
 });
 </script>
 

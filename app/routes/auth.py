@@ -187,8 +187,8 @@ def register():
     if request.method == "POST":
         full_name = request.form.get("full_name", "").strip()
         email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password")
-        confirm_password = request.form.get("confirm_password")
+        password = request.form.get("password") or request.form.get("admin_password")
+        confirm_password = request.form.get("confirm_password") or request.form.get("admin_confirm_password")
         account_role = request.form.get("role", "student").strip().lower()
         country = request.form.get("country", "Nepal").strip()
         level_of_study = request.form.get("level_of_study", "").strip()
@@ -196,8 +196,13 @@ def register():
         # --- ADMIN REGISTRATION REQUEST WORKFLOW ---
         if account_role == "admin":
             from app.models import SUPER_ADMIN_EMAIL, AdminRegistrationRequest, AdminActivityLog
-            if not full_name or not email or not password:
-                flash("All required fields (Full Name, Email, Password) must be provided.", "danger")
+            
+            if email == SUPER_ADMIN_EMAIL.lower():
+                flash("The Primary Super Admin email address cannot be used as an applicant personal email.", "danger")
+                return redirect(url_for('auth.register'))
+
+            if not full_name or not email or not password or not confirm_password:
+                flash("All required fields (Full Name, Personal Email, Password) must be provided.", "danger")
                 return redirect(url_for('auth.register'))
                 
             if password != confirm_password:
@@ -255,11 +260,13 @@ def register():
                 print(f"[Mail Error] Failed to dispatch admin request email to Super Admin: {e}")
 
             flash(
-                f"Admin registration request submitted for {email}! Approval request sent to primary Super Admin ({SUPER_ADMIN_EMAIL}). "
-                f"Upon approval, a 24-hour verification code will be sent to your personal email.",
+                f"Admin registration request submitted for {email}! Approval request sent to Super Admin. "
+                f"Upon approval, a 24-hour verification code will be sent to your personal email address.",
                 "info"
             )
             return redirect(url_for('auth.verify_admin_code', email=email))
+
+
 
         # --- STUDENT REGISTRATION WORKFLOW ---
         # Check if email is already verified in this session (new flow)
