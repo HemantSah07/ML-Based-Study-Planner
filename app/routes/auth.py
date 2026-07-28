@@ -88,8 +88,9 @@ def check_password_strength(password):
     if re.search(r'[A-Z]', password): score += 1
     if re.search(r'[a-z]', password): score += 1
     if re.search(r'[0-9]', password): score += 1
-    if re.search(r'[@#$%^&*]', password): score += 1
+    if re.search(r'[^a-zA-Z0-9]', password): score += 1
     return score >= 4 and len(password) >= 8
+
 
 @auth_bp.route("/send-verification-ajax", methods=["POST"])
 def send_verification_ajax():
@@ -188,12 +189,83 @@ def register():
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password")
         confirm_password = request.form.get("confirm_password")
+        account_role = request.form.get("role", "student").strip().lower()
         country = request.form.get("country", "Nepal").strip()
         level_of_study = request.form.get("level_of_study", "").strip()
         
+        # --- ADMIN REGISTRATION REQUEST WORKFLOW ---
+        if account_role == "admin":
+            from app.models import SUPER_ADMIN_EMAIL, AdminRegistrationRequest, AdminActivityLog
+            if not full_name or not email or not password:
+                flash("All required fields (Full Name, Email, Password) must be provided.", "danger")
+                return redirect(url_for('auth.register'))
+                
+            if password != confirm_password:
+                flash("Passwords do not match.", "danger")
+                return redirect(url_for('auth.register'))
+                
+            if not check_password_strength(password):
+                flash("Password must be at least 8 characters long and contain uppercase, lowercase, numbers, and special characters.", "danger")
+                return redirect(url_for('auth.register'))
+
+            # Duplicate email check in active users
+            if User.query.filter(db.func.lower(User.email) == email).first():
+                flash("This email is already registered in Smart Study. Please log in.", "danger")
+                return redirect(url_for('auth.register'))
+
+            # Check if pending request exists
+            existing_req = AdminRegistrationRequest.query.filter(
+                db.func.lower(AdminRegistrationRequest.email) == email,
+                AdminRegistrationRequest.status == 'PENDING'
+            ).first()
+            if existing_req:
+                flash("An admin registration request for this email is already pending approval from the Super Admin.", "warning")
+                return redirect(url_for('auth.verify_admin_code', email=email))
+
+            hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
+            admin_req = AdminRegistrationRequest(
+                full_name=full_name,
+                email=email,
+                password_hash=hashed_pw,
+                requested_role='admin',
+                status='PENDING'
+            )
+            db.session.add(admin_req)
+            db.session.commit()
+
+            # Notify Super Admin via Email
+            from flask_mail import Message
+            from app import mail
+            try:
+                msg = Message(
+                    subject="New Admin Registration Request - Smart Study",
+                    recipients=[SUPER_ADMIN_EMAIL],
+                    body=(
+                        f"New Admin Registration Request\n\n"
+                        f"Applicant Name: {full_name}\n"
+                        f"Applicant Personal Email: {email}\n"
+                        f"Requested Role: Regular Admin\n"
+                        f"Request Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n\n"
+                        f"An applicant has requested access to the Smart Study Admin Dashboard.\n"
+                        f"Please review and approve this request from the Super Admin Dashboard."
+                    )
+                )
+                mail.send(msg)
+            except Exception as e:
+                print(f"[Mail Error] Failed to dispatch admin request email to Super Admin: {e}")
+
+            flash(
+                f"Admin registration request submitted for {email}! Approval request sent to primary Super Admin ({SUPER_ADMIN_EMAIL}). "
+                f"Upon approval, a 24-hour verification code will be sent to your personal email.",
+                "info"
+            )
+            return redirect(url_for('auth.verify_admin_code', email=email))
+
+        # --- STUDENT REGISTRATION WORKFLOW ---
         # Check if email is already verified in this session (new flow)
         session_verified_email = session.get('verified_email', '').strip().lower()
         is_verified_inline = (session_verified_email and email == session_verified_email)
+
         
         # If not verified inline, we fall back to the old registration/redirect flow (for unit tests / compatibility)
         if not is_verified_inline:
@@ -630,3 +702,86 @@ def logout():
     logout_user()
     flash("You have been logged out.", "info")
     return redirect(url_for('auth.login'))
+
+
+@auth_bp.route("/verify-admin-code", methods=["GET", "POST"])
+def verify_admin_code():
+    """
+    Verification page for admin applicants who received an approval code from Super Admin.
+    Account is only activated AFTER successful code verification.
+    """
+    from app.models import AdminRegistrationRequest, AdminActivityLog
+    email = request.args.get("email", "").strip().lower()
+
+    if request.method == "POST":
+        email_submitted = request.form.get("email", "").strip().lower()
+        code_submitted = request.form.get("verification_code", "").strip()
+
+        if not email_submitted or not code_submitted:
+            flash("Email and 6-digit verification code are required.", "danger")
+            return render_template("auth/verify_admin_code.html", email=email_submitted)
+
+        # Look up approved request matching email
+        admin_req = AdminRegistrationRequest.query.filter(
+            db.func.lower(AdminRegistrationRequest.email) == email_submitted,
+            AdminRegistrationRequest.status == 'APPROVED',
+            AdminRegistrationRequest.code_used == False
+        ).order_by(AdminRegistrationRequest.actioned_at.desc()).first()
+
+        if not admin_req:
+            flash("No approved admin registration request found for this email address. Please ensure Super Admin has approved your request.", "danger")
+            return render_template("auth/verify_admin_code.html", email=email_submitted)
+
+        # Expiration check
+        if admin_req.code_expires_at and datetime.utcnow() > admin_req.code_expires_at:
+            flash("The verification code has expired (24-hour limit). Please request re-approval from the Super Admin.", "danger")
+            return render_template("auth/verify_admin_code.html", email=email_submitted)
+
+        # Code verification
+        if admin_req.verification_code != code_submitted:
+            flash("Invalid verification code. Please check the code sent to your email.", "danger")
+            return render_template("auth/verify_admin_code.html", email=email_submitted)
+
+        # Code is valid — Activate account!
+        admin_req.code_used = True
+        
+        # Check if user record already exists
+        existing_user = User.query.filter(db.func.lower(User.email) == email_submitted).first()
+        if existing_user:
+            existing_user.role = 'admin'
+            existing_user.is_active = True
+            existing_user.password_hash = admin_req.password_hash
+        else:
+            new_admin = User(
+                username=email_submitted,
+                full_name=admin_req.full_name,
+                email=email_submitted,
+                password_hash=admin_req.password_hash,
+                role='admin',
+                is_active=True,
+                is_seed_account=False
+            )
+            db.session.add(new_admin)
+
+        db.session.commit()
+
+        # Log activation
+        try:
+            target_user = User.query.filter(db.func.lower(User.email) == email_submitted).first()
+            log = AdminActivityLog(
+                admin_user_id=admin_req.actioned_by_id or target_user.id,
+                action="activated_regular_admin",
+                entity_type="User",
+                entity_id=target_user.id,
+                detail=f"Applicant {admin_req.full_name} ({email_submitted}) verified code and activated Regular Admin account"
+            )
+            db.session.add(log)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+
+        flash("✓ Admin Account Verified & Activated! You may now log in with your administrative credentials.", "success")
+        return redirect(url_for('auth.login'))
+
+    return render_template("auth/verify_admin_code.html", email=email)
+

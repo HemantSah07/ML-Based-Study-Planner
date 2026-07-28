@@ -1,10 +1,14 @@
-from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, session
+from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, session, abort
 from flask_login import login_required, current_user
 from app import db
 from app.models import (
     User, Prediction, StudyLog, StudentProfile, StudentSubject,
     EducationLevel, University, Faculty, CurriculumProgram, Subject, AdminActivityLog,
-    ProgramSubject, ImportSession, ImportItem
+    ProgramSubject, ImportSession, ImportItem, AdminRegistrationRequest, SUPER_ADMIN_EMAIL
+)
+from app.utils.auth_decorators import (
+    super_admin_required, admin_required, is_protected_primary_super_admin,
+    is_super_admin, is_admin
 )
 from datetime import datetime, timedelta
 import json
@@ -14,8 +18,9 @@ admin_bp = Blueprint("admin", __name__)
 @admin_bp.before_request
 @login_required
 def require_admin():
-    if current_user.role != 'admin':
+    if not current_user.is_authenticated or not current_user.is_admin:
         return redirect(url_for('student.dashboard'))
+
 
 def log_admin_action(action, entity_type=None, entity_id=None, detail=None):
     try:
@@ -1734,7 +1739,9 @@ def activity_log():
 
 # ── SECTION 7: RESTART-FREE LIVE CONFIGURATION ────────────────────────────────
 @admin_bp.route("/config", methods=["GET", "POST"])
+@super_admin_required
 def config():
+
     """System Configuration & Maintenance Control Center."""
     import os, sys, datetime
     from flask import current_app
@@ -2697,7 +2704,9 @@ def analytics_detail():
 # ── SECTION 7: CONFIG — STUDY PLANNER SETTINGS ────────────────────────────────
 
 @admin_bp.route("/config/planner", methods=["POST"])
+@super_admin_required
 def config_planner():
+
     from app.models import AppSetting
     for k in ["PLANNER_SESSION_MINUTES", "PLANNER_BREAK_MINUTES", "PLANNER_SESSIONS_PER_DAY"]:
         val = request.form.get(k, "").strip()
@@ -3174,5 +3183,379 @@ def admin_retrain_ml():
         return jsonify({"status": "success", "results": results}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ── SUPER ADMIN: ADMIN MANAGEMENT & APPROVAL WORKFLOW ───────────────────────
+
+@admin_bp.route("/manage-admins")
+@super_admin_required
+def manage_admins():
+    """
+    Super Admin Management Area:
+    View all Regular Admins, Pending Admin Requests, Approval Actions, and Audit Logs.
+    """
+    pending_requests = AdminRegistrationRequest.query.filter_by(status="PENDING").order_by(AdminRegistrationRequest.created_at.desc()).all()
+    processed_requests = AdminRegistrationRequest.query.filter(AdminRegistrationRequest.status.in_(["APPROVED", "REJECTED"])).order_by(AdminRegistrationRequest.actioned_at.desc()).limit(20).all()
+    
+    # Regular Admins (excluding Primary Super Admin)
+    regular_admins = User.query.filter(User.role == 'admin').order_by(User.date_registered.desc()).all()
+    
+    # Super Admin account inspection
+    primary_super_admin = User.query.filter(db.func.lower(User.email) == SUPER_ADMIN_EMAIL.lower()).first()
+
+    return render_template(
+        "admin/manage_admins.html",
+        pending_requests=pending_requests,
+        processed_requests=processed_requests,
+        regular_admins=regular_admins,
+        primary_super_admin=primary_super_admin,
+        super_admin_email=SUPER_ADMIN_EMAIL
+    )
+
+@admin_bp.route("/requests")
+@super_admin_required
+def admin_requests():
+    return redirect(url_for("admin.manage_admins"))
+
+
+@admin_bp.route("/requests/<int:req_id>/approve", methods=["POST"])
+@super_admin_required
+def approve_admin_request(req_id):
+    """
+    Super Admin approval of an Admin Registration Request.
+    Generates a secure 6-digit single-use verification code valid for 24 hours
+    and dispatches it to the applicant's personal email.
+    """
+    req = AdminRegistrationRequest.query.get_or_404(req_id)
+    if req.status != 'PENDING':
+        flash(f"Request for {req.email} has already been processed (status: {req.status}).", "warning")
+        return redirect(url_for("admin.manage_admins"))
+
+    import secrets
+    code = "".join(secrets.choice("0123456789") for _ in range(6))
+    now = datetime.utcnow()
+    expires = now + timedelta(hours=24)
+
+    req.status = 'APPROVED'
+    req.verification_code = code
+    req.code_expires_at = expires
+    req.code_used = False
+    req.actioned_at = now
+    req.actioned_by_id = current_user.id
+    db.session.commit()
+
+    # Log in AdminActivityLog
+    log_admin_action(
+        "approved_admin_request",
+        "AdminRegistrationRequest",
+        req.id,
+        f"Super Admin approved Regular Admin request for {req.full_name} ({req.email}). Verification code generated (valid 24h)."
+    )
+
+    # Email 24-hour verification code to applicant's personal email
+    from flask_mail import Message
+    from app import mail
+    try:
+        msg = Message(
+            subject="Admin Account Approved - Smart Study Verification Code",
+            recipients=[req.email],
+            body=(
+                f"Hello {req.full_name},\n\n"
+                f"Your Admin Registration Request for Smart Study has been APPROVED by the Super Admin!\n\n"
+                f"Your single-use 24-hour verification code is:\n\n"
+                f"   {code}\n\n"
+                f"Please visit the verification page to activate your Regular Admin account:\n"
+                f"{url_for('auth.verify_admin_code', email=req.email, _external=True)}\n\n"
+                f"This code will expire in 24 hours. If you did not request this, please ignore."
+            )
+        )
+        mail.send(msg)
+        flash(f"Admin request for '{req.full_name}' ({req.email}) APPROVED! Single-use 24-hour verification code emailed to applicant.", "success")
+    except Exception as e:
+        flash(f"Admin request APPROVED, but failed to send verification email to {req.email}: {e}", "warning")
+
+    return redirect(url_for("admin.manage_admins"))
+
+
+@admin_bp.route("/requests/<int:req_id>/reject", methods=["POST"])
+@super_admin_required
+def reject_admin_request(req_id):
+    """
+    Super Admin rejection of an Admin Registration Request.
+    """
+    req = AdminRegistrationRequest.query.get_or_404(req_id)
+    req.status = 'REJECTED'
+    req.actioned_at = datetime.utcnow()
+    req.actioned_by_id = current_user.id
+    db.session.commit()
+
+    log_admin_action(
+        "rejected_admin_request",
+        "AdminRegistrationRequest",
+        req.id,
+        f"Super Admin rejected Regular Admin request for {req.full_name} ({req.email})."
+    )
+    flash(f"Admin registration request for '{req.full_name}' ({req.email}) REJECTED.", "info")
+    return redirect(url_for("admin.manage_admins"))
+
+
+@admin_bp.route("/admins/<int:user_id>/disable", methods=["POST"])
+@super_admin_required
+def disable_regular_admin(user_id):
+    """Disable a Regular Admin account."""
+    target_user = User.query.get_or_404(user_id)
+    if is_protected_primary_super_admin(target_user):
+        flash("CRITICAL GUARD: Primary Super Admin (hemantsah123456789@gmail.com) CANNOT be disabled or modified!", "danger")
+        return redirect(url_for("admin.manage_admins"))
+
+    target_user.is_active = False
+    db.session.commit()
+
+    log_admin_action("disabled_regular_admin", "User", user_id, f"Super Admin disabled Regular Admin {target_user.email} (ID {user_id})")
+    flash(f"Regular Admin account '{target_user.email}' disabled successfully.", "warning")
+    return redirect(url_for("admin.manage_admins"))
+
+
+@admin_bp.route("/admins/<int:user_id>/reactivate", methods=["POST"])
+@super_admin_required
+def reactivate_regular_admin(user_id):
+    """Reactivate a Regular Admin account."""
+    target_user = User.query.get_or_404(user_id)
+    target_user.is_active = True
+    db.session.commit()
+
+    log_admin_action("reactivated_regular_admin", "User", user_id, f"Super Admin reactivated Regular Admin {target_user.email} (ID {user_id})")
+    flash(f"Regular Admin account '{target_user.email}' reactivated successfully.", "success")
+    return redirect(url_for("admin.manage_admins"))
+
+
+# ── SUPER ADMIN-ONLY PERMANENT DELETION ENDPOINTS (7 TOTAL) ────────────────
+
+@admin_bp.route("/admins/<int:user_id>/delete-permanent", methods=["POST"])
+@super_admin_required
+def delete_permanent_admin(user_id):
+    """Permanently delete a Regular Admin account (Super Admin Only)."""
+    target_user = User.query.get_or_404(user_id)
+    if is_protected_primary_super_admin(target_user):
+        flash("CRITICAL GUARD: Primary Super Admin (hemantsah123456789@gmail.com) CANNOT be deleted under any circumstances!", "danger")
+        return redirect(url_for("admin.manage_admins"))
+
+    confirm_text = request.form.get("confirm_text", "").strip().lower()
+    if confirm_text != target_user.email.strip().lower():
+        flash(f"Confirmation string mismatch. Expected '{target_user.email}', received '{confirm_text}'. Permanent deletion aborted.", "danger")
+        return redirect(url_for("admin.manage_admins"))
+
+    try:
+        deleted_email = target_user.email
+        db.session.delete(target_user)
+        db.session.commit()
+        log_admin_action("permanently_deleted_admin", "User", user_id, f"Super Admin permanently deleted Regular Admin {deleted_email} (ID {user_id})")
+        flash(f"Regular Admin '{deleted_email}' permanently deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to permanently delete admin: {e}", "danger")
+
+    return redirect(url_for("admin.manage_admins"))
+
+
+@admin_bp.route("/students/<int:student_id>/delete-permanent", methods=["POST"])
+@super_admin_required
+def delete_permanent_student(student_id):
+    """Permanently delete a Student account and associated records (Super Admin Only)."""
+    student = User.query.filter_by(id=student_id, role='student').first_or_404()
+    if is_protected_primary_super_admin(student):
+        flash("CRITICAL GUARD: Primary Super Admin account cannot be deleted!", "danger")
+        return redirect(url_for("admin.students"))
+
+    confirm_text = request.form.get("confirm_text", "").strip().lower()
+    if confirm_text != student.email.strip().lower():
+        flash(f"Confirmation email mismatch. Expected '{student.email}', received '{confirm_text}'. Permanent deletion aborted.", "danger")
+        return redirect(url_for("admin.student_detail", student_id=student_id))
+
+    try:
+        from app.models import (
+            StudentProfile, StudentSubject, Prediction, StudyLog, Assignment,
+            Exam, Schedule, Recommendation, Goal, AvailabilitySlot, StudentSeenQuestion,
+            StudyPlan, AcademicDocument, ExtractedMark, StudentAssessment, AssessmentResponse
+        )
+        # Delete dependent student records
+        StudentProfile.query.filter_by(user_id=student_id).delete()
+        StudentSubject.query.filter_by(user_id=student_id).delete()
+        Prediction.query.filter_by(user_id=student_id).delete()
+        StudyLog.query.filter_by(user_id=student_id).delete()
+        Assignment.query.filter_by(user_id=student_id).delete()
+        Exam.query.filter_by(user_id=student_id).delete()
+        Schedule.query.filter_by(user_id=student_id).delete()
+        Recommendation.query.filter_by(user_id=student_id).delete()
+        Goal.query.filter_by(user_id=student_id).delete()
+        AvailabilitySlot.query.filter_by(user_id=student_id).delete()
+        StudentSeenQuestion.query.filter_by(student_id=student_id).delete()
+        StudyPlan.query.filter_by(student_id=student_id).delete()
+
+        docs = AcademicDocument.query.filter_by(student_id=student_id).all()
+        for d in docs:
+            ExtractedMark.query.filter_by(document_id=d.id).delete()
+            db.session.delete(d)
+
+        assessments = StudentAssessment.query.filter_by(student_id=student_id).all()
+        for a in assessments:
+            AssessmentResponse.query.filter_by(assessment_id=a.id).delete()
+            db.session.delete(a)
+
+        email_deleted = student.email
+        db.session.delete(student)
+        db.session.commit()
+
+        log_admin_action("permanently_deleted_student", "User", student_id, f"Super Admin permanently deleted Student account {email_deleted} (ID {student_id})")
+        flash(f"Student account '{email_deleted}' and all associated records permanently deleted.", "success")
+        return redirect(url_for("admin.students"))
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to permanently delete student: {e}", "danger")
+        return redirect(url_for("admin.student_detail", student_id=student_id))
+
+
+@admin_bp.route("/curriculum/levels/<int:level_id>/delete-permanent", methods=["POST"])
+@super_admin_required
+def delete_permanent_level(level_id):
+    """Permanently delete an Education Level record (Super Admin Only)."""
+    level = EducationLevel.query.get_or_404(level_id)
+    confirm_text = request.form.get("confirm_text", "").strip()
+    if confirm_text != level.name:
+        flash(f"Confirmation name mismatch. Expected '{level.name}', received '{confirm_text}'. Permanent deletion aborted.", "danger")
+        return redirect(url_for("admin.curriculum_levels"))
+
+    # Safety check: student usage
+    usage_count = StudentProfile.query.filter_by(study_level=level.name).count()
+    if usage_count > 0:
+        flash(f"Deletion blocked: {usage_count} active student profile(s) rely on Education Level '{level.name}'. Reassign students before permanently deleting.", "danger")
+        return redirect(url_for("admin.curriculum_levels"))
+
+    try:
+        lvl_name = level.name
+        db.session.delete(level)
+        db.session.commit()
+        log_admin_action("permanently_deleted_level", "EducationLevel", level_id, f"Super Admin permanently deleted Education Level '{lvl_name}' (ID {level_id})")
+        flash(f"Education Level '{lvl_name}' permanently deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to delete Education Level: {e}", "danger")
+
+    return redirect(url_for("admin.curriculum_levels"))
+
+
+@admin_bp.route("/curriculum/universities/<int:uni_id>/delete-permanent", methods=["POST"])
+@super_admin_required
+def delete_permanent_university(uni_id):
+    """Permanently delete a University record (Super Admin Only)."""
+    uni = University.query.get_or_404(uni_id)
+    confirm_text = request.form.get("confirm_text", "").strip()
+    if confirm_text != uni.name:
+        flash(f"Confirmation name mismatch. Expected '{uni.name}', received '{confirm_text}'. Permanent deletion aborted.", "danger")
+        return redirect(url_for("admin.curriculum_universities"))
+
+    usage_count = StudentProfile.query.filter(StudentProfile.university.like(f"{uni.name}%")).count()
+    if usage_count > 0:
+        flash(f"Deletion blocked: {usage_count} student profile(s) reference University '{uni.name}'.", "danger")
+        return redirect(url_for("admin.curriculum_universities"))
+
+    try:
+        u_name = uni.name
+        db.session.delete(uni)
+        db.session.commit()
+        log_admin_action("permanently_deleted_university", "University", uni_id, f"Super Admin permanently deleted University '{u_name}' (ID {uni_id})")
+        flash(f"University '{u_name}' permanently deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to delete University: {e}", "danger")
+
+    return redirect(url_for("admin.curriculum_universities"))
+
+
+@admin_bp.route("/curriculum/faculties/<int:fac_id>/delete-permanent", methods=["POST"])
+@super_admin_required
+def delete_permanent_faculty(fac_id):
+    """Permanently delete a Faculty/Stream record (Super Admin Only)."""
+    fac = Faculty.query.get_or_404(fac_id)
+    confirm_text = request.form.get("confirm_text", "").strip()
+    if confirm_text != fac.name:
+        flash(f"Confirmation name mismatch. Expected '{fac.name}', received '{confirm_text}'. Permanent deletion aborted.", "danger")
+        return redirect(url_for("admin.curriculum_faculties"))
+
+    try:
+        f_name = fac.name
+        db.session.delete(fac)
+        db.session.commit()
+        log_admin_action("permanently_deleted_faculty", "Faculty", fac_id, f"Super Admin permanently deleted Faculty '{f_name}' (ID {fac_id})")
+        flash(f"Faculty/Stream '{f_name}' permanently deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to delete Faculty: {e}", "danger")
+
+    return redirect(url_for("admin.curriculum_faculties"))
+
+
+@admin_bp.route("/curriculum/programs/<int:program_id>/delete-permanent", methods=["POST"])
+@super_admin_required
+def delete_permanent_program(program_id):
+    """Permanently delete an Academic Program record (Super Admin Only)."""
+    prog = CurriculumProgram.query.get_or_404(program_id)
+    confirm_text = request.form.get("confirm_text", "").strip()
+    if confirm_text != prog.name:
+        flash(f"Confirmation name mismatch. Expected '{prog.name}', received '{confirm_text}'. Permanent deletion aborted.", "danger")
+        return redirect(url_for("admin.curriculum_programs"))
+
+    try:
+        p_name = prog.name
+        ProgramSubject.query.filter_by(program_id=program_id).delete()
+        db.session.delete(prog)
+        db.session.commit()
+        log_admin_action("permanently_deleted_program", "CurriculumProgram", program_id, f"Super Admin permanently deleted Academic Program '{p_name}' (ID {program_id})")
+        flash(f"Academic Program '{p_name}' permanently deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to delete Academic Program: {e}", "danger")
+
+    return redirect(url_for("admin.curriculum_programs"))
+
+
+@admin_bp.route("/curriculum/subjects/<int:subject_id>/delete-permanent", methods=["POST"])
+@super_admin_required
+def delete_permanent_subject(subject_id):
+    """Permanently delete a Master Subject record (Super Admin Only)."""
+    subj = Subject.query.get_or_404(subject_id)
+    confirm_text = request.form.get("confirm_text", "").strip()
+    if confirm_text != subj.name:
+        flash(f"Confirmation name mismatch. Expected '{subj.name}', received '{confirm_text}'. Permanent deletion aborted.", "danger")
+        return redirect(url_for("admin.curriculum_subjects"))
+
+    try:
+        from app.models import Chapter, Topic, AssessmentQuestion, LearningMaterial
+        s_name = subj.name
+        
+        StudentSubject.query.filter_by(subject_id=subject_id).delete()
+        ProgramSubject.query.filter_by(subject_id=subject_id).delete()
+
+        chapters = Chapter.query.filter_by(subject_id=subject_id).all()
+        for ch in chapters:
+            topics = Topic.query.filter_by(chapter_id=ch.id).all()
+            for tp in topics:
+                AssessmentQuestion.query.filter_by(topic_id=tp.id).delete()
+                LearningMaterial.query.filter_by(topic_id=tp.id).delete()
+                db.session.delete(tp)
+            db.session.delete(ch)
+
+        AssessmentQuestion.query.filter_by(subject_id=subject_id).delete()
+        db.session.delete(subj)
+        db.session.commit()
+
+        log_admin_action("permanently_deleted_subject", "Subject", subject_id, f"Super Admin permanently deleted Master Subject '{s_name}' (ID {subject_id})")
+        flash(f"Master Subject '{s_name}' permanently deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to delete Master Subject: {e}", "danger")
+
+    return redirect(url_for("admin.curriculum_subjects"))
+
 
 

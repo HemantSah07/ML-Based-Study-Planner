@@ -39,8 +39,37 @@
                     
                     <!-- STEP 1: ACCOUNT DETAILS -->
                     <div class="form-step active" id="step-panel-1">
-                        <h5 class="fw-bold text-white mb-4"><i class="fas fa-user text-primary me-2"></i> Step 1: Account Info</h5>
+                        <h5 class="fw-bold text-white mb-3"><i class="fas fa-user text-primary me-2"></i> Step 1: Account Info</h5>
                         
+                        <!-- Account Role Selector -->
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold text-white">Account Type *</label>
+                            <div class="btn-group w-100" role="group" id="roleBtnGroup">
+                                <input type="radio" class="btn-check" name="role" id="roleStudent" value="student" checked>
+                                <label class="btn btn-outline-primary py-2 fw-semibold" for="roleStudent">
+                                    <i class="fas fa-user-graduate me-2"></i>Student Account
+                                </label>
+                                
+                                <input type="radio" class="btn-check" name="role" id="roleAdmin" value="admin">
+                                <label class="btn btn-outline-warning py-2 fw-semibold" for="roleAdmin">
+                                    <i class="fas fa-user-shield me-2"></i>Admin Request
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Admin Request Info Box -->
+                        <div id="adminNoticeBox" class="alert alert-warning border-warning bg-opacity-10 text-white d-none mb-4">
+                            <h6 class="fw-bold text-warning mb-2"><i class="fas fa-shield-alt me-2"></i>Admin Registration Approval Notice</h6>
+                            <p class="small mb-2">
+                                Selecting Admin does <strong>NOT</strong> create an active Admin account immediately.
+                            </p>
+                            <ul class="small mb-2 ps-3">
+                                <li>Destination Approval Email: <strong class="text-warning">hemantsah123456789@gmail.com</strong> (Primary Super Admin)</li>
+                                <li>Your personal email will be submitted to the Super Admin for review.</li>
+                                <li>Upon Super Admin approval, a single-use 24-hour verification code will be sent to your personal email address.</li>
+                            </ul>
+                        </div>
+
                         <div class="mb-3">
                             <label class="form-label">Full Name *</label>
                             <input type="text" id="full_name" name="full_name" class="form-control bg-dark border-secondary text-white" placeholder="John Doe" required>
@@ -71,8 +100,12 @@
 
                         <div class="d-flex justify-content-end mt-4">
                             <button type="button" class="btn btn-primary px-4 py-2" id="nextBtn1" disabled>Next <i class="fas fa-arrow-right ms-1"></i></button>
+                            <button type="submit" class="btn btn-warning px-4 py-2 fw-bold text-dark d-none" id="submitAdminBtn">
+                                <i class="fas fa-paper-plane me-1"></i> Submit Admin Request
+                            </button>
                         </div>
                     </div>
+
 
                     <!-- STEP 2: EDUCATIONAL SETTING -->
                     <div class="form-step" id="step-panel-2">
@@ -744,6 +777,32 @@ document.addEventListener('DOMContentLoaded', function() {
         return allValid;
     }
 
+    // Role toggle handling (Student vs. Admin Request)
+    const roleStudentBtn = document.getElementById('roleStudent');
+    const roleAdminBtn = document.getElementById('roleAdmin');
+    const adminNoticeBox = document.getElementById('adminNoticeBox');
+    const submitAdminBtn = document.getElementById('submitAdminBtn');
+    const stepIndicators = document.querySelector('.step-indicator');
+
+    function updateRoleUI() {
+        if (roleAdminBtn && roleAdminBtn.checked) {
+            adminNoticeBox.classList.remove('d-none');
+            submitAdminBtn.classList.remove('d-none');
+            nextBtn1.classList.add('d-none');
+            if (stepIndicators) stepIndicators.style.display = 'none';
+        } else {
+            adminNoticeBox.classList.add('d-none');
+            submitAdminBtn.classList.add('d-none');
+            nextBtn1.classList.remove('d-none');
+            if (stepIndicators) stepIndicators.style.display = 'flex';
+        }
+    }
+
+    if (roleStudentBtn && roleAdminBtn) {
+        roleStudentBtn.addEventListener('change', updateRoleUI);
+        roleAdminBtn.addEventListener('change', updateRoleUI);
+    }
+
     password.addEventListener('input', validateStep3);
     confirmPassword.addEventListener('input', validateStep3);
 
@@ -754,7 +813,12 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     form.addEventListener('submit', function(e) {
-        // Final sanity checks on submit
+        // If submitting an Admin Request, skip steps 2 & 3 checks
+        if (roleAdminBtn && roleAdminBtn.checked) {
+            return true;
+        }
+
+        // Final sanity checks on submit for Student registration
         if (!validateStep1() || !validateStep2() || !validateStep3()) {
             e.preventDefault();
             alert("Please fill all required registration details accurately.");
@@ -767,4 +831,5 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
+
 {% endblock %}

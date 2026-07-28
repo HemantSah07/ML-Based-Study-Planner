@@ -90,11 +90,22 @@
             <i class="fas fa-shield-halved"></i>
             <span>Audit & Logs</span>
         </a>
+        {% if current_user.is_super_admin %}
         <a class="sidebar-nav-link {% if 'config' in request.path %}active{% endif %}" href="{{ url_for('admin.config') }}">
             <i class="fas fa-sliders"></i>
             <span>System Config</span>
         </a>
+        {% endif %}
+
+        {% if current_user.is_super_admin %}
+        <div class="sidebar-nav-section">Administration</div>
+        <a class="sidebar-nav-link {% if 'manage-admins' in request.path or 'requests' in request.path %}active{% endif %}" href="{{ url_for('admin.manage_admins') }}">
+            <i class="fas fa-user-shield"></i>
+            <span>Admin Management</span>
+        </a>
+        {% endif %}
     </nav>
+
 
     <div class="admin-sidebar-footer">
         <div class="sidebar-user-card">

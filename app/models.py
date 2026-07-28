@@ -22,6 +22,8 @@ def load_user(user_id):
     print(f"[DEBUG load_user] returned user {u.id if u else None} (role={u.role if u else None})")
     return u
 
+SUPER_ADMIN_EMAIL = "hemantsah123456789@gmail.com"
+
 class User(db.Model, UserMixin):
     __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
@@ -29,7 +31,7 @@ class User(db.Model, UserMixin):
     full_name = db.Column(db.String(100))
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
-    role = db.Column(db.String(20), nullable=False, default="student") # student or admin
+    role = db.Column(db.String(20), nullable=False, default="student") # student, admin, super_admin
     is_active = db.Column(db.Boolean, default=True)
     date_registered = db.Column(db.DateTime, default=datetime.utcnow)
     email_verified_status = db.Column(db.String(32), default='unknown')
@@ -38,9 +40,22 @@ class User(db.Model, UserMixin):
     is_seed_account = db.Column(db.Boolean, default=False, nullable=False)
 
     @property
+    def is_protected_super_admin(self):
+        return bool(self.email and self.email.strip().lower() == SUPER_ADMIN_EMAIL.lower())
+
+    @property
+    def is_super_admin(self):
+        return self.is_protected_super_admin or self.role == 'super_admin'
+
+    @property
+    def is_admin(self):
+        return self.is_super_admin or self.role in ['admin', 'super_admin']
+
+    @property
     def profile(self):
         from app.models import StudentProfile
         return StudentProfile.query.filter_by(user_id=self.id).first()
+
 
 class StudentProfile(db.Model):
     __tablename__ = "student_profiles"
@@ -424,6 +439,28 @@ class AdminActivityLog(db.Model):
     timestamp    = db.Column(db.DateTime, default=datetime.utcnow)
 
     admin_user   = db.relationship('User', foreign_keys=[admin_user_id])
+
+
+class AdminRegistrationRequest(db.Model):
+    """
+    Stores pending and processed Admin Registration Requests requiring Super Admin approval.
+    """
+    __tablename__ = "admin_registration_requests"
+    id                 = db.Column(db.Integer, primary_key=True)
+    full_name          = db.Column(db.String(100), nullable=False)
+    email              = db.Column(db.String(120), nullable=False)
+    password_hash      = db.Column(db.String(128), nullable=False)
+    requested_role     = db.Column(db.String(20), nullable=False, default="admin")
+    status             = db.Column(db.String(20), nullable=False, default="PENDING")  # PENDING, APPROVED, REJECTED
+    verification_code  = db.Column(db.String(10), nullable=True)
+    code_expires_at    = db.Column(db.DateTime, nullable=True)
+    code_used          = db.Column(db.Boolean, default=False)
+    created_at         = db.Column(db.DateTime, default=datetime.utcnow)
+    actioned_at        = db.Column(db.DateTime, nullable=True)
+    actioned_by_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    actioned_by        = db.relationship('User', foreign_keys=[actioned_by_id])
+
 
 class StudyPlan(db.Model):
     __tablename__ = "study_plans"

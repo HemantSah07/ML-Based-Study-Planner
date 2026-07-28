@@ -63,6 +63,19 @@ def create_app(config_class=None):
         except Exception:
             db.session.rollback()
 
+        # Guarantee Primary Super Admin account role integrity
+        try:
+            from app.models import User, SUPER_ADMIN_EMAIL
+            super_admin_user = User.query.filter(db.func.lower(User.email) == SUPER_ADMIN_EMAIL.lower()).first()
+            if super_admin_user and super_admin_user.role != 'super_admin':
+                super_admin_user.role = 'super_admin'
+                super_admin_user.is_active = True
+                db.session.commit()
+                print(f"[DB Setup] Primary Super Admin account ({SUPER_ADMIN_EMAIL}) role synced to 'super_admin'.")
+        except Exception as err:
+            db.session.rollback()
+            print(f"[DB Setup] Super admin sync warning: {err}")
+
     @app.before_request
     def check_live_config():
         from app.live_config import load_live_config
@@ -75,6 +88,11 @@ def create_app(config_class=None):
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         return response
 
+    @app.errorhandler(403)
+    def forbidden_error(e):
+        from flask import render_template
+        return render_template("errors/403.html"), 403
+
     from app.routes.auth    import auth_bp
     from app.routes.student import student_bp
     from app.routes.admin   import admin_bp
@@ -85,4 +103,4 @@ def create_app(config_class=None):
     app.register_blueprint(student_bp, url_prefix="/student")
     app.register_blueprint(admin_bp,   url_prefix="/admin")
 
-    return app
+    return app
