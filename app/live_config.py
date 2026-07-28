@@ -11,23 +11,50 @@ def load_live_config(app, force=False):
         from app.models import AppSetting
         try:
             settings = AppSetting.query.all()
-            for s in settings:
-                val = s.value
-                # Parse to appropriate types
-                if s.key == "GEMINI_BILLING_ENABLED":
-                    val = val.lower() in ("true", "1", "yes")
-                elif s.key in (
-                    "GEMINI_DAILY_LIMIT_MCQ", 
-                    "GEMINI_RPM_LIMIT_MCQ", 
-                    "GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", 
-                    "GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK", 
-                    "GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY"
+            settings_dict = {s.key: s.value for s in settings}
+            
+            # First, update string keys directly (only if non-empty, preserving .env defaults)
+            for key, val in settings_dict.items():
+                if key in (
+                    "GEMINI_API_KEY", "GEMINI_API_KEY_FREE", "GEMINI_API_KEY_PAID",
+                    "GEMINI_MODEL_MCQ", "GEMINI_MODEL_ASSISTANT_PRIMARY", "GEMINI_MODEL_ASSISTANT_FALLBACK",
+                    "GEMINI_MODE", "GEMINI_PAID_PROVIDER_RPM", "GEMINI_PAID_PROVIDER_RPD"
+                ):
+                    if val and val.strip():
+                        app.config[key] = val.strip().strip('"\'')
+            
+            # Parse booleans
+            for key, val in settings_dict.items():
+                if key in ("GEMINI_BILLING_ENABLED", "GEMINI_ALLOW_CROSS_KEY_FALLBACK"):
+                    app.config[key] = val.lower() in ("true", "1", "yes")
+
+            # Parse integers
+            for key, val in settings_dict.items():
+                if key in (
+                    "GEMINI_DAILY_LIMIT_MCQ", "GEMINI_RPM_LIMIT_MCQ",
+                    "GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", "GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK",
+                    "GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY", "GEMINI_RPM_LIMIT_ASSISTANT_FALLBACK",
+                    "GEMINI_DAILY_LIMIT_MCQ_PAID", "GEMINI_RPM_LIMIT_MCQ_PAID",
+                    "GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY_PAID", "GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY_PAID",
+                    "GEMINI_GLOBAL_DAILY_LIMIT_FREE", "GEMINI_GLOBAL_DAILY_LIMIT_PAID",
+                    "GEMINI_GLOBAL_RPM_LIMIT_FREE", "GEMINI_GLOBAL_RPM_LIMIT_PAID"
                 ):
                     try:
-                        val = int(val)
+                        app.config[key] = int(val)
                     except (ValueError, TypeError):
-                        val = 0
-                app.config[s.key] = val
+                        app.config[key] = 0
+
+            # Derive canonical GEMINI_MODE and GEMINI_BILLING_ENABLED precedence
+            db_mode = settings_dict.get("GEMINI_MODE")
+            if db_mode:
+                app.config["GEMINI_MODE"] = db_mode.lower()
+            else:
+                db_billing = settings_dict.get("GEMINI_BILLING_ENABLED")
+                if db_billing is not None:
+                    billing_bool = db_billing.lower() in ("true", "1", "yes")
+                    app.config["GEMINI_MODE"] = "paid" if billing_bool else "free"
+            
+            app.config["GEMINI_BILLING_ENABLED"] = (app.config.get("GEMINI_MODE") == "paid")
             _config_last_loaded = now
         except Exception as e:
             # Table might not exist yet during migrations/initialization

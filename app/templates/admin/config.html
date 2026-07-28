@@ -125,10 +125,10 @@
     <!-- TAB 2: AI & GEMINI PROVIDER -->
     <div class="tab-pane fade" id="gemini" role="tabpanel">
         <div class="row g-4">
-            <div class="col-lg-7">
+            <div class="col-lg-8">
                 <div class="admin-card h-100 mb-0">
                     <div class="admin-card-header">
-                        <h2 class="admin-card-title"><i class="fas fa-robot text-warning"></i> Google Gemini API Integration Settings</h2>
+                        <h2 class="admin-card-title"><i class="fas fa-robot text-warning"></i> Google Gemini AI Configuration & Safety Budgets</h2>
                         {% if gemini_config.configured %}
                         <span class="badge-status active"><i class="fas fa-check"></i> CONFIGURED</span>
                         {% else %}
@@ -137,40 +137,90 @@
                     </div>
 
                     <form action="{{ url_for('admin.config') }}" method="POST">
-                        <div class="mb-3">
-                            <label class="form-label text-muted small fw-semibold">Gemini API Key (Masked)</label>
-                            <div class="input-group">
-                                <input type="password" name="GEMINI_API_KEY" class="form-control admin-input font-mono" value="{{ settings.get('GEMINI_API_KEY', '') }}" placeholder="Enter new Gemini API key to update">
-                                <span class="input-group-text bg-secondary-subtle border-secondary text-muted small font-mono">{{ gemini_config.masked_key }}</span>
+                        <!-- Mode Selector -->
+                        <div class="mb-4 p-3 rounded" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);">
+                            <label class="form-label text-white fw-bold small mb-2"><i class="fas fa-toggle-on text-primary me-1"></i> Active AI Operating Mode</label>
+                            <div class="d-flex gap-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="GEMINI_MODE" id="modeFree" value="free" {% if gemini_config.gemini_mode == 'free' %}checked{% endif %}>
+                                    <label class="form-check-label text-white small" for="modeFree">
+                                        <strong>Free Tier Mode</strong> (Uses Free Key & Free Safety Budgets)
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="GEMINI_MODE" id="modePaid" value="paid" {% if gemini_config.gemini_mode == 'paid' %}checked{% endif %}>
+                                    <label class="form-check-label text-white small" for="modePaid">
+                                        <strong>Paid Tier Mode</strong> (Uses Paid Key & Paid Safety Budgets)
+                                    </label>
+                                </div>
                             </div>
-                            <div class="form-text text-dim">Key is encrypted in application state and masked in all UI views.</div>
                         </div>
 
+                        <!-- API Keys Section -->
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-semibold">Free Tier Gemini API Key (<code>GEMINI_API_KEY_FREE</code>)</label>
+                            <div class="input-group">
+                                <input type="password" name="GEMINI_API_KEY_FREE" class="form-control admin-input font-mono" value="{{ settings.get('GEMINI_API_KEY_FREE', '') }}" placeholder="Enter Free API Key">
+                                <span class="input-group-text bg-secondary-subtle border-secondary text-muted small font-mono">{{ gemini_config.masked_key_free }}</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-semibold">Paid Tier Gemini API Key (<code>GEMINI_API_KEY_PAID</code>)</label>
+                            <div class="input-group">
+                                <input type="password" name="GEMINI_API_KEY_PAID" class="form-control admin-input font-mono" value="{{ settings.get('GEMINI_API_KEY_PAID', '') }}" placeholder="Enter Paid API Key">
+                                <span class="input-group-text bg-secondary-subtle border-secondary text-muted small font-mono">{{ gemini_config.masked_key_paid }}</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-semibold">Legacy Fallback API Key (<code>GEMINI_API_KEY</code>)</label>
+                            <div class="input-group">
+                                <input type="password" name="GEMINI_API_KEY" class="form-control admin-input font-mono" value="{{ settings.get('GEMINI_API_KEY', '') }}" placeholder="Enter Legacy Fallback Key">
+                                <span class="input-group-text bg-secondary-subtle border-secondary text-muted small font-mono">{{ gemini_config.masked_key }}</span>
+                            </div>
+                            <div class="form-text text-dim">Keys are encrypted in memory and masked in all UI views. Never exposed in responses.</div>
+                        </div>
+
+                        <hr class="border-secondary my-4">
+
+                        <!-- Models Section -->
                         <div class="row g-3 mb-3">
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <label class="form-label text-muted small fw-semibold">MCQ Generator Model</label>
                                 <input type="text" name="GEMINI_MODEL_MCQ" class="form-control admin-input font-mono" value="{{ gemini_config.mcq_model }}">
                             </div>
-                            <div class="col-md-6">
-                                <label class="form-label text-muted small fw-semibold">AI Assistant Primary Model</label>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small fw-semibold">Assistant Primary Model</label>
                                 <input type="text" name="GEMINI_MODEL_ASSISTANT_PRIMARY" class="form-control admin-input font-mono" value="{{ gemini_config.assistant_model }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small fw-semibold">Assistant Fallback Model</label>
+                                <input type="text" name="GEMINI_MODEL_ASSISTANT_FALLBACK" class="form-control admin-input font-mono" value="{{ gemini_config.fallback_model }}">
+                            </div>
+                        </div>
+
+                        <!-- Safety Budgets Section -->
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-semibold">MCQ Daily Budget (Free)</label>
+                                <input type="number" name="GEMINI_DAILY_LIMIT_MCQ" class="form-control admin-input font-mono" value="{{ gemini_config.mcq_daily_limit }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-semibold">MCQ Daily Budget (Paid)</label>
+                                <input type="number" name="GEMINI_DAILY_LIMIT_MCQ_PAID" class="form-control admin-input font-mono" value="{{ gemini_config.mcq_daily_limit_paid }}">
                             </div>
                         </div>
 
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label text-muted small fw-semibold">MCQ Daily Quota Limit</label>
-                                <input type="number" name="GEMINI_DAILY_LIMIT_MCQ" class="form-control admin-input font-mono" value="{{ gemini_config.mcq_daily_limit }}">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label text-muted small fw-semibold">Assistant Daily Quota Limit</label>
+                                <label class="form-label text-muted small fw-semibold">Assistant Primary Daily Budget (Free)</label>
                                 <input type="number" name="GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY" class="form-control admin-input font-mono" value="{{ gemini_config.assistant_daily_limit }}">
                             </div>
-                        </div>
-
-                        <div class="form-check form-switch mb-4">
-                            <input class="form-check-input" type="checkbox" name="GEMINI_BILLING_ENABLED" id="billingCheck" {% if gemini_config.billing_enabled %}checked{% endif %}>
-                            <label class="form-check-label text-white small fw-semibold" for="billingCheck">Enable Gemini Paid Billing Tier Features</label>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-semibold">Assistant Daily Budget (Paid)</label>
+                                <input type="number" name="GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY_PAID" class="form-control admin-input font-mono" value="{{ gemini_config.assistant_daily_limit_paid }}">
+                            </div>
                         </div>
 
                         <div class="text-end">
@@ -182,15 +232,15 @@
                 </div>
             </div>
 
-            <div class="col-lg-5">
+            <div class="col-lg-4">
                 <div class="admin-card h-100 mb-0">
                     <div class="admin-card-header">
-                        <h2 class="admin-card-title"><i class="fas fa-plug text-primary"></i> AI Connection Testing &amp; Notice</h2>
+                        <h2 class="admin-card-title"><i class="fas fa-plug text-primary"></i> AI Diagnostics</h2>
                     </div>
 
                     <div class="p-3 rounded mb-3" style="background: rgba(245, 158, 11, 0.08); border: 1px solid var(--admin-warning);">
                         <div class="fw-bold text-white small mb-1"><i class="fas fa-triangle-exclamation text-warning me-1"></i> Gemini API Test Tool</div>
-                        <div class="text-dim small">Tests live connectivity to Google Gemini servers without logging sensitive credentials.</div>
+                        <div class="text-dim small">Tests live connectivity to Google Gemini servers using the active mode key.</div>
                     </div>
 
                     <form action="{{ url_for('admin.config_test_gemini') }}" method="POST" class="mb-4">
@@ -200,8 +250,8 @@
                     </form>
 
                     <div class="p-3 rounded" style="background: rgba(59, 130, 246, 0.08); border: 1px solid var(--admin-info);">
-                        <div class="fw-bold text-white small mb-1"><i class="fas fa-info-circle text-info me-1"></i> Quota Persistence Note</div>
-                        <div class="text-dim small">Google Gemini API quota consumption is not currently persisted by the application. Telemetry metrics will render automatically when logging tables are provisioned.</div>
+                        <div class="fw-bold text-white small mb-1"><i class="fas fa-shield-alt text-info me-1"></i> Safety Isolation Note</div>
+                        <div class="text-dim small">Free and Paid quota counters are completely isolated in the database telemetry table. Switching modes immediately changes active safety budgets without mixing usage data.</div>
                     </div>
                 </div>
             </div>

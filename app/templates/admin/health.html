@@ -238,14 +238,14 @@
     </div>
 </div>
 
-<!-- Gemini API & Telemetry Unavailability Section -->
+<!-- Gemini API & AI Service Telemetry Dashboard -->
 <div class="row g-3 mb-4">
     <!-- Gemini API Config Card -->
-    <div class="col-lg-6">
+    <div class="col-lg-5">
         <div class="admin-card h-100 mb-0">
             <div class="admin-card-header">
-                <h2 class="admin-card-title"><i class="fas fa-robot text-primary"></i> Gemini API Provider Health</h2>
-                {% if gemini_configured %}
+                <h2 class="admin-card-title"><i class="fas fa-robot text-primary"></i> Gemini AI Service Overview</h2>
+                {% if gemini_health.api_config == 'Configured' %}
                 <span class="badge-status active"><i class="fas fa-check"></i> CONFIGURED</span>
                 {% else %}
                 <span class="badge-status error"><i class="fas fa-ban"></i> UNCONFIGURED</span>
@@ -254,18 +254,30 @@
 
             <div class="d-flex flex-column gap-2.5">
                 <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
-                    <span class="text-muted fw-semibold">API Key Configuration</span>
+                    <span class="text-muted fw-semibold">Operating Tier Mode</span>
+                    <span class="badge bg-primary text-white font-mono px-2 py-1">{{ gemini_health.mode }}</span>
+                </div>
+
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold">Active Key Configuration</span>
                     <code class="text-white font-mono">{{ masked_key }}</code>
                 </div>
 
                 <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
-                    <span class="text-muted fw-semibold">Configured Model Version</span>
-                    <span class="fw-bold text-white font-mono">{{ gemini_model_version }}</span>
+                    <span class="text-muted fw-semibold">Service Availability</span>
+                    <span class="fw-bold {% if 'Limited' in gemini_health.status %}text-warning{% else %}text-success{% endif %} font-mono">
+                        <i class="fas fa-circle me-1" style="font-size: 0.6rem;"></i> {{ gemini_health.status }}
+                    </span>
+                </div>
+
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold">Assistant Fallback Router</span>
+                    <span class="text-info font-mono">{{ gemini_health.fallback_status }}</span>
                 </div>
 
                 {% set g_check = checks.gemini %}
                 <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
-                    <span class="text-muted fw-semibold">Live Connection Health Check</span>
+                    <span class="text-muted fw-semibold">Live Ping Verification</span>
                     {% if g_check.status == 'ok' %}
                     <span class="badge-status active"><i class="fas fa-bolt"></i> OK ({{ g_check.latency_ms }} ms)</span>
                     {% elif g_check.status == 'unconfigured' %}
@@ -274,25 +286,98 @@
                     <span class="badge-status error"><i class="fas fa-exclamation-triangle"></i> Connection Error</span>
                     {% endif %}
                 </div>
+
+                <div class="p-2.5 rounded d-flex align-items-center justify-content-between" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.85rem;">
+                    <span class="text-muted fw-semibold">Last AI Exception</span>
+                    <span class="text-dim font-mono text-truncate ms-2" title="{{ gemini_health.last_error_type }} @ {{ gemini_health.last_error_time }}">
+                        {% if gemini_health.last_error_type != 'None' %}
+                            <span class="text-danger"><i class="fas fa-bug me-1"></i>{{ gemini_health.last_error_type }}</span> ({{ gemini_health.last_error_time }})
+                        {% else %}
+                            <span class="text-success"><i class="fas fa-check-circle me-1"></i>None recorded</span>
+                        {% endif %}
+                    </span>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Telemetry Unavailability Information Card -->
-    <div class="col-lg-6">
+    <!-- Live Telemetry & Quota Budget Matrix Card -->
+    <div class="col-lg-7">
         <div class="admin-card h-100 mb-0">
             <div class="admin-card-header">
-                <h2 class="admin-card-title"><i class="fas fa-circle-info text-info"></i> API Quota &amp; Request Telemetry Status</h2>
+                <h2 class="admin-card-title"><i class="fas fa-chart-line text-info"></i> Application Safety Budgets & Usage Telemetry</h2>
             </div>
 
-            <div class="p-3 rounded mb-3" style="background: rgba(59, 130, 246, 0.1); border: 1px solid var(--admin-info); font-size: 0.85rem; line-height: 1.5;">
-                <div class="fw-bold text-white mb-1"><i class="fas fa-info-circle text-info me-1"></i> Quota Telemetry Unavailable</div>
-                <div class="text-dim">Google Gemini API quota usage is not currently tracked by the application database or logging system. Real-time API consumption rate metrics will be displayed if a quota logging table is added in a future phase.</div>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-sm align-middle mb-0" style="font-size: 0.82rem;">
+                    <thead>
+                        <tr class="text-muted border-secondary">
+                            <th>Scope / Feature</th>
+                            <th>Model Target</th>
+                            <th>Provider Ref Quota</th>
+                            <th>Safety Budget</th>
+                            <th>Today's Usage</th>
+                            <th>Remaining</th>
+                            <th>RPM Protection</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Global Scope -->
+                        <tr>
+                            <td class="fw-bold text-white"><i class="fas fa-globe text-primary me-1"></i> Global Pool</td>
+                            <td class="text-muted font-mono">System-wide</td>
+                            <td class="text-dim font-mono">
+                                {% if gemini_health.mode == 'FREE' %}500 RPD / 15 RPM{% else %}Unrestricted{% endif %}
+                            </td>
+                            <td class="fw-semibold text-warning font-mono">{{ gemini_health.global_daily_limit }} /day</td>
+                            <td class="fw-bold text-info font-mono">{{ gemini_health.global_usage }}</td>
+                            <td class="fw-bold font-mono {% if (gemini_health.global_daily_limit - gemini_health.global_usage) <= 0 %}text-danger{% else %}text-success{% endif %}">
+                                {{ [0, gemini_health.global_daily_limit - gemini_health.global_usage]|max }}
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary font-mono">{{ gemini_health.global_rpm_usage }}/{{ gemini_health.global_rpm_limit }} RPM</span>
+                            </td>
+                        </tr>
+
+                        <!-- MCQ Feature -->
+                        <tr>
+                            <td class="fw-semibold text-white"><i class="fas fa-file-signature text-warning me-1"></i> MCQ Generation</td>
+                            <td class="text-info font-mono">{{ gemini_health.mcq_model }}</td>
+                            <td class="text-dim font-mono">
+                                {{ gemini_health.mcq_provider_quota.rpd }} RPD / {{ gemini_health.mcq_provider_quota.rpm }} RPM
+                            </td>
+                            <td class="fw-semibold text-warning font-mono">{{ gemini_health.mcq_daily_limit }} /day</td>
+                            <td class="fw-bold text-info font-mono">{{ gemini_health.mcq_usage }}</td>
+                            <td class="fw-bold font-mono {% if (gemini_health.mcq_daily_limit - gemini_health.mcq_usage) <= 0 %}text-danger{% else %}text-success{% endif %}">
+                                {{ [0, gemini_health.mcq_daily_limit - gemini_health.mcq_usage]|max }}
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary font-mono">{{ gemini_health.mcq_rpm_usage }}/{{ gemini_health.mcq_rpm_limit }} RPM</span>
+                            </td>
+                        </tr>
+
+                        <!-- Assistant Primary Feature -->
+                        <tr>
+                            <td class="fw-semibold text-white"><i class="fas fa-comments text-success me-1"></i> AI Tutor (Primary)</td>
+                            <td class="text-success font-mono">{{ gemini_health.assistant_model }}</td>
+                            <td class="text-dim font-mono">
+                                {{ gemini_health.assistant_provider_quota.rpd }} RPD / {{ gemini_health.assistant_provider_quota.rpm }} RPM
+                            </td>
+                            <td class="fw-semibold text-warning font-mono">{{ gemini_health.assistant_daily_limit }} /day</td>
+                            <td class="fw-bold text-info font-mono">{{ gemini_health.assistant_usage }}</td>
+                            <td class="fw-bold font-mono {% if (gemini_health.assistant_daily_limit - gemini_health.assistant_usage) <= 0 %}text-danger{% else %}text-success{% endif %}">
+                                {{ [0, gemini_health.assistant_daily_limit - gemini_health.assistant_usage]|max }}
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary font-mono">{{ gemini_health.assistant_rpm_usage }}/{{ gemini_health.assistant_rpm_limit }} RPM</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
 
-            <div class="p-3 rounded" style="background: rgba(245, 158, 11, 0.1); border: 1px solid var(--admin-warning); font-size: 0.85rem; line-height: 1.5;">
-                <div class="fw-bold text-white mb-1"><i class="fas fa-shield-halved text-warning me-1"></i> AI Tutor Request Telemetry</div>
-                <div class="text-dim">Request latency and per-prompt token usage logs are not currently persisted by the chat handler. All AI Tutor interactions operate live over official API endpoints.</div>
+            <div class="mt-3 p-2.5 rounded" style="background: rgba(255,255,255,0.02); border: 1px solid var(--admin-border); font-size: 0.78rem;">
+                <div class="text-dim"><i class="fas fa-shield-alt text-primary me-1"></i> <strong>Application Safety System:</strong> Enforced safety budgets avoid unexpected costs or key lockouts. They function independently from raw Google provider quotas.</div>
             </div>
         </div>
     </div>

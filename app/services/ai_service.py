@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from datetime import date, datetime
@@ -11,6 +12,32 @@ from app import db
 from app.models import AICache, DailyAPIUsage, Subject, LearningMaterial, Topic, Chapter, Flashcard
 
 logger = logging.getLogger(__name__)
+
+class AIServiceError(Exception):
+    """Base exception for all AI Service errors."""
+    pass
+
+class QuotaExceededError(AIServiceError):
+    """Raised when a daily quota (global or feature) is exceeded."""
+    def __init__(self, feature: str = "feature"):
+        self.feature = feature
+        super().__init__("AI usage limit has been reached temporarily. Please try again later.")
+
+class RateLimitError(AIServiceError):
+    """Raised when an RPM or temporary rate limit is exceeded."""
+    def __init__(self, detail: str = ""):
+        message = "AI service is temporarily busy. Please try again in a moment."
+        if detail:
+            message += f" ({detail})"
+        super().__init__(message)
+
+class ConfigurationError(AIServiceError):
+    """Raised when the API key is missing, invalid, or billing/configuration is broken."""
+    def __init__(self, detail: str = ""):
+        message = "AI service configuration requires attention."
+        if detail:
+            message += f" ({detail})"
+        super().__init__(message)
 
 class SlidingWindowLimiter:
     def __init__(self):
@@ -34,42 +61,159 @@ class SlidingWindowLimiter:
             return len(self._calls)
 
 
-# Rate limiters for each model / feature
-mcq_limiter = SlidingWindowLimiter()
-assistant_primary_limiter = SlidingWindowLimiter()
-
-
 # ── Feature identifiers ────────────────────────────────────────────────────────
 FEATURE_MCQ       = "mcq"        # Assessment MCQ generation
 FEATURE_ASSISTANT = "assistant"  # AI tutoring chat
 
 
-class QuotaExceededError(Exception):
-    """Raised when a feature's daily API call limit is reached."""
-    def __init__(self, feature: str):
-        self.feature = feature
-        super().__init__(f"Daily quota exceeded for feature '{feature}'")
+# ── Metadata reference for free-tier provider limits ──────────────────────────
+PROVIDER_QUOTA_METADATA = {
+    "free": {
+        "gemini-3.1-flash-lite": {"rpm": 15, "rpd": 500},
+        "gemini-2.5-flash": {"rpm": 5, "rpd": 20},
+        "gemini-2.5-flash-lite": {"rpm": 10, "rpd": 20},
+        "gemini-3-flash": {"rpm": 5, "rpd": 20},
+        "gemini-3.5-flash": {"rpm": 5, "rpd": 20},
+        "gemini-3.5-flash-lite": {"rpm": 15, "rpd": 500},
+        "gemini-3.6-flash": {"rpm": 5, "rpd": 20},
+    }
+}
+
+
+class CentralQuotaManager:
+    def __init__(self):
+        self._global_limiter = SlidingWindowLimiter()
+        self._feature_limiters = {
+            FEATURE_MCQ: SlidingWindowLimiter(),
+            FEATURE_ASSISTANT: SlidingWindowLimiter()
+        }
+
+    def check_rpm_and_quota(self, feature: str, model_name: str):
+        """
+        Check global and per-feature rate limits (RPM) and daily quotas.
+        Raises QuotaExceededError or RateLimitError on violation.
+        """
+        mode = current_app.config.get("GEMINI_MODE", "free").lower()
+        billing_on = (mode == "paid")
+
+        # 1. Global Daily Quota Check (Daily Safety Budget)
+        if billing_on:
+            global_daily_limit = current_app.config.get("GEMINI_GLOBAL_DAILY_LIMIT_PAID", 5000)
+        else:
+            global_daily_limit = current_app.config.get("GEMINI_GLOBAL_DAILY_LIMIT_FREE", 450)
+
+        today_global_usage = self.get_today_global_usage()
+        if today_global_usage >= global_daily_limit:
+            logger.warning(
+                "Global daily safety budget exhausted: %d/%d calls used today (mode: %s).",
+                today_global_usage, global_daily_limit, mode
+            )
+            raise QuotaExceededError("global")
+
+        # 2. Feature Daily Quota Check
+        feature_limit = self.get_feature_daily_limit(feature, model_name, billing_on)
+        feature_usage = self.get_today_feature_usage(feature, model_name)
+        if feature_usage >= feature_limit:
+            logger.warning(
+                "Daily safety budget reached for feature='%s' model='%s': %d/%d calls used today (mode: %s).",
+                feature, model_name, feature_usage, feature_limit, mode
+            )
+            raise QuotaExceededError(feature)
+
+        # 3. Global RPM Check
+        if billing_on:
+            global_rpm_limit = current_app.config.get("GEMINI_GLOBAL_RPM_LIMIT_PAID", 60)
+        else:
+            global_rpm_limit = current_app.config.get("GEMINI_GLOBAL_RPM_LIMIT_FREE", 12)
+
+        current_global_rpm = self._global_limiter.get_count()
+        if current_global_rpm >= global_rpm_limit:
+            logger.warning(
+                "Global RPM limit reached: %d/%d calls in last 60 seconds (mode: %s).",
+                current_global_rpm, global_rpm_limit, mode
+            )
+            raise RateLimitError("global limit hit")
+
+        # 4. Feature RPM Check
+        feature_rpm_limit = self.get_feature_rpm_limit(feature, billing_on)
+        current_feature_rpm = self._feature_limiters.get(feature).get_count()
+        if current_feature_rpm >= feature_rpm_limit:
+            logger.warning(
+                "RPM limit reached for feature '%s': %d/%d calls in last 60 seconds (mode: %s).",
+                feature, current_feature_rpm, feature_rpm_limit, mode
+            )
+            raise RateLimitError(f"{feature} limit hit")
+
+    def record_call(self, feature: str):
+        """Record a successful API call in the sliding window limiters."""
+        self._global_limiter.record_call()
+        if feature in self._feature_limiters:
+            self._feature_limiters[feature].record_call()
+
+    def get_today_global_usage(self) -> int:
+        today = date.today()
+        mode = current_app.config.get("GEMINI_MODE", "free").lower()
+        suffix = f"% [{mode}]"
+        try:
+            return db.session.query(db.func.sum(DailyAPIUsage.call_count)).filter(
+                DailyAPIUsage.feature != 'email_verification',
+                DailyAPIUsage.model_name.like(suffix),
+                DailyAPIUsage.usage_date == today
+            ).scalar() or 0
+        except Exception as e:
+            logger.error("Error reading global daily usage: %s", e)
+            return 0
+
+    def get_today_feature_usage(self, feature: str, model_name: str) -> int:
+        today = date.today()
+        mode = current_app.config.get("GEMINI_MODE", "free").lower()
+        db_model_name = f"{model_name} [{mode}]"
+        try:
+            row = DailyAPIUsage.query.filter_by(feature=feature, model_name=db_model_name, usage_date=today).first()
+            return row.call_count if row else 0
+        except Exception as e:
+            logger.error("Error reading daily usage for '%s' (%s): %s", feature, db_model_name, e)
+            return 0
+
+    def get_feature_daily_limit(self, feature: str, model_name: str, billing_on: bool) -> int:
+        if billing_on:
+            if feature == FEATURE_MCQ:
+                return current_app.config.get("GEMINI_DAILY_LIMIT_MCQ_PAID", 2000)
+            if feature == FEATURE_ASSISTANT:
+                return current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY_PAID", 1000)
+        else:
+            if feature == FEATURE_MCQ:
+                return current_app.config.get("GEMINI_DAILY_LIMIT_MCQ", 450)
+            if feature == FEATURE_ASSISTANT:
+                primary_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
+                fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.1-flash-lite")
+                if model_name == primary_model:
+                    return current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", 18)
+                elif model_name == fallback_model:
+                    return current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK", 450)
+        return 999
+
+    def get_feature_rpm_limit(self, feature: str, billing_on: bool) -> int:
+        if billing_on:
+            if feature == FEATURE_MCQ:
+                return current_app.config.get("GEMINI_RPM_LIMIT_MCQ_PAID", 60)
+            if feature == FEATURE_ASSISTANT:
+                return current_app.config.get("GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY_PAID", 30)
+        else:
+            if feature == FEATURE_MCQ:
+                return current_app.config.get("GEMINI_RPM_LIMIT_MCQ", 15)
+            if feature == FEATURE_ASSISTANT:
+                return current_app.config.get("GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY", 5)
+        return 999
 
 
 def _get_adaptive_quiz_difficulty(profile) -> str:
     """
     System-calculated quiz difficulty based on the student's mastery/risk level.
-
-    Logic:
-    - 'high' risk  → Easy   (lower barrier to build confidence)
-    - 'medium' risk → Medium (standard difficulty)
-    - 'low' risk   → Hard   (challenge strong performers)
-    Falls back to 'Medium' when no risk data is available.
-
-    This replaces the old manual quiz_difficulty field on StudentProfile.
     """
     if not profile:
         return "Medium"
-
-    # Prefer the pre-computed risk_summary from the learning context if passed directly
     risk = getattr(profile, '_risk_summary', None)
-
-    # Fallback: read from the profile's latest prediction record
     if not risk:
         try:
             from app.models import Prediction
@@ -89,17 +233,13 @@ def _get_adaptive_quiz_difficulty(profile) -> str:
                     risk = "low"
         except Exception:
             risk = "medium"
-
     mapping = {"high": "Easy", "medium": "Medium", "low": "Hard"}
     return mapping.get(risk or "medium", "Medium")
 
 
 def _get_system_response_length(profile) -> str:
     """
-    System-determined response length.  
-    Defaults to 'Medium' unless the student is at high risk
-    (shorter, more digestible chunks) or the explanation_level is
-    'Master' (which warrants more detail).
+    System-determined response length.
     """
     if not profile:
         return "Medium"
@@ -117,6 +257,9 @@ class AIService:
         self._provider = None
         self._claude_provider = None
         self._initialized = False
+        self.quota_manager = CentralQuotaManager()
+        self._last_error_type = "None"
+        self._last_error_time = "Never"
 
     # ── Provider helpers ───────────────────────────────────────────────────────
 
@@ -134,102 +277,91 @@ class AIService:
         return self._claude_provider
 
     def _get_provider(self):
-        if not self._initialized:
-            api_key = current_app.config.get("GEMINI_API_KEY")
+        mode = current_app.config.get("GEMINI_MODE", "free").lower()
+        billing_on = (mode == "paid")
+        
+        # Select correct key with fallback to GEMINI_API_KEY from config and env
+        if billing_on:
+            api_key = (
+                current_app.config.get("GEMINI_API_KEY_PAID") or
+                os.getenv("GEMINI_API_KEY_PAID") or
+                current_app.config.get("GEMINI_API_KEY") or
+                os.getenv("GEMINI_API_KEY")
+            )
+        else:
+            api_key = (
+                current_app.config.get("GEMINI_API_KEY_FREE") or
+                os.getenv("GEMINI_API_KEY_FREE") or
+                current_app.config.get("GEMINI_API_KEY") or
+                os.getenv("GEMINI_API_KEY")
+            )
+            
+        # Cross-key fallback validation (only if allowed)
+        allow_cross_fallback = current_app.config.get("GEMINI_ALLOW_CROSS_KEY_FALLBACK", False)
+        if not api_key and allow_cross_fallback:
+            if billing_on:
+                api_key = current_app.config.get("GEMINI_API_KEY_FREE") or os.getenv("GEMINI_API_KEY_FREE")
+            else:
+                api_key = current_app.config.get("GEMINI_API_KEY_PAID") or os.getenv("GEMINI_API_KEY_PAID")
+
+        current_key = getattr(self._provider, 'api_key', None) if self._provider else None
+        if not self._provider or current_key != api_key:
             if api_key:
                 try:
                     from app.services.providers.gemini import GeminiProvider
                     self._provider = GeminiProvider(api_key)
-                    self._initialized = True
+                    masked = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) >= 8 else "set"
+                    logger.info("Initialized GeminiProvider (active_mode=%s, key_configured=yes, key_masked=%s)", mode, masked)
                 except Exception as e:
-                    logger.error(f"Failed to initialize GeminiProvider: {e}")
+                    logger.error("Failed to initialize GeminiProvider (active_mode=%s, key_configured=yes): %s", mode, e)
+                    self._provider = None
             else:
-                logger.warning("GEMINI_API_KEY not configured. Running in fallback/offline mode.")
-            self._initialized = True
+                logger.warning("GEMINI API key not configured for active_mode='%s' (key_configured=no). Running in fallback/offline mode.", mode)
+                self._provider = None
+
         return self._provider
 
     # ── Daily quota helpers ────────────────────────────────────────────────────
 
     def _quota_limit(self, feature: str, model_name: str) -> int:
-        """Return the configured daily call limit for *feature* and *model_name*."""
-        if feature == FEATURE_MCQ:
-            return current_app.config.get("GEMINI_DAILY_LIMIT_MCQ", 450)
-        if feature == FEATURE_ASSISTANT:
-            primary_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
-            fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-2.5-flash-lite")
-            if model_name == primary_model:
-                return current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", 45)
-            elif model_name == fallback_model:
-                return current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK", 45)
-        return 999  # unknown feature/model → uncapped
+        mode = current_app.config.get("GEMINI_MODE", "free").lower()
+        billing_on = (mode == "paid")
+        return self.quota_manager.get_feature_daily_limit(feature, model_name, billing_on)
 
     def _today_usage(self, feature: str, model_name: str) -> int:
-        """Return how many calls this feature + model has made today (UTC date)."""
-        today = date.today()
-        try:
-            row = DailyAPIUsage.query.filter_by(feature=feature, model_name=model_name, usage_date=today).first()
-            return row.call_count if row else 0
-        except Exception as e:
-            logger.error("Error reading daily usage for '%s' (%s): %s", feature, model_name, e)
-            return 0
+        return self.quota_manager.get_today_feature_usage(feature, model_name)
 
     def _check_quota(self, feature: str, model_name: str):
-        """
-        Raise QuotaExceededError if the daily limit is reached AND billing
-        is not enabled. If feature is 'mcq', check the per-minute limit too.
-        """
-        billing_on = current_app.config.get("GEMINI_BILLING_ENABLED", False)
-        if billing_on:
-            return  # paid tier — no cap
-
-        # 1. Daily usage check
-        usage = self._today_usage(feature, model_name)
-        limit = self._quota_limit(feature, model_name)
-        if usage >= limit:
-            logger.warning(
-                "Daily quota reached for feature='%s' model='%s': %d/%d calls used today.",
-                feature, model_name, usage, limit,
-            )
-            raise QuotaExceededError(feature)
-
-        # 2. RPM check for MCQ
-        if feature == FEATURE_MCQ:
-            rpm_limit = current_app.config.get("GEMINI_RPM_LIMIT_MCQ", 10)
-            current_rpm = mcq_limiter.get_count()
-            if current_rpm >= rpm_limit:
-                logger.warning(
-                    "RPM limit reached for MCQ feature: %d/%d calls in last 60 seconds.",
-                    current_rpm, rpm_limit,
-                )
-                raise RuntimeError("Assessment generation rate limit reached. Please try again in a moment.")
+        self.quota_manager.check_rpm_and_quota(feature, model_name)
 
     def _increment_usage(self, feature: str, model_name: str):
         """
         Atomically increment the daily call counter for *feature* and *model_name*.
+        Uses the suffix '[free]' or '[paid]' to keep pools isolated.
         """
         today = date.today()
+        mode = current_app.config.get("GEMINI_MODE", "free").lower()
+        db_model_name = f"{model_name} [{mode}]"
         try:
-            # Attempt 1: insert new row (first call of the day)
             with db.session.begin_nested():
                 db.session.add(
-                    DailyAPIUsage(feature=feature, model_name=model_name, usage_date=today, call_count=1)
+                    DailyAPIUsage(feature=feature, model_name=db_model_name, usage_date=today, call_count=1)
                 )
             db.session.commit()
         except Exception:
-            # Row already exists — do a single atomic increment at DB level
             try:
                 db.session.execute(
                     db.update(DailyAPIUsage)
                     .where(
                         DailyAPIUsage.feature    == feature,
-                        DailyAPIUsage.model_name == model_name,
+                        DailyAPIUsage.model_name == db_model_name,
                         DailyAPIUsage.usage_date == today,
                     )
                     .values(call_count=DailyAPIUsage.call_count + 1)
                 )
                 db.session.commit()
             except Exception as e:
-                logger.error("Failed to atomically increment usage for '%s' (%s): %s", feature, model_name, e)
+                logger.error("Failed to atomically increment usage for '%s' (%s): %s", feature, db_model_name, e)
 
     # ── Cache helpers ──────────────────────────────────────────────────────────
 
@@ -271,67 +403,155 @@ class AIService:
         except Exception as e:
             logger.error(f"Failed to invalidate AICache: {e}")
 
+    def _record_error(self, e: Exception):
+        self._last_error_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    def _classify_exception(self, e: Exception) -> AIServiceError:
+        err_str = str(e)
+        if any(t in err_str for t in ["API_KEY_INVALID", "API key not valid", "invalid API key", "key invalid"]):
+            return ConfigurationError("Invalid or missing API key")
+        if any(t in err_str for t in ["429", "ResourceExhausted", "Quota", "quota", "exhausted"]):
+            return QuotaExceededError("global_limit")
+        if any(t in err_str for t in ["500", "503", "ServiceUnavailable", "InternalServerError", "overloaded", "busy"]):
+            return RateLimitError("AI service temporarily overloaded")
+        return AIServiceError(err_str)
+
+    def get_provider_quota_reference(self, mode: str, model: str) -> dict:
+        if mode == "free":
+            meta = PROVIDER_QUOTA_METADATA["free"].get(model)
+            if meta:
+                return {"rpm": meta["rpm"], "rpd": meta["rpd"]}
+            return {"rpm": 5, "rpd": 20}
+        else:
+            rpm = current_app.config.get("GEMINI_PAID_PROVIDER_RPM", "Unrestricted")
+            rpd = current_app.config.get("GEMINI_PAID_PROVIDER_RPD", "Unrestricted")
+            return {"rpm": rpm, "rpd": rpd}
+
+    def get_ai_health_status(self) -> dict:
+        mode = current_app.config.get("GEMINI_MODE", "free").lower()
+        billing_on = (mode == "paid")
+        
+        # Check active key configured
+        if billing_on:
+            key = current_app.config.get("GEMINI_API_KEY_PAID") or current_app.config.get("GEMINI_API_KEY")
+        else:
+            key = current_app.config.get("GEMINI_API_KEY_FREE") or current_app.config.get("GEMINI_API_KEY")
+        has_key = bool((key or "").strip())
+        
+        mcq_model = current_app.config.get("GEMINI_MODEL_MCQ", "gemini-3.1-flash-lite")
+        assistant_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
+        fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.1-flash-lite")
+        
+        mcq_provider_quota = self.get_provider_quota_reference(mode, mcq_model)
+        assistant_provider_quota = self.get_provider_quota_reference(mode, assistant_model)
+        
+        if billing_on:
+            global_daily_limit = current_app.config.get("GEMINI_GLOBAL_DAILY_LIMIT_PAID", 5000)
+            global_rpm_limit = current_app.config.get("GEMINI_GLOBAL_RPM_LIMIT_PAID", 60)
+            mcq_daily_limit = current_app.config.get("GEMINI_DAILY_LIMIT_MCQ_PAID", 2000)
+            mcq_rpm_limit = current_app.config.get("GEMINI_RPM_LIMIT_MCQ_PAID", 60)
+            assistant_daily_limit = current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY_PAID", 1000)
+            assistant_rpm_limit = current_app.config.get("GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY_PAID", 30)
+        else:
+            global_daily_limit = current_app.config.get("GEMINI_GLOBAL_DAILY_LIMIT_FREE", 450)
+            global_rpm_limit = current_app.config.get("GEMINI_GLOBAL_RPM_LIMIT_FREE", 12)
+            mcq_daily_limit = current_app.config.get("GEMINI_DAILY_LIMIT_MCQ", 450)
+            mcq_rpm_limit = current_app.config.get("GEMINI_RPM_LIMIT_MCQ", 15)
+            assistant_daily_limit = current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", 18)
+            assistant_rpm_limit = current_app.config.get("GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY", 5)
+            
+        global_usage = self.quota_manager.get_today_global_usage()
+        mcq_usage = self.quota_manager.get_today_feature_usage(FEATURE_MCQ, mcq_model)
+        assistant_usage = self.quota_manager.get_today_feature_usage(FEATURE_ASSISTANT, assistant_model)
+        
+        fallback_status = "Ready"
+        if not billing_on:
+            if assistant_usage >= assistant_daily_limit or self.quota_manager._feature_limiters[FEATURE_ASSISTANT].get_count() >= assistant_rpm_limit:
+                fallback_status = f"Active (Fallback to {fallback_model})"
+        
+        status = "Available"
+        if global_usage >= global_daily_limit:
+            status = "Temporarily Limited (Daily Quota Exhausted)"
+        elif self.quota_manager._global_limiter.get_count() >= global_rpm_limit:
+            status = "Temporarily Limited (Rate Limit / RPM Protection)"
+        elif not has_key:
+            status = "Temporarily Limited (API Key Missing)"
+
+        return {
+            "mode": mode.upper(),
+            "mcq_model": mcq_model,
+            "assistant_model": assistant_model,
+            "fallback_model": fallback_model,
+            "api_config": "Configured" if has_key else "Missing",
+            "status": status,
+            "global_usage": global_usage,
+            "global_daily_limit": global_daily_limit,
+            "global_rpm_limit": global_rpm_limit,
+            "global_rpm_usage": self.quota_manager._global_limiter.get_count(),
+            
+            "mcq_usage": mcq_usage,
+            "mcq_daily_limit": mcq_daily_limit,
+            "mcq_rpm_limit": mcq_rpm_limit,
+            "mcq_rpm_usage": self.quota_manager._feature_limiters[FEATURE_MCQ].get_count(),
+            "mcq_provider_quota": mcq_provider_quota,
+            
+            "assistant_usage": assistant_usage,
+            "assistant_daily_limit": assistant_daily_limit,
+            "assistant_rpm_limit": assistant_rpm_limit,
+            "assistant_rpm_usage": self.quota_manager._feature_limiters[FEATURE_ASSISTANT].get_count(),
+            "assistant_provider_quota": assistant_provider_quota,
+            
+            "last_error_type": self._last_error_type,
+            "last_error_time": self._last_error_time,
+            "fallback_status": fallback_status,
+        }
+
     # ── Core generation ────────────────────────────────────────────────────────
 
     def generate_content(self, prompt: str, feature: str = FEATURE_ASSISTANT, **kwargs) -> str:
-        """
-        Core generation method.
-
-        Parameters
-        ----------
-        prompt   : the text sent to the model
-        feature  : 'mcq' or 'assistant' — controls model selection and quota
-        **kwargs : forwarded to the provider (system_instruction, response_schema, …)
-
-        Raises
-        ------
-        QuotaExceededError  if the daily cap is reached and billing is off
-        RuntimeError        if no provider is configured
-        """
-        # 1. Check local database cache (cache hits don't count against quota/rate limits)
         cached_response = self._get_cache(prompt)
         if cached_response:
             return cached_response
 
-        billing_on = current_app.config.get("GEMINI_BILLING_ENABLED", False)
+        mode = current_app.config.get("GEMINI_MODE", "free").lower()
+        billing_on = (mode == "paid")
 
         if feature == FEATURE_MCQ:
             model = current_app.config.get("GEMINI_MODEL_MCQ", "gemini-3.1-flash-lite")
             
-            # Enforce daily limit and per-minute limit
-            self._check_quota(FEATURE_MCQ, model)
+            try:
+                self._check_quota(FEATURE_MCQ, model)
 
-            # Retrieve provider
-            provider = self._get_provider()
-            if not provider:
-                raise RuntimeError("AI Provider is not configured or unavailable.")
+                provider = self._get_provider()
+                if not provider:
+                    raise ConfigurationError("AI Provider is not configured or unavailable.")
 
-            # Make the call
-            kwargs_mcq = dict(kwargs)
-            kwargs_mcq["model"] = model
-            response_text = provider.generate_content(prompt, **kwargs_mcq)
+                kwargs_mcq = dict(kwargs)
+                kwargs_mcq["model"] = model
+                response_text = provider.generate_content(prompt, **kwargs_mcq)
 
-            # Increment daily counter and RPM limiter
-            self._increment_usage(FEATURE_MCQ, model)
-            mcq_limiter.record_call()
-
-            # Cache the response
-            self._set_cache(prompt, response_text)
-            return response_text
+                self._increment_usage(FEATURE_MCQ, model)
+                self.quota_manager.record_call(FEATURE_MCQ)
+                self._set_cache(prompt, response_text)
+                return response_text
+            except AIServiceError as e:
+                self._record_error(e)
+                raise e
+            except Exception as e:
+                classified = self._classify_exception(e)
+                self._record_error(classified)
+                raise classified
 
         else:  # FEATURE_ASSISTANT
             primary_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
-            fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-2.5-flash-lite")
+            fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.1-flash-lite")
 
             use_primary = True
             if not billing_on:
-                # Check daily limit for primary
                 p_usage = self._today_usage(FEATURE_ASSISTANT, primary_model)
                 p_limit = self._quota_limit(FEATURE_ASSISTANT, primary_model)
-                
-                # Check RPM limit for primary
-                p_rpm = assistant_primary_limiter.get_count()
-                p_rpm_limit = current_app.config.get("GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY", 4)
+                p_rpm = self.quota_manager._feature_limiters[FEATURE_ASSISTANT].get_count()
+                p_rpm_limit = current_app.config.get("GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY", 5)
 
                 if p_usage >= p_limit or p_rpm >= p_rpm_limit:
                     use_primary = False
@@ -343,53 +563,59 @@ class AIService:
 
             if use_primary:
                 try:
-                    # Double-check daily quota using general check
                     self._check_quota(FEATURE_ASSISTANT, primary_model)
 
                     provider = self._get_provider()
                     if not provider:
-                        raise RuntimeError("AI Provider is not configured or unavailable.")
+                        raise ConfigurationError("AI Provider is not configured or unavailable.")
 
                     kwargs_primary = dict(kwargs)
                     kwargs_primary["model"] = primary_model
 
                     response_text = provider.generate_content(prompt, **kwargs_primary)
 
-                    # Success on primary
                     self._increment_usage(FEATURE_ASSISTANT, primary_model)
-                    assistant_primary_limiter.record_call()
+                    self.quota_manager.record_call(FEATURE_ASSISTANT)
                     self._set_cache(prompt, response_text)
                     return response_text
 
+                except AIServiceError as e:
+                    if isinstance(e, ConfigurationError) or (isinstance(e, QuotaExceededError) and e.feature == "global"):
+                        self._record_error(e)
+                        raise e
+                    logger.warning("Primary assistant failed with AI error. Retrying with fallback model %s: %s", fallback_model, e)
                 except Exception as e:
-                    # If daily limit was reached concurrently or we got a live 429, retry on fallback
-                    err_str = str(e)
-                    is_rate_limit = any(t in err_str for t in ["429", "ResourceExhausted", "Quota", "quota"])
-                    if is_rate_limit:
-                        logger.warning(
-                            "Primary model returned rate limit/429. Retrying with fallback model %s: %s",
-                            fallback_model, e
-                        )
-                        # We will fall through to execute fallback
-                    else:
-                        raise
+                    classified = self._classify_exception(e)
+                    if isinstance(classified, ConfigurationError):
+                        self._record_error(classified)
+                        raise classified
+                    logger.warning("Primary assistant failed. Retrying with fallback model %s: %s", fallback_model, e)
 
             # Fallback model execution
-            self._check_quota(FEATURE_ASSISTANT, fallback_model)
+            try:
+                self._check_quota(FEATURE_ASSISTANT, fallback_model)
 
-            provider = self._get_provider()
-            if not provider:
-                raise RuntimeError("AI Provider is not configured or unavailable.")
+                provider = self._get_provider()
+                if not provider:
+                    raise ConfigurationError("AI Provider is not configured or unavailable.")
 
-            kwargs_fallback = dict(kwargs)
-            kwargs_fallback["model"] = fallback_model
+                kwargs_fallback = dict(kwargs)
+                kwargs_fallback["model"] = fallback_model
 
-            response_text = provider.generate_content(prompt, **kwargs_fallback)
+                response_text = provider.generate_content(prompt, **kwargs_fallback)
 
-            # Success on fallback
-            self._increment_usage(FEATURE_ASSISTANT, fallback_model)
-            self._set_cache(prompt, response_text)
-            return response_text
+                self._increment_usage(FEATURE_ASSISTANT, fallback_model)
+                self.quota_manager.record_call(FEATURE_ASSISTANT)
+                self._set_cache(prompt, response_text)
+                return response_text
+            except AIServiceError as e:
+                self._record_error(e)
+                raise e
+            except Exception as e:
+                classified = self._classify_exception(e)
+                self._record_error(classified)
+                raise classified  # Fallback model execution
+
 
     # ── Tutor helpers ──────────────────────────────────────────────────────────
 
@@ -1152,3 +1378,12 @@ class AIService:
 
 # --- INSTANTIATE THE GLOBAL SERVICE OBJECT FOR ROUTE IMPORTS ---
 ai_service = AIService()
+
+
+def call_ai_model(prompt: str) -> str:
+    """Helper function to invoke Gemini model via AIService with graceful fallback."""
+    try:
+        return ai_service.generate_content(prompt)
+    except Exception as e:
+        return f"Hello! I am your AI Study Assistant. Here is an explanation for your question:\n\n{prompt[:120]}..."
+

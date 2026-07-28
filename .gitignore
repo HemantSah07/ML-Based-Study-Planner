@@ -26,6 +26,9 @@ models/*.csv
 
 # User uploads
 app/static/uploads/
+uploads/
+materials/
+
 
 # IDE configurations
 .vscode/

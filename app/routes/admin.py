@@ -1338,13 +1338,18 @@ def health():
     high_risk_count = Prediction.query.filter_by(predicted_risk_level="High Risk").count()
 
     # 3. Gemini API Health Configuration Check
-    raw_api_key = os.environ.get("GEMINI_API_KEY") or current_app.config.get("GEMINI_API_KEY") or ""
-    gemini_configured = bool(raw_api_key.strip())
+    from app.services.ai_service import ai_service
+    gemini_health = ai_service.get_ai_health_status()
+    gemini_configured = (gemini_health["api_config"] == "Configured")
+    
+    mode = gemini_health["mode"].lower()
+    if mode == "paid":
+        raw_api_key = current_app.config.get("GEMINI_API_KEY_PAID") or current_app.config.get("GEMINI_API_KEY") or ""
+    else:
+        raw_api_key = current_app.config.get("GEMINI_API_KEY_FREE") or current_app.config.get("GEMINI_API_KEY") or ""
     masked_key = f"••••••••••••{raw_api_key[-4:]}" if len(raw_api_key) >= 4 else ("••••••••••••" if gemini_configured else "Not set")
     
-    gemini_model_version = current_app.config.get("GEMINI_MODEL") or os.environ.get("GEMINI_MODEL")
-    if not gemini_model_version:
-        gemini_model_version = "Model version not configured in env"
+    gemini_model_version = gemini_health["mcq_model"]
 
     # 4. Content & Material Telemetry
     total_ai_materials = LearningMaterial.query.count()
@@ -1395,6 +1400,7 @@ def health():
         gemini_configured=gemini_configured,
         masked_key=masked_key,
         gemini_model_version=gemini_model_version,
+        gemini_health=gemini_health,
         total_ai_materials=total_ai_materials,
         subjects_zero_q=subjects_zero_q,
         broken_pdfs_count=broken_pdfs_count,
@@ -1738,11 +1744,17 @@ def config():
     if request.method == "POST":
         # Save all configs securely
         keys = [
-            "GEMINI_API_KEY", "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY", "GEMINI_API_KEY_FREE", "GEMINI_API_KEY_PAID", "ANTHROPIC_API_KEY",
             "GEMINI_MODEL_MCQ", "GEMINI_MODEL_ASSISTANT_PRIMARY", "GEMINI_MODEL_ASSISTANT_FALLBACK",
             "GEMINI_DAILY_LIMIT_MCQ", "GEMINI_RPM_LIMIT_MCQ",
             "GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", "GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK",
-            "GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY",
+            "GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY", "GEMINI_RPM_LIMIT_ASSISTANT_FALLBACK",
+            "GEMINI_DAILY_LIMIT_MCQ_PAID", "GEMINI_RPM_LIMIT_MCQ_PAID",
+            "GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY_PAID", "GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY_PAID",
+            "GEMINI_GLOBAL_DAILY_LIMIT_FREE", "GEMINI_GLOBAL_DAILY_LIMIT_PAID",
+            "GEMINI_GLOBAL_RPM_LIMIT_FREE", "GEMINI_GLOBAL_RPM_LIMIT_PAID",
+            "GEMINI_PAID_PROVIDER_RPM", "GEMINI_PAID_PROVIDER_RPD",
+            "GEMINI_MODE", "GEMINI_ALLOW_CROSS_KEY_FALLBACK",
             "PLANNER_SESSION_MINUTES", "PLANNER_BREAK_MINUTES", "PLANNER_SESSIONS_PER_DAY",
             "MAINTENANCE_MESSAGE"
         ]
@@ -1756,15 +1768,16 @@ def config():
                     setting = AppSetting(key=k, value=val)
                     db.session.add(setting)
                 
-        # Billing switch
-        if "GEMINI_BILLING_ENABLED" in request.form or "save_general" in request.form:
-            billing = "True" if request.form.get("GEMINI_BILLING_ENABLED") else "False"
-            setting = AppSetting.query.get("GEMINI_BILLING_ENABLED")
-            if setting:
-                setting.value = billing
+        # Sync legacy GEMINI_BILLING_ENABLED with canonical GEMINI_MODE
+        if "GEMINI_MODE" in request.form or "save_general" in request.form:
+            mode = request.form.get("GEMINI_MODE", "free").lower()
+            billing = "True" if mode == "paid" else "False"
+            setting_billing = AppSetting.query.get("GEMINI_BILLING_ENABLED")
+            if setting_billing:
+                setting_billing.value = billing
             else:
-                setting = AppSetting(key="GEMINI_BILLING_ENABLED", value=billing)
-                db.session.add(setting)
+                setting_billing = AppSetting(key="GEMINI_BILLING_ENABLED", value=billing)
+                db.session.add(setting_billing)
             
         db.session.commit()
         load_live_config(current_app._get_current_object(), force=True)
@@ -1786,14 +1799,23 @@ def config():
 
     # Gemini configuration inspection
     raw_api_key = settings.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY") or current_app.config.get("GEMINI_API_KEY") or ""
+    raw_api_key_free = settings.get("GEMINI_API_KEY_FREE") or os.environ.get("GEMINI_API_KEY_FREE") or current_app.config.get("GEMINI_API_KEY_FREE") or ""
+    raw_api_key_paid = settings.get("GEMINI_API_KEY_PAID") or os.environ.get("GEMINI_API_KEY_PAID") or current_app.config.get("GEMINI_API_KEY_PAID") or ""
+    
     gemini_config = {
-        "configured": bool(raw_api_key.strip()),
+        "configured": bool(raw_api_key.strip() or raw_api_key_free.strip() or raw_api_key_paid.strip()),
         "masked_key": f"••••••••••••{raw_api_key[-4:]}" if len(raw_api_key) >= 4 else ("••••••••••••" if raw_api_key else "Not set"),
+        "masked_key_free": f"••••••••••••{raw_api_key_free[-4:]}" if len(raw_api_key_free) >= 4 else ("••••••••••••" if raw_api_key_free else "Not set"),
+        "masked_key_paid": f"••••••••••••{raw_api_key_paid[-4:]}" if len(raw_api_key_paid) >= 4 else ("••••••••••••" if raw_api_key_paid else "Not set"),
         "billing_enabled": settings.get("GEMINI_BILLING_ENABLED", "False") == "True",
-        "mcq_model": settings.get("GEMINI_MODEL_MCQ") or current_app.config.get("GEMINI_MODEL_MCQ", "gemini-2.0-flash-lite"),
-        "assistant_model": settings.get("GEMINI_MODEL_ASSISTANT_PRIMARY") or current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.0-flash-lite"),
+        "gemini_mode": settings.get("GEMINI_MODE", "free").lower(),
+        "mcq_model": settings.get("GEMINI_MODEL_MCQ") or current_app.config.get("GEMINI_MODEL_MCQ", "gemini-3.1-flash-lite"),
+        "assistant_model": settings.get("GEMINI_MODEL_ASSISTANT_PRIMARY") or current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash"),
+        "fallback_model": settings.get("GEMINI_MODEL_ASSISTANT_FALLBACK") or current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.1-flash-lite"),
         "mcq_daily_limit": settings.get("GEMINI_DAILY_LIMIT_MCQ") or current_app.config.get("GEMINI_DAILY_LIMIT_MCQ", "450"),
-        "assistant_daily_limit": settings.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY") or current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", "1000")
+        "mcq_daily_limit_paid": settings.get("GEMINI_DAILY_LIMIT_MCQ_PAID") or current_app.config.get("GEMINI_DAILY_LIMIT_MCQ_PAID", "2000"),
+        "assistant_daily_limit": settings.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY") or current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", "18"),
+        "assistant_daily_limit_paid": settings.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY_PAID") or current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY_PAID", "1000"),
     }
 
     # Maintenance mode state
@@ -2174,15 +2196,23 @@ from flask import current_app
 def _check_gemini_api():
     """Ping Gemini with a minimal token to verify the API key is live."""
     try:
-        api_key = current_app.config.get("GEMINI_API_KEY", "")
+        mode = current_app.config.get("GEMINI_MODE", "free").lower()
+        billing_on = (mode == "paid")
+        if billing_on:
+            api_key = current_app.config.get("GEMINI_API_KEY_PAID") or current_app.config.get("GEMINI_API_KEY")
+        else:
+            api_key = current_app.config.get("GEMINI_API_KEY_FREE") or current_app.config.get("GEMINI_API_KEY")
+            
         if not api_key:
-            return {"status": "unconfigured", "latency_ms": None, "detail": "No API key set"}
+            return {"status": "unconfigured", "latency_ms": None, "detail": f"No active API key set for mode {mode}"}
+            
+        test_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.1-flash-lite")
         try:
             from google import genai as _genai
             client = _genai.Client(api_key=api_key)
             start = time.perf_counter()
             resp = client.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model=test_model,
                 contents="Reply with exactly: OK",
             )
             latency = round((time.perf_counter() - start) * 1000)
@@ -2191,7 +2221,7 @@ def _check_gemini_api():
         except ImportError:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash-lite")
+            model = genai.GenerativeModel(test_model)
             start = time.perf_counter()
             resp = model.generate_content("Reply with exactly: OK")
             latency = round((time.perf_counter() - start) * 1000)
@@ -2510,17 +2540,11 @@ def content_regenerate_pdf(topic_id):
 def content_regenerate_questions(subject_id):
     """Trigger MCQ regeneration for a subject (respects daily quota)."""
     from app.models import AssessmentQuestion
-    from app.services.ai_service import AIService
+    from app.routes.student import generate_assessment_questions_for_subject
     subj = SubjectModel.query.get_or_404(subject_id)
     try:
         existing = AssessmentQuestion.query.filter_by(subject_id=subject_id).count()
-        ai = AIService()
-        ai.generate_assessment_questions(
-            subject_name=subj.name,
-            level_of_study=subj.level_of_study or "Class 10",
-            subject_id=subject_id,
-            force_regenerate=False,
-        )
+        generate_assessment_questions_for_subject(subject_id)
         new_count = AssessmentQuestion.query.filter_by(subject_id=subject_id).count()
         added = new_count - existing
         log_admin_action("regenerate_question_bank", "Subject", subject_id,
@@ -2752,12 +2776,8 @@ def bulk_seed_questions():
                                 _bulk_seed_state["running"] = False
                             break
                         existing = AssessmentQuestion.query.filter_by(subject_id=sid).count()
-                        ai.generate_assessment_questions(
-                            subject_name=subj.name,
-                            level_of_study=subj.level_of_study or "Class 10",
-                            subject_id=sid,
-                            force_regenerate=False,
-                        )
+                        from app.routes.student import generate_assessment_questions_for_subject
+                        generate_assessment_questions_for_subject(sid)
                         new_count = AssessmentQuestion.query.filter_by(subject_id=sid).count()
                         msg = f"+ {subj.name}: +{new_count - existing} questions"
                     except QuotaExceededError:
@@ -3143,4 +3163,16 @@ def profile():
         "admin/profile.html",
         recent_logs=recent_logs
     )
+
+
+@admin_bp.route("/ml/retrain", methods=["POST"])
+def admin_retrain_ml():
+    from app.services.ml_service import retrain_level_models
+    try:
+        results = retrain_level_models()
+        log_admin_action("retrain_ml_models", "MLModels", None, "Retrained Random Forest models across all academic levels.")
+        return jsonify({"status": "success", "results": results}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 

@@ -69,14 +69,14 @@ class StudentAnalyticsService:
         self._mastery = result
         return self._mastery
 
-    def assessment_summary(self, limit: int = 3) -> Dict:
+    def assessment_summary(self, limit: Optional[int] = None) -> Dict:
         """
         Returns:
           total_attempted   -- total number of SA records
           total_correct     -- sum of correct answers across all assessments
           total_incorrect   -- derived from total_questions - total_correct
           accuracy          -- overall accuracy %
-          recent            -- last `limit` StudentAssessment rows with detail
+          recent            -- all or last `limit` StudentAssessment rows with detail
         """
         if self._assessment_summary is not None and self._assessment_summary.get("_limit") == limit:
             return self._assessment_summary
@@ -105,7 +105,7 @@ class StudentAnalyticsService:
             total_correct += correct
             total_questions += resp_count
 
-            if len(recent) < limit:
+            if limit is None or len(recent) < limit:
                 subj = Subject.query.get(sa.subject_id)
                 recent.append({
                     "id": sa.id,

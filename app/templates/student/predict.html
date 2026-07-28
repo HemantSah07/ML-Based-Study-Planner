@@ -135,9 +135,9 @@
 
             <div class="row g-3 mb-4">
                 <div class="col-md-3">
-                    <div class="p-3 rounded border border-secondary h-100">
-                        <div class="text-muted small">Attendance %</div>
-                        <div class="fw-bold subject-risk-name">
+                    <div class="p-3 rounded h-100" style="background: rgba(13, 19, 34, 0.85); border: 1px solid rgba(255,255,255,0.15);">
+                        <div class="text-secondary small fw-semibold">Attendance %</div>
+                        <div class="fw-bold text-white fs-6">
                             {% if profile and profile.attendance_pct is not none %}
                                 {{ profile.attendance_pct|round(0)|int }}%
                             {% else %}
@@ -147,12 +147,12 @@
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="p-3 rounded border border-secondary h-100">
-                        <div class="text-muted small">Profile GPA</div>
-                        <div class="fw-bold subject-risk-name">
-                            {% if profile and profile.cumulative_gpa is not none %}
-                                {{ "%.2f"|format(profile.cumulative_gpa) }} GPA
-                                <span class="text-muted small">(≈{{ "%.1f"|format(profile.cumulative_gpa * 25 if profile.cumulative_gpa <= 4.0 else profile.cumulative_gpa) }}%)</span>
+                    <div class="p-3 rounded h-100" style="background: rgba(13, 19, 34, 0.85); border: 1px solid rgba(255,255,255,0.15);">
+                        <div class="text-secondary small fw-semibold">Academic Score / GPA</div>
+                        <div class="fw-bold text-white fs-6">
+                            {% if computed_gpa is not none %}
+                                {{ "%.2f"|format(computed_gpa) }} GPA
+                                <span class="text-secondary small">({{ gpa_source_label }})</span>
                             {% else %}
                                 <span class="text-warning">Not set</span>
                             {% endif %}
@@ -160,21 +160,21 @@
                     </div>
                 </div>
                 <div class="col-md-2">
-                    <div class="p-3 rounded border border-secondary h-100">
-                        <div class="text-muted small">Study h/week</div>
-                        <div class="fw-bold subject-risk-name">Auto split</div>
+                    <div class="p-3 rounded h-100" style="background: rgba(13, 19, 34, 0.85); border: 1px solid rgba(255,255,255,0.15);">
+                        <div class="text-secondary small fw-semibold">Target Study h/wk</div>
+                        <div class="fw-bold text-white" style="font-size: 0.9rem;">{{ study_hours_preview }}</div>
                     </div>
                 </div>
                 <div class="col-md-2">
-                    <div class="p-3 rounded border border-secondary h-100">
-                        <div class="text-muted small">Days to exam</div>
-                        <div class="fw-bold subject-risk-name">Exam table or 30</div>
+                    <div class="p-3 rounded h-100" style="background: rgba(13, 19, 34, 0.85); border: 1px solid rgba(255,255,255,0.15);">
+                        <div class="text-secondary small fw-semibold">Next Exam</div>
+                        <div class="fw-bold text-white" style="font-size: 0.9rem;">{{ days_to_exam_preview }}</div>
                     </div>
                 </div>
                 <div class="col-md-2">
-                    <div class="p-3 rounded border border-secondary h-100">
-                        <div class="text-muted small">Days since study</div>
-                        <div class="fw-bold subject-risk-name">Study log</div>
+                    <div class="p-3 rounded h-100" style="background: rgba(13, 19, 34, 0.85); border: 1px solid rgba(255,255,255,0.15);">
+                        <div class="text-secondary small fw-semibold">Last Activity</div>
+                        <div class="fw-bold text-white" style="font-size: 0.9rem;">{{ days_since_study_preview }}</div>
                     </div>
                 </div>
             </div>

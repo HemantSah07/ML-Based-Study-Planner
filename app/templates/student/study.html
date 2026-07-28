@@ -142,6 +142,8 @@
             <button class="study-tab-btn" onclick="switchStudyTab('quiz')"><i class="fas fa-clipboard-check me-2"></i> MCQ Quiz</button>
             <button class="study-tab-btn" onclick="switchStudyTab('flashcards')"><i class="fas fa-clone me-2"></i> Flashcards</button>
             <button class="study-tab-btn" onclick="switchStudyTab('notes')"><i class="fas fa-sticky-note me-2"></i> My Notes</button>
+            <button class="study-tab-btn" onclick="switchStudyTab('coverage'); loadSyllabusCoverage();"><i class="fas fa-chart-pie me-2"></i> Syllabus Coverage</button>
+            <button class="study-tab-btn" onclick="switchStudyTab('module-info'); loadModuleInfo();"><i class="fas fa-info-circle me-2"></i> Course Info</button>
         </div>
 
         <!-- TAB Content: Learn -->
@@ -224,6 +226,29 @@
                 <textarea id="notes-content" class="form-control" rows="15" placeholder="Write down formulas, code templates, or revision plans here..." style="font-family: 'Consolas', 'Courier New', monospace; font-size: 15px; color: #e2e8f0; background: #0f172a; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">{{ notes_content }}</textarea>
             </div>
         </div>
+
+        <!-- TAB Content: Syllabus Coverage -->
+        <div id="tab-coverage" class="tab-content-item d-none">
+            <div class="card card-light p-4">
+                <h4 class="fw-bold mb-2 text-gradient"><i class="fas fa-chart-pie me-2"></i> Syllabus Coverage Gap Analysis</h4>
+                <p class="text-muted small mb-4">Calculates semantic vector similarity between your uploaded study material and official module descriptor syllabus topics.</p>
+                <div id="coverage-content">
+                    <div class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i> Analyzing syllabus coverage...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB Content: Course Info -->
+        <div id="tab-module-info" class="tab-content-item d-none">
+            <div class="card card-light p-4">
+                <h4 class="fw-bold mb-2 text-gradient"><i class="fas fa-info-circle me-2"></i> Official Module Descriptor Information</h4>
+                <p class="text-muted small mb-4">Structured grading weights, exam format, and assessment dates extracted automatically from uploaded Module Descriptors.</p>
+                <div id="module-info-content">
+                    <div class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i> Loading course information...</div>
+                </div>
+            </div>
+        </div>
+    </div>
     </div>
 </div>
 
@@ -1153,6 +1178,121 @@
         });
     }
 
+    function loadSyllabusCoverage() {
+        const container = document.getElementById("coverage-content");
+        container.innerHTML = '<div class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i> Analyzing syllabus coverage...</div>';
+        
+        fetch(`/student/subjects/{{ subject.id }}/coverage`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success" && data.coverage && data.coverage.length > 0) {
+                let coveredCount = data.coverage.filter(c => c.covered).length;
+                let totalCount = data.coverage.length;
+                let pct = Math.round((coveredCount / totalCount) * 100);
+
+                let html = `
+                    <div class="row align-items-center mb-4 g-3">
+                        <div class="col-md-4 text-center">
+                            <div class="p-3 rounded-3 bg-dark border border-secondary">
+                                <div class="fs-1 fw-bold text-gradient">${pct}%</div>
+                                <div class="text-muted small">Syllabus Covered</div>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div class="progress mb-2" style="height: 12px; background: rgba(255,255,255,0.08);">
+                                <div class="progress-bar bg-success" style="width: ${pct}%;"></div>
+                            </div>
+                            <small class="text-muted">${coveredCount} of ${totalCount} topics backed by uploaded study materials</small>
+                        </div>
+                    </div>
+                    <div class="list-group list-group-flush">
+                `;
+
+                data.coverage.forEach(item => {
+                    let badge = item.covered 
+                        ? `<span class="badge bg-success bg-opacity-20 text-success"><i class="fas fa-check me-1"></i> Covered (${item.file_count} chunks)</span>`
+                        : `<span class="badge bg-danger bg-opacity-20 text-danger"><i class="fas fa-times me-1"></i> Coverage Gap</span>`;
+                    html += `
+                        <div class="list-group-item bg-dark border-secondary text-white d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="fw-bold">${item.topic}</span>
+                                <div class="small text-muted font-monospace">Sim score: ${(item.max_similarity * 100).toFixed(1)}%</div>
+                            </div>
+                            ${badge}
+                        </div>
+                    `;
+                });
+
+                html += `</div>`;
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = `
+                    <div class="text-center py-5 text-muted">
+                        <i class="fas fa-file-invoice fa-3x mb-3 opacity-30"></i>
+                        <h5>No Module Descriptor Found</h5>
+                        <p class="small mb-0">Upload a Module Descriptor document in your zip upload to generate automatic syllabus gap analysis!</p>
+                    </div>
+                `;
+            }
+        })
+        .catch(err => {
+            container.innerHTML = `<div class="alert alert-danger">Error loading coverage data: ${err}</div>`;
+        });
+    }
+
+    function loadModuleInfo() {
+        const container = document.getElementById("module-info-content");
+        container.innerHTML = '<div class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i> Loading course information...</div>';
+
+        fetch(`/student/subjects/{{ subject.id }}/module-info`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success" && data.module_descriptor) {
+                let md = data.module_descriptor;
+                let html = `
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <div class="p-3 rounded-3 bg-dark border border-secondary">
+                                <div class="text-muted small mb-1"><i class="fas fa-file-alt text-primary me-1"></i> Final Exam</div>
+                                <div class="fs-5 fw-bold text-white">${md.has_final_exam ? 'Yes' : 'No'} (${md.exam_weight_pct || 0}%)</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="p-3 rounded-3 bg-dark border border-secondary">
+                                <div class="text-muted small mb-1"><i class="fas fa-tasks text-warning me-1"></i> Coursework Weight</div>
+                                <div class="fs-5 fw-bold text-white">${md.coursework_weight_pct || 0}%</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                if (md.assessment_dates && md.assessment_dates.length > 0) {
+                    html += `<h6 class="fw-bold text-white mb-2">Assessment Schedule</h6><ul class="list-group mb-4">`;
+                    md.assessment_dates.forEach(ad => {
+                        html += `<li class="list-group-item bg-dark border-secondary text-white d-flex justify-content-between">
+                            <span>${ad.type || 'Assessment'}</span>
+                            <span class="badge bg-primary">${ad.date || 'TBD'} (${ad.weight_pct || 0}%)</span>
+                        </li>`;
+                    });
+                    html += `</ul>`;
+                }
+
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = `
+                    <div class="text-center py-5 text-muted">
+                        <i class="fas fa-info-circle fa-3x mb-3 opacity-30"></i>
+                        <h5>No Course Info Available</h5>
+                        <p class="small mb-0">Upload a Module Descriptor PDF/DOCX to automatically parse grading criteria and exam schedules!</p>
+                    </div>
+                `;
+            }
+        })
+        .catch(err => {
+            container.innerHTML = `<div class="alert alert-danger">Error loading module info: ${err}</div>`;
+        });
+    }
+
     // Page Load: auto-load first topic or restore state
     document.addEventListener("DOMContentLoaded", function() {
         // Restore active tab
@@ -1189,5 +1329,230 @@
         }
         renderFlashcard();
     });
+</script>
+
+<!-- ── RAG AI Study Assistant Floating Button & Offcanvas Drawer ── -->
+<div id="rag-chat-fab-container" style="position: fixed; bottom: 24px; right: 24px; z-index: 1040; transition: opacity 0.25s ease, transform 0.25s ease;">
+    <button type="button" class="btn btn-primary rounded-circle shadow-lg d-flex align-items-center justify-content-center" id="rag-chat-toggle-btn" data-bs-toggle="offcanvas" data-bs-target="#ragChatOffcanvas" style="width: 60px; height: 60px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: 2px solid rgba(255, 255, 255, 0.25); box-shadow: 0 10px 25px rgba(99, 102, 241, 0.45);" title="Ask AI Study Assistant" aria-label="Ask AI Study Assistant">
+        <i class="fas fa-robot fa-lg text-white"></i>
+    </button>
+</div>
+
+<!-- Offcanvas Chat Drawer -->
+<div class="offcanvas offcanvas-end bg-dark text-white border-start border-secondary shadow-lg" tabindex="-1" id="ragChatOffcanvas" style="width: 440px; max-width: 100vw; height: 100vh;">
+    <div class="offcanvas-header border-bottom border-secondary py-3 px-3 flex-shrink-0" style="background: #1e293b;">
+        <div class="d-flex align-items-center gap-3 min-w-0">
+            <div class="rounded-circle p-2 d-flex align-items-center justify-content-center flex-shrink-0 shadow-sm" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); width: 42px; height: 42px; border: 1.5px solid rgba(255, 255, 255, 0.25); box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);">
+                <i class="fas fa-sparkles text-white" style="font-size: 1.1rem;"></i>
+            </div>
+            <div class="min-w-0">
+                <h6 class="offcanvas-title fw-bold mb-0 text-white" style="font-size: 1rem; letter-spacing: -0.01em;">AI Study Assistant</h6>
+                <small class="text-white-50" style="font-size: 0.76rem;">Your personal AI tutor</small>
+            </div>
+        </div>
+        <button type="button" class="btn-close btn-close-white opacity-75" data-bs-dismiss="offcanvas" aria-label="Close AI Study Assistant" style="font-size: 0.85rem;"></button>
+    </div>
+    
+    <div class="offcanvas-body p-0 d-flex flex-column" style="background: #0f172a; height: 100%; overflow: hidden;">
+        <!-- Hidden active subject ID context -->
+        <input type="hidden" id="rag-active-subject-id" value="{{ subject.id }}">
+
+        <!-- Scrollable Chat History Container -->
+        <div id="rag-chat-messages" class="flex-grow-1 p-3 d-flex flex-column gap-2" style="overflow-y: auto; min-height: 0; background: #0f172a;">
+            <div id="rag-chat-empty-state" class="text-center py-4 px-3 my-auto text-muted">
+                <div class="rounded-circle p-3 d-inline-flex align-items-center justify-content-center mb-3 shadow-sm" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.2)); width: 56px; height: 56px; border: 1px solid rgba(99, 102, 241, 0.3);">
+                    <i class="fas fa-sparkles text-primary fa-lg"></i>
+                </div>
+                <h5 class="fw-bold text-white mb-1" style="font-size: 1.1rem;">AI Study Assistant</h5>
+                <div class="text-primary fw-semibold small mb-2" style="font-size: 0.82rem;">Learn smarter with AI</div>
+                <p class="small text-white-50 mb-4" style="max-width: 290px; margin: 0 auto; font-size: 0.82rem; line-height: 1.45;">
+                    Ask questions about your study materials. I'll help you understand concepts, explain difficult topics, and learn more effectively.
+                </p>
+
+                <div class="d-flex flex-column gap-2 text-start" style="max-width: 320px; margin: 0 auto;">
+                    <div class="text-muted text-uppercase font-monospace text-center mb-1" style="font-size: 0.68rem; letter-spacing: 0.05em;">Suggested prompts</div>
+                    
+                    <button type="button" class="btn btn-sm btn-dark border border-secondary text-light text-start py-2 px-3 fw-normal d-flex align-items-center gap-2" style="font-size: 0.8rem; border-radius: 10px; background: #1e293b; transition: all 0.2s ease;" onclick="useSamplePrompt('Explain this topic in simple terms')">
+                        <i class="fas fa-lightbulb text-warning opacity-75"></i>
+                        <span>Explain this topic in simple terms</span>
+                    </button>
+
+                    <button type="button" class="btn btn-sm btn-dark border border-secondary text-light text-start py-2 px-3 fw-normal d-flex align-items-center gap-2" style="font-size: 0.8rem; border-radius: 10px; background: #1e293b; transition: all 0.2s ease;" onclick="useSamplePrompt('Summarize my study material')">
+                        <i class="fas fa-compress-alt text-info opacity-75"></i>
+                        <span>Summarize my study material</span>
+                    </button>
+
+                    <button type="button" class="btn btn-sm btn-dark border border-secondary text-light text-start py-2 px-3 fw-normal d-flex align-items-center gap-2" style="font-size: 0.8rem; border-radius: 10px; background: #1e293b; transition: all 0.2s ease;" onclick="useSamplePrompt('Give me an example')">
+                        <i class="fas fa-search text-success opacity-75"></i>
+                        <span>Give me an example</span>
+                    </button>
+
+                    <button type="button" class="btn btn-sm btn-dark border border-secondary text-light text-start py-2 px-3 fw-normal d-flex align-items-center gap-2" style="font-size: 0.8rem; border-radius: 10px; background: #1e293b; transition: all 0.2s ease;" onclick="useSamplePrompt('Create practice questions')">
+                        <i class="fas fa-question-circle text-primary opacity-75"></i>
+                        <span>Create practice questions</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="rag-chat-loading" class="d-none text-center py-2 flex-shrink-0" style="background: #0f172a;">
+            <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+            <span class="small text-muted">Searching study materials &amp; generating answer...</span>
+        </div>
+
+        <!-- Fixed Input Composer -->
+        <div class="p-3 border-top border-secondary flex-shrink-0" style="background: #1e293b;">
+            <form id="rag-chat-form" onsubmit="handleRagChatSubmit(event);">
+                <div class="input-group bg-dark rounded-3 border border-secondary p-1">
+                    <input type="text" id="rag-chat-input" class="form-control bg-transparent text-white border-0 shadow-none px-3" placeholder="Ask your AI tutor anything..." required autocomplete="off" style="font-size: 0.88rem;">
+                    <button type="submit" class="btn btn-primary rounded-3 px-3 fw-bold shadow-sm d-flex align-items-center gap-1" id="rag-chat-send-btn" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none;">
+                        <i class="fas fa-paper-plane" style="font-size: 0.85rem;"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+function useSamplePrompt(text) {
+    const input = document.getElementById("rag-chat-input");
+    if (input) {
+        input.value = text.replace(/^"|"$/g, '').trim();
+        input.focus();
+    }
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    const drawerEl = document.getElementById("ragChatOffcanvas");
+    const fabContainer = document.getElementById("rag-chat-fab-container");
+    if (drawerEl && fabContainer) {
+        drawerEl.addEventListener("show.bs.offcanvas", function() {
+            fabContainer.style.opacity = "0";
+            fabContainer.style.pointerEvents = "none";
+        });
+        drawerEl.addEventListener("hidden.bs.offcanvas", function() {
+            fabContainer.style.opacity = "1";
+            fabContainer.style.pointerEvents = "auto";
+        });
+    }
+});
+
+async function handleRagChatSubmit(e) {
+    e.preventDefault();
+    const input = document.getElementById("rag-chat-input");
+    const subjIdInput = document.getElementById("rag-active-subject-id");
+    const msgContainer = document.getElementById("rag-chat-messages");
+    const loading = document.getElementById("rag-chat-loading");
+    const sendBtn = document.getElementById("rag-chat-send-btn");
+
+    const message = input.value.trim();
+    const subjectId = subjIdInput ? subjIdInput.value : null;
+
+    if (!message || !subjectId) return;
+
+    // Remove empty state placeholder if present
+    const emptyState = document.getElementById("rag-chat-empty-state");
+    if (emptyState) {
+        emptyState.remove();
+    }
+
+    // Append user message bubble (aligned right)
+    const userWrapper = document.createElement("div");
+    userWrapper.className = "d-flex justify-content-end mb-2";
+    userWrapper.innerHTML = `
+        <div class="p-2 px-3 rounded-3 text-white text-break" style="max-width: 82%; font-size: 0.88rem; background: linear-gradient(135deg, #4f46e5, #6366f1); box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3);">
+            ${escapeHtml(message)}
+        </div>
+    `;
+    msgContainer.appendChild(userWrapper);
+
+    input.value = "";
+    input.disabled = true;
+    sendBtn.disabled = true;
+    loading.classList.remove("d-none");
+    msgContainer.scrollTop = msgContainer.scrollHeight;
+
+    try {
+        const response = await fetch("/student/api/rag/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: message, subject_id: parseInt(subjectId) })
+        });
+        const data = await response.json();
+
+        loading.classList.add("d-none");
+        input.disabled = false;
+        sendBtn.disabled = false;
+
+        const aiWrapper = document.createElement("div");
+        aiWrapper.className = "d-flex align-items-start gap-2 mb-2";
+
+        if (data.status === "success") {
+            if (data.grounded) {
+                let sourcesHtml = '';
+                if (data.sources && data.sources.length > 0) {
+                    sourcesHtml += `<div class="mt-2 pt-2 border-top border-secondary text-muted" style="font-size:0.72rem;">`;
+                    sourcesHtml += `<div class="text-success mb-1 fw-semibold"><i class="fas fa-check-circle me-1"></i>Grounded in your study materials</div>`;
+                    sourcesHtml += `<div class="d-flex flex-wrap gap-1 mt-1">`;
+                    data.sources.forEach(s => {
+                        sourcesHtml += `<span class="badge bg-dark border border-secondary text-light fw-normal text-truncate" style="max-width: 220px; font-size: 0.7rem;">📄 ${escapeHtml(s.filename)}${s.chapter_title ? ' • 📖 ' + escapeHtml(s.chapter_title) : ''}</span>`;
+                    });
+                    sourcesHtml += `</div></div>`;
+                }
+                aiWrapper.innerHTML = `
+                    <div class="rounded-circle p-2 flex-shrink-0 d-flex align-items-center justify-content-center shadow-sm" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); width: 32px; height: 32px;">
+                        <i class="fas fa-sparkles text-white" style="font-size: 0.78rem;"></i>
+                    </div>
+                    <div class="p-3 rounded-3 border border-secondary text-white text-break" style="max-width: 88%; font-size: 0.88rem; background: #1e293b; line-height: 1.5;">
+                        <div>${escapeHtml(data.answer).replace(/\n/g, '<br>')}</div>
+                        ${sourcesHtml}
+                    </div>
+                `;
+            } else {
+                aiWrapper.innerHTML = `
+                    <div class="rounded-circle bg-warning bg-opacity-20 text-warning p-2 flex-shrink-0 d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
+                        <i class="fas fa-exclamation-triangle text-warning" style="font-size: 0.85rem;"></i>
+                    </div>
+                    <div class="p-3 rounded-3 border border-secondary text-white-50 text-break" style="max-width: 88%; font-size: 0.88rem; background: #1e293b; line-height: 1.5;">
+                        <div>${escapeHtml(data.answer)}</div>
+                    </div>
+                `;
+            }
+        } else {
+            aiWrapper.innerHTML = `
+                <div class="rounded-circle bg-danger bg-opacity-20 text-danger p-2 flex-shrink-0 d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
+                    <i class="fas fa-times-circle text-danger" style="font-size: 0.85rem;"></i>
+                </div>
+                <div class="p-3 rounded-3 border border-danger text-danger text-break" style="max-width: 88%; font-size: 0.88rem; background: #1e293b; line-height: 1.5;">
+                    <div>${escapeHtml(data.message || 'Error fetching answer.')}</div>
+                </div>
+            `;
+        }
+
+        msgContainer.appendChild(aiWrapper);
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+    } catch (err) {
+        loading.classList.add("d-none");
+        input.disabled = false;
+        sendBtn.disabled = false;
+
+        const errWrapper = document.createElement("div");
+        errWrapper.className = "d-flex align-items-start gap-2 mb-2";
+        errWrapper.innerHTML = `
+            <div class="p-2 px-3 rounded-3 bg-danger text-white me-auto small">
+                Connection error. Please try again.
+            </div>
+        `;
+        msgContainer.appendChild(errWrapper);
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+    }
+}
 </script>
 {% endblock %}

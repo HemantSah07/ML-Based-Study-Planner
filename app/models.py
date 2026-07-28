@@ -493,6 +493,35 @@ class Flashcard(db.Model):
     front = db.Column(db.Text, nullable=False)
     back = db.Column(db.Text, nullable=False)
 
+
+class FlashcardReview(db.Model):
+    __tablename__ = "flashcard_reviews"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    flashcard_id = db.Column(db.Integer, db.ForeignKey('flashcards.id', ondelete='CASCADE'), nullable=False)
+    easiness_factor = db.Column(db.Float, default=2.5)
+    interval_days = db.Column(db.Integer, default=0)
+    repetitions = db.Column(db.Integer, default=0)
+    next_review_date = db.Column(db.DateTime, default=datetime.utcnow)
+    last_reviewed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_quality_rating = db.Column(db.Integer, nullable=True)
+
+class SubjectBook(db.Model):
+    __tablename__ = "subject_books"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
+    title = db.Column(db.String(255), nullable=False)
+    author = db.Column(db.String(255), nullable=True)
+    publisher = db.Column(db.String(255), nullable=True)
+    edition = db.Column(db.String(100), nullable=True)
+    isbn = db.Column(db.String(100), nullable=True)
+    toc_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('subject_books', lazy=True, cascade="all, delete-orphan"))
+    subject = db.relationship('Subject', backref=db.backref('books', lazy=True))
+
 class QuizScore(db.Model):
     __tablename__ = "quiz_scores"
     id = db.Column(db.Integer, primary_key=True)
@@ -704,6 +733,94 @@ class PastQuestion(db.Model):
     topic = db.relationship('Topic')
 
 
+class MaterialImportBatch(db.Model):
+    """
+    Tracks one zip upload by a student. Mirrors the ImportSession pattern
+    already used for admin curriculum import, but scoped to a student's
+    own study material rather than global curriculum data.
+
+    Lifecycle: uploaded -> extracted -> reviewing -> committed -> failed
+    """
+    __tablename__ = "material_import_batches"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='uploaded')
+    source_filename = db.Column(db.String(255), nullable=False)
+    stored_zip_path = db.Column(db.String(500), nullable=False)
+    total_files_found = db.Column(db.Integer, default=0)
+    matched_files = db.Column(db.Integer, default=0)
+    unmatched_files = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    committed_at = db.Column(db.DateTime, nullable=True)
+    error_log = db.Column(db.Text, nullable=True)
+
+    user = db.relationship('User', backref=db.backref('import_batches', lazy=True))
+    unmatched_items = db.relationship('MaterialImportUnmatched', backref='batch', lazy=True, cascade='all, delete-orphan')
+
+
+class MaterialImportUnmatched(db.Model):
+    """
+    A folder found in the zip whose name didn't confidently match any
+    Subject the student is enrolled in. Student resolves these manually
+    in the review screen before commit — never silently dropped.
+    """
+    __tablename__ = "material_import_unmatched"
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey('material_import_batches.id', ondelete='CASCADE'), nullable=False)
+    folder_path_in_zip = db.Column(db.String(500), nullable=False)
+    detected_name = db.Column(db.String(200), nullable=True)
+    suggested_subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=True)
+    resolved_subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=True)
+    file_count = db.Column(db.Integer, default=0)
+
+
+class MaterialChunk(db.Model):
+    """
+    One retrievable chunk of text from an UploadedMaterial file.
+    embedding_vector stored as JSON list of floats (SQLite has no native vector type).
+    """
+    __tablename__ = "material_chunks"
+    id = db.Column(db.Integer, primary_key=True)
+    material_id = db.Column(db.Integer, db.ForeignKey('uploaded_materials.id', ondelete='CASCADE'), nullable=False)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    chunk_index = db.Column(db.Integer, nullable=False)
+    chunk_text = db.Column(db.Text, nullable=False)
+    token_count = db.Column(db.Integer, nullable=True)
+    embedding_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    material = db.relationship('UploadedMaterial', backref=db.backref('chunks', lazy=True, cascade='all, delete-orphan'))
+    subject = db.relationship('Subject')
+
+
+class ModuleDescriptor(db.Model):
+    """
+    Structured fields extracted (via Gemini) from a Module Descriptor file.
+    One per subject per student.
+    """
+    __tablename__ = "module_descriptors"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
+    source_material_id = db.Column(db.Integer, db.ForeignKey('uploaded_materials.id'), nullable=True)
+
+    has_final_exam = db.Column(db.Boolean, nullable=True)
+    exam_weight_pct = db.Column(db.Float, nullable=True)
+    coursework_weight_pct = db.Column(db.Float, nullable=True)
+    has_presentation = db.Column(db.Boolean, nullable=True)
+    topics_json = db.Column(db.Text, nullable=True)
+    assessment_dates_json = db.Column(db.Text, nullable=True)
+    raw_extraction_json = db.Column(db.Text, nullable=True)
+    extracted_at = db.Column(db.DateTime, default=datetime.utcnow)
+    extraction_confidence = db.Column(db.String(20), default='unverified')
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'subject_id', name='uq_module_descriptor_user_subject'),)
+
+    user = db.relationship('User')
+    subject = db.relationship('Subject')
+
+
 class UploadedMaterial(db.Model):
     __tablename__ = "uploaded_materials"
     id = db.Column(db.Integer, primary_key=True)
@@ -722,11 +839,20 @@ class UploadedMaterial(db.Model):
     mcqs_json = db.Column(db.Text, nullable=True)
     last_opened = db.Column(db.DateTime, nullable=True)
 
+    # NEW — RAG & classification columns
+    import_batch_id = db.Column(db.Integer, db.ForeignKey('material_import_batches.id'), nullable=True)
+    category = db.Column(db.String(30), nullable=False, default='Other')
+    file_size_bytes = db.Column(db.Integer, nullable=True)
+    embedding_status = db.Column(db.String(20), nullable=False, default='pending')
+    relative_folder_path = db.Column(db.String(500), nullable=True)
+
     # Relationships
     user = db.relationship('User', backref=db.backref('uploaded_materials', lazy=True))
     subject = db.relationship('Subject', backref=db.backref('uploaded_materials', lazy=True))
     chapter = db.relationship('Chapter', backref=db.backref('uploaded_materials', lazy=True))
     topic = db.relationship('Topic', backref=db.backref('uploaded_materials', lazy=True))
+    import_batch = db.relationship('MaterialImportBatch', backref=db.backref('materials', lazy=True))
+
 
 
 class AppSetting(db.Model):

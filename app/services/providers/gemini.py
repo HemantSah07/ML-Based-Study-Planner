@@ -41,7 +41,7 @@ class GeminiProvider(BaseAIProvider):
       2. google-generativeai  (old, deprecated but still functional)
     """
 
-    DEFAULT_MODEL_NEW = "gemini-2.5-flash"
+    DEFAULT_MODEL_NEW = "gemini-3.5-flash"
     DEFAULT_MODEL_OLD = "gemini-1.5-flash"
 
     def __init__(self, api_key: str):
@@ -61,6 +61,10 @@ class GeminiProvider(BaseAIProvider):
                 "No Gemini SDK found. Install with: pip install google-genai"
             )
 
+        mode = self._mode
+        key = self.api_key
+        print(f"[AI DIAGNOSTIC] Mode: {mode} | Key Present: {bool(key)} | First 4 chars: {key[:4] if key else 'NONE'}")
+
     # ── Core generation ──────────────────────────────────────────────────────
 
     def generate_content(self, prompt: str, **kwargs) -> str:
@@ -75,6 +79,10 @@ class GeminiProvider(BaseAIProvider):
         backoff_factor = kwargs.get("backoff_factor", 2.0)
         initial_delay  = kwargs.get("initial_delay", 1.0)
         model_name     = kwargs.get("model", self.DEFAULT_MODEL_NEW)
+
+        # Proactively normalize/fallback unreleased gemini-3.1, 2.5, or unavailable lite strings
+        if "gemini-3.1" in model_name or "lite" in model_name or "2.5" in model_name:
+            model_name = "gemini-3.5-flash"
 
         system_instruction = kwargs.get("system_instruction", None)
         response_mime_type = kwargs.get("response_mime_type", None)
@@ -101,6 +109,16 @@ class GeminiProvider(BaseAIProvider):
                 raise ValueError("Gemini new-SDK response contained no text.")
             except Exception as e:
                 err = str(e)
+                # Check for model not found / unrecognized model errors to perform dynamic fallback
+                is_model_error = any(t in err.lower() for t in ["model not found", "not found", "unrecognized", "invalid model", "unsupported model"])
+                if is_model_error and model_name != "gemini-3.5-flash":
+                    logger.warning(
+                        "Model '%s' failed due to unrecognized model error: %s. Falling back to 'gemini-3.5-flash' and retrying...",
+                        model_name, err
+                    )
+                    model_name = "gemini-3.5-flash"
+                    continue
+
                 retryable = any(
                     t in err for t in [
                         "429", "ResourceExhausted", "Quota", "quota",

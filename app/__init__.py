@@ -52,6 +52,16 @@ def create_app(config_class=None):
     with app.app_context():
         from app.live_config import load_live_config
         load_live_config(app, force=True)
+        try:
+            db.create_all()
+        except Exception as err:
+            print(f"[DB Setup] db.create_all() warning: {err}")
+        try:
+            from sqlalchemy import text
+            db.session.execute(text("ALTER TABLE uploaded_materials ADD COLUMN relative_folder_path VARCHAR(500)"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
     @app.before_request
     def check_live_config():

@@ -12,6 +12,7 @@ from app import db
 from datetime import date, datetime, time, timedelta
 import joblib
 import os
+import shutil
 import numpy as np
 from app.utils.ocr_processor import MarksheetProcessor
 from werkzeug.utils import secure_filename
@@ -21,7 +22,13 @@ import io
 from difflib import SequenceMatcher
 from app.utils.planner_generator import generate_study_planner
 from app.utils.timezone_utils import local_now_for_user, local_today_for_user, default_timezone_for_country, MULTI_TIMEZONE_OPTIONS
-from app.services.ai_service import ai_service
+from app.services.ai_service import (
+    ai_service,
+    AIServiceError,
+    QuotaExceededError,
+    RateLimitError,
+    ConfigurationError,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -388,6 +395,119 @@ def get_level_slug(lvl_string):
     return "bachelors"
 
 
+def calculate_subject_hour_allocations(subjects_info, total_available_hours):
+    """
+    Shared hour allocation calculation for ML Predictor and Study Planner.
+    Applies a 0.5-hour floor per subject first, then redistributes the remaining
+    pool across subjects proportional to their risk score & difficulty weights.
+    Uses the largest-remainder method (Hamilton/Hare-Niemeyer) for 1-decimal
+    rounding so the sum of allocations matches total_available_hours exactly.
+    """
+    if not subjects_info:
+        return {}
+
+    total_avail = max(0.0, float(total_available_hours or 0.0))
+    if total_avail <= 0:
+        return {(s.get("name") or s.get("subject_name") or s.get("subject")): 0.0 for s in subjects_info if (s.get("name") or s.get("subject_name") or s.get("subject"))}
+
+    valid_subjects = []
+    seen_names = set()
+    for s in subjects_info:
+        name = s.get("name") or s.get("subject_name") or s.get("subject")
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
+        diff = float(s.get("difficulty") or s.get("subject_difficulty") or 3.0)
+        risk_score = float(s.get("risk_score") if s.get("risk_score") is not None else 0.5)
+        perf_score = s.get("previous_grade") or s.get("performance_score") or s.get("score")
+
+        base_weight = 1.0 + (diff * 0.3)
+        risk_weight = risk_score * (diff * 0.7)
+        gap_weight = max(0.0, (100.0 - float(perf_score)) / 100.0) * 0.5 if perf_score is not None else 0.2
+
+        tw = max(0.1, base_weight + risk_weight + gap_weight)
+        valid_subjects.append({
+            "name": name,
+            "weight": tw
+        })
+
+    num_subjects = len(valid_subjects)
+    if num_subjects == 0:
+        return {}
+
+    # If total pool is less than (num_subjects * 0.5), divide total_avail equally with largest-remainder rounding
+    if total_avail < (num_subjects * 0.5):
+        raw_share = total_avail / num_subjects
+        base_allocs = {}
+        remainders = []
+        for vs in valid_subjects:
+            base = float(int(raw_share * 10)) / 10.0
+            rem = raw_share - base
+            base_allocs[vs["name"]] = base
+            remainders.append((rem, vs["name"]))
+
+        target_tenths = int(round(total_avail * 10))
+        if total_avail > 0 and target_tenths == 0:
+            target_tenths = 1
+        current_tenths = int(round(sum(base_allocs.values()) * 10))
+        missing_tenths = max(0, target_tenths - current_tenths)
+
+        remainders.sort(key=lambda x: x[0], reverse=True)
+        for i in range(min(missing_tenths, len(remainders))):
+            name = remainders[i][1]
+            base_allocs[name] = round(base_allocs[name] + 0.1, 1)
+
+        return base_allocs
+
+    # Pass 1: Unrounded raw allocation (0.5h floor + weighted share of remaining pool)
+    floor = 0.5
+    remaining_pool = total_avail - (num_subjects * floor)
+    sum_weights = sum(vs["weight"] for vs in valid_subjects) or 1.0
+
+    raw_allocs = {}
+    base_allocs = {}
+    remainders = []
+
+    for vs in valid_subjects:
+        name = vs["name"]
+        raw_val = floor + (vs["weight"] / sum_weights) * remaining_pool
+        raw_allocs[name] = raw_val
+        base_val = float(int(raw_val * 10)) / 10.0
+        rem = raw_val - base_val
+        base_allocs[name] = base_val
+        remainders.append((rem, name))
+
+    # Pass 2: Largest-remainder distribution for 1-decimal rounding alignment
+    target_tenths = int(round(total_avail * 10))
+    current_tenths = int(round(sum(base_allocs.values()) * 10))
+    missing_tenths = max(0, target_tenths - current_tenths)
+
+    remainders.sort(key=lambda x: x[0], reverse=True)
+    for i in range(min(missing_tenths, len(remainders))):
+        name = remainders[i][1]
+        base_allocs[name] = round(base_allocs[name] + 0.1, 1)
+
+    return base_allocs
+
+
+def derive_subject_difficulty(score_pct):
+    """
+    Single source of truth helper to derive 1-5 difficulty rating from
+    assessment performance score percentage (matching 5-tier standard scale).
+    """
+    if score_pct is None:
+        return 3.0
+    try:
+        score = float(score_pct)
+        if score < 35.0: return 5.0      # Level 5 · Very Hard
+        elif score < 50.0: return 4.0    # Level 4 · Hard
+        elif score < 70.0: return 3.0    # Level 3 · Moderate
+        elif score < 85.0: return 2.0    # Level 2 · Light
+        else: return 1.0                 # Level 1 · Easy
+    except (TypeError, ValueError):
+        return 3.0
+
+
 def get_subject_features(user_id, subject_name, input_grade, input_attendance, input_weekly_hours, input_difficulty, input_days_until_exam=30, input_days_since_last_studied=None):
     """Build the 7-feature vector used by the Random Forest model."""
     subject = Subject.query.filter_by(name=subject_name).first()
@@ -401,7 +521,15 @@ def get_subject_features(user_id, subject_name, input_grade, input_attendance, i
     attendance = float(input_attendance)
 
     # ── Feature 3: difficulty ─────────────────────────────────────────────────
-    difficulty = float(input_difficulty)
+    # Server-side recomputed from previous_grade for single source of truth
+    difficulty = float(derive_subject_difficulty(previous_grade))
+    if subject and subject.difficulty_level != int(difficulty):
+        try:
+            subject.difficulty_level = int(difficulty)
+            db.session.add(subject)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
     # ── Feature 4: study_hours (weekly) ──────────────────────────────────────
     study_hours = float(input_weekly_hours)
@@ -645,6 +773,15 @@ def dashboard():
     # Get compact assessment summary
     summary = analytics.assessment_summary(limit=3)
 
+    # Trigger smart real-time notifications
+    unread_notifications = []
+    try:
+        from app.services.notification_service import generate_student_notifications, get_unread_notifications
+        generate_student_notifications(current_user.id)
+        unread_notifications = get_unread_notifications(current_user.id)
+    except Exception as ne:
+        print(f"[Notifications Error]: {ne}")
+
     return render_template("student/dashboard.html",
                            user=current_user,
                            profile=ctx.profile,
@@ -661,6 +798,7 @@ def dashboard():
                            today_slots=today_slots,
                            recommended_review_bookmarks=recommended_review_bookmarks,
                            recent_study_history=recent_study_history,
+                           unread_notifications=unread_notifications,
                            recent_assessments=summary["recent"],
                            overall_stats={
                                "total_attempted": summary["total_attempted"],
@@ -668,6 +806,118 @@ def dashboard():
                                "incorrect": summary["total_incorrect"],
                                "accuracy": summary["accuracy"]
                            })
+
+@student_bp.route("/api/notifications/mark-read/<int:notif_id>", methods=["POST"])
+@login_required
+def api_mark_notification_read(notif_id):
+    from app.services.notification_service import mark_notification_as_read
+    ok = mark_notification_as_read(notif_id, current_user.id)
+    return jsonify({"status": "success" if ok else "error"}), 200
+
+
+@student_bp.route("/api/notifications/mark-all-read", methods=["POST"])
+@login_required
+def api_mark_all_notifications_read():
+    from app.services.notification_service import mark_all_notifications_as_read
+    mark_all_notifications_as_read(current_user.id)
+    return jsonify({"status": "success"}), 200
+
+
+@student_bp.route("/api/flashcards/review", methods=["POST"])
+@login_required
+def api_flashcard_review():
+    data = request.get_json() or {}
+    flashcard_id = data.get("flashcard_id")
+    quality_rating = data.get("quality_rating")
+    user_answer = data.get("user_answer")
+
+    if not flashcard_id:
+        return jsonify({"status": "error", "message": "Missing flashcard_id"}), 400
+
+    try:
+        from app.services.spaced_repetition import process_sm2_review
+        res = process_sm2_review(
+            user_id=current_user.id,
+            flashcard_id=int(flashcard_id),
+            quality_rating=int(quality_rating) if quality_rating is not None else None,
+            user_answer=str(user_answer) if user_answer else None
+        )
+        return jsonify(res), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+
+@student_bp.route("/api/study-log/auto-add", methods=["POST"])
+@login_required
+def api_study_log_auto_add():
+    from datetime import date
+    data = request.get_json() or {}
+    subject_id = data.get("subject_id")
+    duration_minutes = float(data.get("duration_minutes", 25.0))
+    hours = round(duration_minutes / 60.0, 2)
+
+    from app.models import StudyLog, Notification, Subject
+    today = date.today()
+
+    if not subject_id:
+        sub = Subject.query.first()
+        subject_id = sub.id if sub else 1
+
+    log = StudyLog(
+        user_id=current_user.id,
+        subject_id=subject_id,
+        duration_hours=hours,
+        date=today,
+        notes=f"Auto-logged via {int(duration_minutes)}-minute Pomodoro focus session."
+    )
+    db.session.add(log)
+
+    # Dismiss missing study log notifications
+    try:
+        Notification.query.filter(
+            Notification.user_id == current_user.id,
+            Notification.message.like("%No study hours logged yesterday%")
+        ).update({"is_read": True}, synchronize_session=False)
+    except Exception:
+        pass
+
+    db.session.commit()
+
+    return jsonify({
+        "status": "success",
+        "message": f"Successfully logged {hours}h study time!",
+        "logged_hours": hours
+    })
+
+
+@student_bp.route("/api/quiz/generate-weak-spots", methods=["POST"])
+@login_required
+def api_generate_weak_spot_quiz():
+    data = request.get_json() or {}
+    subject_id = data.get("subject_id")
+    try:
+        from app.services.weak_spot_quiz import generate_weak_spot_quiz
+        res = generate_weak_spot_quiz(current_user.id, int(subject_id) if subject_id else None)
+        return jsonify(res), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+
+@student_bp.route("/api/knowledge-graph/<int:subject_id>", methods=["GET"])
+@login_required
+def api_knowledge_graph(subject_id):
+    from app.services.knowledge_graph import build_subject_graph
+    res = build_subject_graph(current_user.id, subject_id)
+    return jsonify(res), 200
+
+
+@student_bp.route("/api/exam-readiness/<int:subject_id>", methods=["GET"])
+@login_required
+def api_exam_readiness(subject_id):
+    from app.services.exam_readiness import generate_exam_readiness_score
+    res = generate_exam_readiness_score(current_user.id, subject_id)
+    return jsonify(res), 200
+
 
 @student_bp.route("/evaluation", methods=["GET", "POST"])
 @login_required
@@ -847,6 +1097,7 @@ def schedule():
 
     subjects = ctx.subjects
     today_idx = local_now_for_user(current_user.id).weekday()
+    draft_subjects = session.pop("draft_schedule_form_data", None)
 
     return render_template(
         "student/schedule.html",
@@ -858,6 +1109,7 @@ def schedule():
         risk_counts=risk,
         profile=ctx.profile,
         get_subject_performance_score=get_subject_performance_score,
+        draft_subjects=draft_subjects,
     )
 
 @student_bp.route("/api/risk-analysis", methods=["POST"])
@@ -924,11 +1176,21 @@ def risk_analysis():
     
     for s in subjects_list:
         name = s.get("name")
-        grade = s.get("previous_grade", 70.0)
-        att = s.get("attendance", 85.0)
-        hrs = s.get("study_hours", 6.0)
-        diff = s.get("difficulty", 3.0)
-        exam_days = s.get("days_until_exam", 30)
+        subj_obj = Subject.query.filter_by(name=name).first()
+        real_grade = None
+        if subj_obj:
+            snap = get_subject_performance_snapshot(current_user.id, subj_obj.id)
+            if snap["source"] != "missing" and snap["score"] is not None:
+                real_grade = float(snap["score"])
+
+        if real_grade is None:
+            return jsonify({"status": "error", "message": f"Subject '{name}' has no completed assessment score. Please complete an assessment in {name} first."}), 400
+
+        grade = real_grade
+        diff = float(derive_subject_difficulty(grade))
+        att = float(s.get("attendance", 85.0))
+        hrs = float(s.get("study_hours", 6.0))
+        exam_days = int(s.get("days_until_exam", 30))
         
         features = get_subject_features(current_user.id, name, grade, att, hrs, diff, exam_days)
         
@@ -969,28 +1231,29 @@ def risk_analysis():
         elif risk_score >= 0.35:
             risk_label = "Medium"
             
-        # Proportional hour allocation based on continuous risk score (0–1)
-        base = 1.0 + (diff * 0.4)          # low-risk baseline
-        extra = risk_score * (diff * 0.8)   # added hours for risk
-        allocated = base + extra
-            
-        total_allocated_hours += allocated
-        
         results.append({
             "name": name,
+            "difficulty": diff,
+            "previous_grade": grade,
             "risk_numeric": risk_pred,
             "risk_level": risk_label,
             "risk_score": round(risk_score, 3),
             "risk_pct": risk_pct,
-            "allocated_hours": round(allocated, 1)
+            "allocated_hours": 0.0,
         })
-        
+
     available_hours = get_available_study_hours_total(current_user.id)
-            
+    allocations = calculate_subject_hour_allocations(results, available_hours)
+    total_allocated_hours = 0.0
+
+    for item in results:
+        item["allocated_hours"] = allocations.get(item["name"], 2.0)
+        total_allocated_hours += item["allocated_hours"]
+
     warning = ""
     if total_allocated_hours > available_hours:
         warning = f"⚠️ Alert: Recommended study hours ({round(total_allocated_hours, 1)} hrs) exceed your available weekly study slots ({round(available_hours, 1)} hrs). Please configure more study slots in your availability dashboard."
-        
+
     return jsonify({
         "status": "success",
         "analysis": results,
@@ -1091,6 +1354,23 @@ def generate_schedule():
         flash("Run ML Predictor for at least one assessed subject before generating a schedule.", "warning")
         return redirect(url_for('student.schedule'))
 
+    def fail_validation(msg):
+        draft_payload = []
+        for j, sname in enumerate(subject_names):
+            if not sname:
+                continue
+            draft_payload.append({
+                "name": sname,
+                "previous_grade": previous_grades[j] if j < len(previous_grades) else "",
+                "attendance": attendances[j] if j < len(attendances) else "85",
+                "study_hours": study_hours[j] if j < len(study_hours) else "6",
+                "days_until_exam": exam_days_list[j] if j < len(exam_days_list) else "30",
+                "difficulty": difficulties[j] if j < len(difficulties) else "3",
+            })
+        session["draft_schedule_form_data"] = draft_payload
+        flash(msg, "danger")
+        return redirect(url_for('student.schedule'))
+
     # Server-side range checks
     for i, name in enumerate(subject_names):
         if not name:
@@ -1098,29 +1378,23 @@ def generate_schedule():
         try:
             grade = float(previous_grades[i])
             if grade < 0 or grade > 100:
-                flash(f"Validation failed: Grade % for '{name}' must be between 0 and 100.", "danger")
-                return redirect(url_for('student.schedule'))
+                return fail_validation(f"Validation failed: Grade % for '{name}' must be between 0 and 100.")
         except (TypeError, ValueError, IndexError):
-            flash(f"Validation failed: Invalid Grade % value for '{name}'.", "danger")
-            return redirect(url_for('student.schedule'))
+            return fail_validation(f"Validation failed: Invalid Grade % value for '{name}'.")
 
         try:
             att = float(attendances[i])
             if att < 0 or att > 100:
-                flash(f"Validation failed: Attendance % for '{name}' must be between 0 and 100.", "danger")
-                return redirect(url_for('student.schedule'))
+                return fail_validation(f"Validation failed: Attendance % for '{name}' must be between 0 and 100.")
         except (TypeError, ValueError, IndexError):
-            flash(f"Validation failed: Invalid Attendance % value for '{name}'.", "danger")
-            return redirect(url_for('student.schedule'))
+            return fail_validation(f"Validation failed: Invalid Attendance % value for '{name}'.")
 
         try:
             hrs = float(study_hours[i])
             if hrs < 0 or hrs > 168:
-                flash(f"Validation failed: Study hrs/wk for '{name}' must be between 0 and 168.", "danger")
-                return redirect(url_for('student.schedule'))
+                return fail_validation(f"Validation failed: Study hrs/wk for '{name}' must be between 0 and 168.")
         except (TypeError, ValueError, IndexError):
-            flash(f"Validation failed: Invalid Study hrs/wk value for '{name}'.", "danger")
-            return redirect(url_for('student.schedule'))
+            return fail_validation(f"Validation failed: Invalid Study hrs/wk value for '{name}'.")
 
     # ── 1. Snapshot previous week actual hours for feedback loop ──────────────
     today_local = local_today_for_user(current_user.id)
@@ -1209,10 +1483,20 @@ def generate_schedule():
 
     for i in range(len(subject_names)):
         name  = subject_names[i]
-        grade = float(previous_grades[i]) if i < len(previous_grades) else 70.0
+        subj_obj = Subject.query.filter_by(name=name).first()
+        real_grade = None
+        if subj_obj:
+            snap = get_subject_performance_snapshot(current_user.id, subj_obj.id)
+            if snap["source"] != "missing" and snap["score"] is not None:
+                real_grade = float(snap["score"])
+
+        if real_grade is None:
+            return fail_validation(f"Subject '{name}' has no completed assessment score. Please complete an assessment in {name} first.")
+
+        grade = real_grade
+        diff = float(derive_subject_difficulty(grade))
         att   = float(attendances[i])      if i < len(attendances)     else 85.0
         hrs   = float(study_hours[i])      if i < len(study_hours)     else 6.0
-        diff  = float(difficulties[i])     if i < len(difficulties)    else 3.0
         exam_d = int(exam_days_list[i])    if i < len(exam_days_list) and exam_days_list[i] else 30
 
         features = get_subject_features(current_user.id, name, grade, att, hrs, diff, exam_d)
@@ -1244,19 +1528,11 @@ def generate_schedule():
         except Exception:
             pass
 
-        # Proportional hours: risk_score in [0,1] maps to hours in [base, base+max_extra]
-        MAX_DAILY_CAP = 3.0  # maximum hours per subject per day
-        base  = 1.0 + (diff * 0.4)
-        extra = risk_score * (diff * 0.8)
-        allocated = base + extra
-
         risk_label = "Low Risk"
         if risk_score >= 0.6:
             risk_label = "High Risk"
         elif risk_score >= 0.35:
             risk_label = "Medium Risk"
-
-        total_recommended_hours += allocated
 
         subj = Subject.query.filter_by(name=name).first()
         if not subj:
@@ -1271,12 +1547,22 @@ def generate_schedule():
             'risk_label': risk_label,
             'risk_score': risk_score,
             'score': risk_score * diff,
-            'allocated_hours': allocated,
-            # raw inputs retained for contextual advice text
+            'allocated_hours': 0.0,
             'grade': grade,
             'attendance': att,
             'difficulty': diff,
         })
+
+    # Compute risk-weighted proportional hour allocations using shared function
+    available_hours = get_available_study_hours_total(current_user.id)
+    if available_hours <= 0:
+        available_hours = float(ctx.profile.target_weekly_hours if ctx.profile and ctx.profile.target_weekly_hours else 14.0)
+
+    allocations = calculate_subject_hour_allocations(subject_data, available_hours)
+    total_recommended_hours = 0.0
+    for sd in subject_data:
+        sd['allocated_hours'] = allocations.get(sd['name'], 2.0)
+        total_recommended_hours += sd['allocated_hours']
 
     logger.info(
         "Schedule generation subjects considered user=%s subjects=%s",
@@ -1502,7 +1788,7 @@ def generate_assessment_questions_for_subject(subject_id, student_id=None):
     Works for EVERY class level, faculty, and program stored in the Subject table.
     Returns the number of questions actually saved to the database (0 on failure).
     """
-    from app.services.ai_service import ai_service, QuotaExceededError, FEATURE_MCQ
+    from app.services.ai_service import ai_service, AIServiceError, QuotaExceededError, ConfigurationError, FEATURE_MCQ
 
     subject = Subject.query.get(subject_id)
     if not subject:
@@ -1520,12 +1806,48 @@ def generate_assessment_questions_for_subject(subject_id, student_id=None):
             "(level='%s', program='%s', subject_id=%s)",
             name, level, program, subject_id,
         )
-    else:
-        _gen_logger.info(
-            "TOPUP — existing=%d, generating more for '%s' "
-            "(level='%s', program='%s', subject_id=%s)",
-            total_existing, name, level, program, subject_id,
-        )
+    # ── Attempt 0: RAG Grounded MCQ Generation (from uploaded materials) ─────
+    uid = student_id or (current_user.id if current_user and current_user.is_authenticated else None)
+    if uid:
+        try:
+            from app.services.grounded_assessment import generate_grounded_mcqs
+            grounded_qs, reason = generate_grounded_mcqs(user_id=uid, subject_id=subject_id, subject_name=name, count=12)
+            if grounded_qs and isinstance(grounded_qs, list):
+                _gen_logger.info("RAG Grounded generation succeeded for subject_id=%s (%d questions)", subject_id, len(grounded_qs))
+                existing_qs = [q.question_text.lower()[:50] for q in AssessmentQuestion.query.filter_by(subject_id=subject_id).all()]
+                saved_count = 0
+                for q_data in grounded_qs:
+                    q_text = q_data.get("q", q_data.get("question_text", ""))
+                    if not q_text or len(q_text) < 10 or q_text.lower()[:50] in existing_qs:
+                        continue
+                    opt_a = q_data.get("a", q_data.get("option_a"))
+                    opt_b = q_data.get("b", q_data.get("option_b"))
+                    opt_c = q_data.get("c", q_data.get("option_c"))
+                    opt_d = q_data.get("d", q_data.get("option_d"))
+                    correct = q_data.get("ans", q_data.get("correct_answer", ""))
+                    if not all([opt_a, opt_b, opt_c, opt_d]) or str(correct).upper() not in ["A", "B", "C", "D"]:
+                        continue
+                    new_q = AssessmentQuestion(
+                        subject_id=subject_id,
+                        question_text=q_text,
+                        option_a=opt_a,
+                        option_b=opt_b,
+                        option_c=opt_c,
+                        option_d=opt_d,
+                        correct_answer=str(correct).upper(),
+                        difficulty=q_data.get("diff", "medium").lower(),
+                        question_type="grounded_conceptual",
+                        explanation=q_data.get("explanation", ""),
+                        source="rag_grounded"
+                    )
+                    db.session.add(new_q)
+                    saved_count += 1
+                if saved_count > 0:
+                    db.session.commit()
+                    return saved_count
+        except Exception as e:
+            _gen_logger.warning("RAG Grounded generation failed for subject_id=%s, falling back to generic AI: %s", subject_id, e)
+
 
     # ── Build chapter/topic context ─────────────────────────────────────────
     chapters = Chapter.query.filter_by(subject_id=subject_id).all()
@@ -1641,7 +1963,7 @@ def generate_assessment_questions_for_subject(subject_id, student_id=None):
                 "Structured Gemini response parsed: %d items",
                 len(questions_data) if isinstance(questions_data, list) else -1,
             )
-    except QuotaExceededError:
+    except (QuotaExceededError, ConfigurationError):
         raise
     except Exception as e:
         _gen_logger.warning(
@@ -1674,7 +1996,7 @@ def generate_assessment_questions_for_subject(subject_id, student_id=None):
                     len(questions_data) if isinstance(questions_data, list) else -1,
                     subject_id,
                 )
-        except QuotaExceededError:
+        except (QuotaExceededError, ConfigurationError):
             raise
         except Exception as e2:
             _gen_logger.error(
@@ -1833,8 +2155,6 @@ def assessment_start():
             "total": resp_count,
             "tier": sa.knowledge_tier or "beginner",
         })
-        if len(recent_assessment_display) >= 5:
-            break
 
     return render_template(
         "student/assessment_start.html",
@@ -1852,6 +2172,9 @@ def assessment_question(subject_id, q_num):
         # Show subject summary before moving to next subject
         return redirect(url_for('student.assessment_subject_summary', subject_id=subject_id))
 
+    # Track AI generation exception if on-demand generation fails
+    last_ai_error = None
+
     # Ensure a healthy question pool exists for this subject
     total_existing = AssessmentQuestion.query.filter_by(subject_id=subject_id).count()
     if total_existing < 12:
@@ -1861,7 +2184,11 @@ def assessment_question(subject_id, q_num):
         )
         try:
             generate_assessment_questions_for_subject(subject_id)
+        except (ConfigurationError, QuotaExceededError, RateLimitError, AIServiceError) as e:
+            last_ai_error = e
+            _gen_logger.error("AI service error during question topup for subject_id=%s: %s", subject_id, e)
         except Exception as e:
+            last_ai_error = e
             _gen_logger.error("Failed to generate assessment questions on-demand: %s", e)
             
     # Adaptive logic
@@ -1904,34 +2231,46 @@ def assessment_question(subject_id, q_num):
     if not q:
         # One automatic on-demand generation attempt before giving up
         _gen_logger.warning(
-            "No questions available for subject_id=%s at q_num=%s. "
-            "Attempting on-demand generation.",
+            "No questions available for subject_id=%s at q_num=%s. Attempting on-demand generation.",
             subject_id, q_num,
         )
         try:
             generated = generate_assessment_questions_for_subject(subject_id)
-        except QuotaExceededError:
-            # Daily MCQ generation limit reached — show friendly message, no retry.
-            flash(
-                "We've reached today's assessment generation limit. "
-                "Please try again tomorrow — your questions will be ready!",
-                "warning",
-            )
-            return redirect(url_for('student.assessment_start'))
+            if generated > 0:
+                questions = AssessmentQuestion.query.filter_by(subject_id=subject_id).all()
+                q = random.choice(questions) if questions else None
+        except (ConfigurationError, QuotaExceededError, RateLimitError, AIServiceError) as e:
+            last_ai_error = e
         except Exception as _gen_err:
-            _gen_logger.error("On-demand generation error: %s", _gen_err)
-            generated = 0
-
-        if generated > 0:
-            # Re-query after successful generation
-            questions = AssessmentQuestion.query.filter_by(subject_id=subject_id).all()
-            q = random.choice(questions) if questions else None
+            last_ai_error = _gen_err
 
         if not q:
-            flash(
-                "We're preparing your assessment questions — please try again in a moment.",
-                "warning",
-            )
+            # Handle AI exceptions with user-friendly flash messages
+            if isinstance(last_ai_error, ConfigurationError):
+                flash(
+                    "AI assessment generation is temporarily unavailable because the AI service configuration requires attention. Please try again later or contact the administrator.",
+                    "warning",
+                )
+            elif isinstance(last_ai_error, QuotaExceededError):
+                flash(
+                    "The AI assessment generation limit has been reached temporarily. Please try again later.",
+                    "warning",
+                )
+            elif isinstance(last_ai_error, RateLimitError):
+                flash(
+                    "The AI service is currently receiving too many requests. Please wait a moment and try again.",
+                    "warning",
+                )
+            elif isinstance(last_ai_error, AIServiceError):
+                flash(
+                    "AI assessment generation is temporarily unavailable. Please try again later.",
+                    "warning",
+                )
+            else:
+                flash(
+                    "We're preparing your assessment questions — please try again in a moment.",
+                    "warning",
+                )
             return redirect(url_for('student.assessment_start'))
     
     subject = Subject.query.get(subject_id)
@@ -2465,6 +2804,43 @@ def predict():
         })
     eligible_subject_count = sum(1 for item in subject_snapshots if item["has_real_score"])
 
+    # ── Dynamic preview values for ML Predictor header cards ──────────────────
+    real_scores = [item["score"] for item in subject_snapshots if item["has_real_score"] and item["score"] is not None]
+    computed_gpa = None
+    gpa_source_label = ""
+    if profile and profile.cumulative_gpa and profile.cumulative_gpa > 0:
+        computed_gpa = profile.cumulative_gpa
+        gpa_source_label = "from profile"
+    elif real_scores:
+        avg_score = sum(real_scores) / len(real_scores)
+        computed_gpa = round((avg_score / 100.0) * 4.0, 2)
+        gpa_source_label = "estimated from assessments"
+
+    target_weekly_hours = float(profile.target_weekly_hours if profile and profile.target_weekly_hours else 14.0)
+    study_hours_preview = f"{target_weekly_hours:.1f}h total (smart split)"
+
+    today_local = local_today_for_user(current_user.id)
+    sub_ids = [s.id for s in student_subjects]
+    from app.models import Exam
+    next_exam = Exam.query.filter(Exam.user_id == current_user.id, Exam.subject_id.in_(sub_ids), Exam.date >= today_local).order_by(Exam.date.asc()).first() if sub_ids else None
+    if next_exam:
+        exam_subj = Subject.query.get(next_exam.subject_id)
+        days_left = (next_exam.date - today_local).days
+        days_to_exam_preview = f"{days_left}d ({exam_subj.name if exam_subj else 'Exam'})"
+    else:
+        days_to_exam_preview = "30d (default)"
+
+    last_log = StudyLog.query.filter_by(user_id=current_user.id).order_by(StudyLog.date.desc()).first()
+    last_review = ReviewedChapter.query.filter_by(student_id=current_user.id, status="completed").order_by(ReviewedChapter.last_accessed_at.desc()).first()
+    last_log_date = last_log.date if (last_log and last_log.date) else None
+    last_review_date = last_review.last_accessed_at.date() if (last_review and last_review.last_accessed_at) else None
+    most_recent = max(last_log_date, last_review_date) if (last_log_date and last_review_date) else (last_log_date or last_review_date)
+    if most_recent:
+        days_since = (today_local - most_recent).days
+        days_since_study_preview = f"{days_since}d ago" if days_since > 0 else "Today"
+    else:
+        days_since_study_preview = "7d (no logs)"
+
     def render_predict(**kwargs):
         context = {
             "profile": profile,
@@ -2472,6 +2848,11 @@ def predict():
             "student_subjects": student_subjects,
             "subject_snapshots": subject_snapshots,
             "eligible_subject_count": eligible_subject_count,
+            "computed_gpa": computed_gpa,
+            "gpa_source_label": gpa_source_label,
+            "study_hours_preview": study_hours_preview,
+            "days_to_exam_preview": days_to_exam_preview,
+            "days_since_study_preview": days_since_study_preview,
             "is_ocr": False,
             "selected_subject_ids": [],
             "batch_results": [],
@@ -2495,21 +2876,60 @@ def predict():
                 flash("Select at least one profile subject.", "warning")
                 return render_predict()
 
-            # Convert GPA (0–4 scale) to percentage (0–100) for ML model
-            raw_gpa = float(
-                profile.cumulative_gpa
-                if profile and profile.cumulative_gpa is not None
-                else (profile.prior_academic_score if profile and profile.prior_academic_score else 0.0)
-            )
-            # Values ≤ 4.0 are on GPA scale; values > 4 are already percentages (legacy data)
+            raw_gpa = float(computed_gpa if computed_gpa is not None else 0.0)
             profile_grade = raw_gpa * 25 if raw_gpa <= 4.0 else raw_gpa
             attendance = float(profile.attendance_pct if profile and profile.attendance_pct is not None else 85.0)
-            target_weekly_hours = float(profile.target_weekly_hours if profile and profile.target_weekly_hours else 14.0)
-            per_subject_weekly_hours = max(1.0, target_weekly_hours / max(1, len(student_subjects)))
+            
             model = load_ml_model("random_forest")
             scaler = load_ml_model("scaler")
             if not model or not scaler:
                 flash("Random Forest model not trained yet, using fallback prediction.", "warning")
+
+            available_hours = get_available_study_hours_total(current_user.id)
+            if available_hours <= 0:
+                available_hours = target_weekly_hours
+
+            fallback_study_hours = max(1.0, available_hours / max(1, len(selected_ids)))
+            three_weeks_ago = today_local - timedelta(days=21)
+
+            # Pass 1: Run model.predict_proba for eligible subjects to extract continuous risk_score
+            eval_subjects = []
+            for s_id in selected_ids:
+                subj = active_by_id[s_id]
+                snap = get_subject_performance_snapshot(current_user.id, subj.id)
+                if snap["source"] != "missing" and snap["score"] is not None:
+                    perf_score = snap["score"]
+                    diff = float(subj.difficulty_level or 3.0)
+
+                    # Check StudyLog for actual recent average weekly hours for this subject
+                    subj_logs = StudyLog.query.filter(
+                        StudyLog.user_id == current_user.id,
+                        StudyLog.subject_id == subj.id,
+                        StudyLog.date >= three_weeks_ago
+                    ).all()
+                    if subj_logs:
+                        total_logged = sum(l.duration_hours for l in subj_logs if l.duration_hours)
+                        initial_study_hours = round(max(0.5, total_logged / 3.0), 1)
+                    else:
+                        initial_study_hours = fallback_study_hours
+
+                    feat_pre = get_subject_features(current_user.id, subj.name, perf_score, attendance, initial_study_hours, diff, 30, None)
+                    r_score = 0.5
+                    if model and scaler:
+                        f_scaled = scaler.transform(np.array([feat_pre]))
+                        if hasattr(model, "predict_proba"):
+                            probs = model.predict_proba(f_scaled)[0]
+                            r_score = float(0.0 * probs[0] + 0.5 * probs[1] + 1.0 * probs[2])
+                    eval_subjects.append({
+                        "id": subj.id,
+                        "name": subj.name,
+                        "difficulty": diff,
+                        "previous_grade": perf_score,
+                        "risk_score": r_score,
+                    })
+
+            # Pass 2: Calculate proportional risk-weighted hour allocations
+            allocations = calculate_subject_hour_allocations(eval_subjects, available_hours)
 
             batch_results = []
             skipped_subjects = []
@@ -2530,6 +2950,8 @@ def predict():
 
                 performance_score = snapshot["score"]
                 difficulty = float(subject.difficulty_level or 3.0)
+                per_subject_weekly_hours = allocations.get(subject.name, max(1.0, target_weekly_hours / max(1, len(selected_ids))))
+
                 features = get_subject_features(
                     current_user.id,
                     subject.name,
@@ -3917,6 +4339,30 @@ def profile():
             has_duration = prog_rec.has_duration if prog_rec else (raw_program in {"BSc IT"})
             raw_program_duration = request.form.get("program_duration", "").strip() if has_duration else ""
 
+        try:
+            raw_att = float(request.form.get("attendance_pct") or 85.0)
+            if not (0.0 <= raw_att <= 100.0):
+                flash("Validation failed: Attendance % must be between 0 and 100.", "danger")
+                return redirect(url_for("student.profile"))
+        except (TypeError, ValueError):
+            raw_att = 85.0
+
+        try:
+            raw_gpa_val = float(request.form.get("cumulative_gpa") or 0.0)
+            if not (0.0 <= raw_gpa_val <= 4.0):
+                flash("Validation failed: Cumulative GPA must be between 0.00 and 4.00.", "danger")
+                return redirect(url_for("student.profile"))
+        except (TypeError, ValueError):
+            raw_gpa_val = 0.0
+
+        try:
+            raw_commute = int(request.form.get("commute_buffer_minutes") or 0)
+            if not (0 <= raw_commute <= 180):
+                flash("Validation failed: Commute buffer must be between 0 and 180 minutes.", "danger")
+                return redirect(url_for("student.profile"))
+        except (TypeError, ValueError):
+            raw_commute = 0
+
         profile_data = {
             "country":           raw_country,
             "timezone":          raw_timezone,
@@ -3929,9 +4375,9 @@ def profile():
             "university":        raw_university,
             "university_type":   raw_university_type,
             "university_country": raw_university_country,
-            "cumulative_gpa":    request.form.get("cumulative_gpa", 0.0),
-            "commute_buffer_minutes": request.form.get("commute_buffer_minutes", 0),
-            "attendance_pct":    float(request.form.get("attendance_pct") or 85.0),
+            "cumulative_gpa":    raw_gpa_val,
+            "commute_buffer_minutes": raw_commute,
+            "attendance_pct":    raw_att,
             "explanation_level": request.form.get("explanation_level", "Intermediate"),
             "study_goal":        request.form.get("study_goal", "Improve Grades"),
             "preferred_language":request.form.get("preferred_language", "English"),
@@ -3974,7 +4420,7 @@ def profile():
     analytics = StudentAnalyticsService(current_user.id)
 
     mastery = analytics.subject_mastery()
-    summary = analytics.assessment_summary(limit=3)
+    summary = analytics.assessment_summary(limit=None)
     weak_topics = analytics.weak_topics(limit=3)
     academic = analytics.academic_summary()
 
@@ -4363,6 +4809,54 @@ def study_material():
     is_reverse = (sort_by == "newest")
     unified_list.sort(key=lambda x: x["date"], reverse=is_reverse)
 
+    # Build verbatim subfolder directory tree dictionary for Explorer
+    from app.models import UploadedMaterial
+    raw_uploaded = UploadedMaterial.query.filter_by(user_id=current_user.id).all()
+    folder_tree = {}
+    for um in raw_uploaded:
+        rel_folder = um.relative_folder_path if um.relative_folder_path else "Root Directory"
+        if rel_folder not in folder_tree:
+            folder_tree[rel_folder] = []
+        ext = (um.file_type or "").lower().lstrip('.')
+        folder_tree[rel_folder].append({
+            "id": um.id,
+            "filename": um.filename,
+            "relative_folder_path": rel_folder,
+            "file_type": ext,
+            "subject_name": um.subject.name if um.subject else "Unassigned",
+            "file_size": um.file_size_bytes or 0,
+            "uploaded_at": um.uploaded_at or datetime.utcnow(),
+            "details_url": url_for("student.uploaded_material_detail", material_id=um.id),
+            "download_url": url_for("student.download_raw_material", material_id=um.id)
+        })
+
+    from app.models import MaterialImportBatch, SubjectBook
+    import_batches = MaterialImportBatch.query.filter_by(user_id=current_user.id).order_by(MaterialImportBatch.created_at.desc()).all()
+    physical_books = SubjectBook.query.filter_by(user_id=current_user.id).all()
+
+    # Determine Tier Mode (1: Files Uploaded, 2: Physical Books Configured, 3: Standard Curriculum)
+    tier_mode = 3
+    if raw_uploaded and len(raw_uploaded) > 0:
+        tier_mode = 1
+    elif physical_books and len(physical_books) > 0:
+        tier_mode = 2
+
+    # Standard Curriculum Fallback Tree for Tier 3
+    curriculum_tree = []
+    for subj in active_subjects:
+        ch_list = Chapter.query.filter_by(subject_id=subj.id).order_by(Chapter.chapter_number).all()
+        ch_data = []
+        for ch in ch_list:
+            top_list = Topic.query.filter_by(chapter_id=ch.id).order_by(Topic.topic_number).all()
+            ch_data.append({
+                "chapter": ch,
+                "topics": top_list
+            })
+        curriculum_tree.append({
+            "subject": subj,
+            "chapters": ch_data
+        })
+
     return render_template(
         "student/study_material.html",
         profile=profile,
@@ -4371,8 +4865,90 @@ def study_material():
         selected_source=source,
         selected_sort=sort_by,
         search_query=q,
-        materials=unified_list
+        materials=unified_list,
+        import_batches=import_batches,
+        folder_tree=folder_tree,
+        physical_books=physical_books,
+        tier_mode=tier_mode,
+        curriculum_tree=curriculum_tree
     )
+
+
+@student_bp.route("/study-materials/delete-batch/<int:batch_id>", methods=["POST", "DELETE"])
+@login_required
+def delete_import_batch(batch_id):
+    from app.models import MaterialImportBatch, MaterialImportUnmatched, UploadedMaterial, MaterialChunk
+    batch = MaterialImportBatch.query.get_or_404(batch_id)
+    if batch.user_id != current_user.id:
+        return jsonify({"status": "error", "message": "Unauthorized access."}), 403
+
+    # 1. Purge physical files on disk & linked MaterialChunk vectors
+    materials = UploadedMaterial.query.filter_by(import_batch_id=batch.id).all()
+    for mat in materials:
+        MaterialChunk.query.filter_by(material_id=mat.id).delete()
+        if mat.file_path and os.path.exists(mat.file_path):
+            try:
+                os.remove(mat.file_path)
+            except OSError:
+                pass
+
+    batch_dir = f"uploads/user_{current_user.id}/batch_{batch.id}"
+    materials_dir = f"materials/user_{current_user.id}/batch_{batch.id}"
+
+    for folder in [batch_dir, materials_dir]:
+        if os.path.exists(folder):
+            shutil.rmtree(folder, ignore_errors=True)
+
+    # 2. Delete database rows
+    UploadedMaterial.query.filter_by(import_batch_id=batch.id).delete()
+    MaterialImportUnmatched.query.filter_by(batch_id=batch.id).delete()
+    db.session.delete(batch)
+    db.session.commit()
+
+    return jsonify({"status": "success", "message": "Batch and all containing folders permanently deleted."}), 200
+
+
+@student_bp.route("/study-materials/delete-material/<int:material_id>", methods=["DELETE", "POST"])
+@login_required
+def delete_uploaded_material(material_id):
+    from app.models import UploadedMaterial, MaterialChunk
+    mat = UploadedMaterial.query.get_or_404(material_id)
+    if mat.user_id != current_user.id:
+        return jsonify({"status": "error", "message": "Unauthorized access."}), 403
+
+    MaterialChunk.query.filter_by(material_id=mat.id).delete()
+
+    if mat.file_path and os.path.exists(mat.file_path):
+        try:
+            os.remove(mat.file_path)
+        except OSError:
+            pass
+    db.session.delete(mat)
+    db.session.commit()
+    return jsonify({"status": "success", "message": "Material permanently deleted."}), 200
+
+
+@student_bp.route("/study-materials/delete-subject/<int:subject_id>", methods=["DELETE", "POST"])
+@login_required
+def delete_student_subject(subject_id):
+    from app.models import StudentSubject, UploadedMaterial
+    StudentSubject.query.filter_by(user_id=current_user.id, subject_id=subject_id).delete()
+
+    materials = UploadedMaterial.query.filter_by(user_id=current_user.id, subject_id=subject_id).all()
+    for mat in materials:
+        if mat.file_path and os.path.exists(mat.file_path):
+            try:
+                os.remove(mat.file_path)
+            except OSError:
+                pass
+        db.session.delete(mat)
+
+    subject_dir = f"uploads/user_{current_user.id}/subject_{subject_id}"
+    if os.path.exists(subject_dir):
+        shutil.rmtree(subject_dir, ignore_errors=True)
+
+    db.session.commit()
+    return jsonify({"status": "success", "message": "Subject folder and materials deleted."}), 200
 
 
 @student_bp.route("/study/api/subject/<int:subject_id>/chapters", methods=["GET"])
@@ -4491,11 +5067,168 @@ def uploaded_material_detail(material_id):
     material.last_opened = datetime.utcnow()
     db.session.commit()
     
+    file_ext = (os.path.splitext(material.filename)[1] or material.file_type or "").lower().lstrip('.')
+
+    docx_html = None
+    if file_ext == 'docx' and material.file_path and os.path.exists(material.file_path):
+        try:
+            import mammoth
+            with open(material.file_path, "rb") as docx_file:
+                res_html = mammoth.convert_to_html(docx_file)
+                docx_html = res_html.value
+        except Exception as e:
+            logger.error(f"[Mammoth Conversion Error]: {e}")
+            docx_html = None
+
     return render_template(
         "student/uploaded_material_detail.html",
         material=material,
-        subject=subject
+        subject=subject,
+        docx_html=docx_html,
+        file_ext=file_ext
     )
+
+
+@student_bp.route("/study-material/<int:material_id>/generate-summary", methods=["POST"])
+@login_required
+def generate_material_summary_ajax(material_id):
+    from app.models import UploadedMaterial
+    from app.services.ai_service import AIService
+    material = UploadedMaterial.query.get_or_404(material_id)
+    if material.user_id != current_user.id:
+        return jsonify({"status": "error", "message": "Unauthorized"}), 403
+
+    text_to_summarize = material.extracted_text or ""
+    if len(text_to_summarize.strip()) == 0:
+        return jsonify({
+            "status": "error",
+            "message": "No text content available in this document to summarize."
+        }), 400
+
+    try:
+        ai = AIService()
+        prompt = (
+            f"Generate a comprehensive executive summary and key bullet notes for the following study material:\n\n"
+            f"Document Title: {material.filename}\n"
+            f"Content:\n{text_to_summarize[:4000]}\n\n"
+            f"Provide a structured response with:\n"
+            f"1. Executive Summary (2-3 paragraphs)\n"
+            f"2. Key Takeaways & Core Concepts (5-8 bullet points)\n"
+        )
+        summary_text = ai.call_gemini_reusable(
+            prompt,
+            feature="assistant",
+            context=f"summary_gen_mat_{material.id}"
+        )
+        if summary_text:
+            material.summary = summary_text.strip()
+            db.session.commit()
+            return jsonify({
+                "status": "success",
+                "summary": material.summary
+            })
+        else:
+            return jsonify({"status": "error", "message": "AI returned empty summary."}), 500
+    except Exception as e:
+        logger.error(f"[Summary Gen Error]: {e}", exc_info=True)
+        fallback_summary = (
+            f"### Executive Summary (Offline Fallback)\n"
+            f"This document '{material.filename}' has been processed and indexed into your RAG vector database.\n\n"
+            f"### Key Concepts & Takeaways\n"
+            f"• Core content extracted and ready for vector search.\n"
+            f"• Full text content available under Extracted Text tab.\n"
+            f"• Interactive document Q&A chat enabled.\n"
+        )
+        material.summary = fallback_summary
+        db.session.commit()
+        return jsonify({
+            "status": "success",
+            "summary": fallback_summary,
+            "notice": "Generated using fallback offline indexing."
+        }), 200
+
+
+@student_bp.route("/physical-book/add", methods=["POST"])
+@login_required
+def add_physical_book():
+    from app.models import SubjectBook
+    subject_id = request.form.get("subject_id", type=int)
+    title = request.form.get("title", "").strip()
+    author = request.form.get("author", "").strip()
+    publisher = request.form.get("publisher", "").strip()
+    edition = request.form.get("edition", "").strip()
+    isbn = request.form.get("isbn", "").strip()
+    toc_raw = request.form.get("toc_text", "").strip()
+
+    if not subject_id or not title:
+        flash("Subject and Book Title are required.", "danger")
+        return redirect(url_for("student.study_material"))
+
+    # Convert TOC lines into structured JSON
+    toc_structure = []
+    if toc_raw:
+        lines = [l.strip() for l in toc_raw.splitlines() if l.strip()]
+        current_ch = None
+        for line in lines:
+            if line.lower().startswith("chapter") or line.lower().startswith("unit") or line.lower().startswith("module") or line[0].isdigit():
+                current_ch = {"chapter_title": line, "topics": []}
+                toc_structure.append(current_ch)
+            else:
+                if current_ch is None:
+                    current_ch = {"chapter_title": "General Overview", "topics": []}
+                    toc_structure.append(current_ch)
+                current_ch["topics"].append(line)
+
+    book = SubjectBook(
+        user_id=current_user.id,
+        subject_id=subject_id,
+        title=title,
+        author=author,
+        publisher=publisher,
+        edition=edition,
+        isbn=isbn,
+        toc_json=json.dumps(toc_structure) if toc_structure else "[]"
+    )
+    db.session.add(book)
+    db.session.commit()
+    flash(f"Physical textbook '{title}' registered successfully!", "success")
+    return redirect(url_for("student.study_material"))
+
+
+@student_bp.route("/study-material/download/<int:material_id>", methods=["GET"])
+@login_required
+def download_raw_material(material_id):
+    from flask import send_from_directory
+    from app.models import UploadedMaterial
+    material = UploadedMaterial.query.get_or_404(material_id)
+    if material.user_id != current_user.id:
+        flash("You are not authorized to access this document.", "danger")
+        return redirect(url_for("student.study_material"))
+
+    if not material.file_path or not os.path.exists(material.file_path):
+        flash("Original file not found on server.", "warning")
+        return redirect(url_for("student.uploaded_material_detail", material_id=material.id))
+
+    directory = os.path.dirname(os.path.abspath(material.file_path))
+    filename = os.path.basename(material.file_path)
+    return send_from_directory(directory, filename, as_attachment=True, download_name=material.filename)
+
+
+@student_bp.route("/study-material/preview-file/<int:material_id>", methods=["GET"])
+@login_required
+def preview_raw_material(material_id):
+    from flask import send_from_directory
+    from app.models import UploadedMaterial
+    material = UploadedMaterial.query.get_or_404(material_id)
+    if material.user_id != current_user.id:
+        return "Unauthorized", 403
+
+    if not material.file_path or not os.path.exists(material.file_path):
+        return "File not found", 404
+
+    directory = os.path.dirname(os.path.abspath(material.file_path))
+    filename = os.path.basename(material.file_path)
+    return send_from_directory(directory, filename, as_attachment=False)
 
 
 @student_bp.route("/study-material/uploaded/<int:material_id>/ai-action", methods=["POST"])
@@ -5278,3 +6011,337 @@ def my_downloads_page():
         downloads=downloads,
         profile=profile
     )
+
+
+# ── BULK ZIP UPLOAD & RAG ROUTES ──────────────────────────────────────────────
+
+@student_bp.route("/study-materials/upload-zip", methods=["POST"])
+@login_required
+def upload_zip_batch():
+    from threading import Thread
+    from flask import current_app
+    from app.models import MaterialImportBatch
+    from app.services.zip_import import async_process_zip
+
+    if 'zip_file' not in request.files:
+        return jsonify({"status": "error", "message": "No zip file uploaded."}), 400
+
+    zip_file = request.files['zip_file']
+    if not zip_file or not zip_file.filename:
+        return jsonify({"status": "error", "message": "No selected zip file."}), 400
+
+    ext = zip_file.filename.rsplit('.', 1)[-1].lower()
+    if ext != 'zip':
+        return jsonify({"status": "error", "message": "File must be a .zip archive."}), 400
+
+    profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+    enrolled_subjects = get_profile_subjects(profile)
+    if not enrolled_subjects:
+        return jsonify({"status": "error", "message": "No active subjects found in profile."}), 400
+
+    try:
+        batch = MaterialImportBatch(
+            user_id=current_user.id,
+            source_filename=zip_file.filename,
+            stored_zip_path='',
+            status='processing',
+            total_files_found=0,
+            matched_files=0,
+            unmatched_files=0
+        )
+        db.session.add(batch)
+        db.session.flush()
+
+        upload_root = f"uploads/user_{current_user.id}/batch_{batch.id}"
+        os.makedirs(upload_root, exist_ok=True)
+        zip_path = os.path.join(upload_root, 'source.zip')
+        zip_file.save(zip_path)
+        batch.stored_zip_path = zip_path
+        db.session.commit()
+
+        app = current_app._get_current_object()
+        thread = Thread(target=async_process_zip, args=(app, batch.id, current_user.id), daemon=True)
+        thread.start()
+
+        return jsonify({
+            "status": "accepted",
+            "batch_id": batch.id,
+            "message": "Zip upload processing started in background."
+        }), 202
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Failed to start zip processing: {str(e)}"}), 500
+
+
+
+@student_bp.route("/study-materials/import/<int:batch_id>/review", methods=["GET"])
+@login_required
+def review_import_batch(batch_id):
+    from app.models import MaterialImportBatch
+    batch = MaterialImportBatch.query.get_or_404(batch_id)
+    if batch.user_id != current_user.id:
+        flash("Unauthorized access to import batch.", "danger")
+        return redirect(url_for("student.study_material"))
+
+    profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+    enrolled_subjects = get_profile_subjects(profile)
+
+    return render_template("student/zip_review.html", batch=batch, enrolled_subjects=enrolled_subjects)
+
+
+@student_bp.route("/study-materials/import/<int:batch_id>/resolve", methods=["POST"])
+@login_required
+def resolve_import_batch(batch_id):
+    from app.models import MaterialImportBatch, MaterialImportUnmatched, UploadedMaterial
+    batch = MaterialImportBatch.query.get_or_404(batch_id)
+    if batch.user_id != current_user.id:
+        flash("Unauthorized access.", "danger")
+        return redirect(url_for("student.study_material"))
+
+    upload_root = f"uploads/user_{current_user.id}/batch_{batch.id}/extracted"
+    from app.services.zip_import import classify_category
+    from app.services.text_extraction import extract_text_from_file
+    from app.services.rag_embeddings import embed_and_store_material
+    from app.services.module_descriptor_parser import parse_module_descriptor
+    import shutil, uuid
+
+    ALLOWED_EXT = {'.pdf', '.docx', '.pptx', '.txt', '.png', '.jpg', '.jpeg'}
+
+    for item in batch.unmatched_items:
+        choice = request.form.get(f"subject_map_{item.id}")
+        if choice and choice != 'skip':
+            try:
+                subject_id = int(choice)
+                item.resolved_subject_id = subject_id
+
+                target_path = os.path.join(upload_root, item.folder_path_in_zip) if item.folder_path_in_zip else upload_root
+                if os.path.exists(target_path):
+                    final_dir = f"uploads/user_{current_user.id}/subject_{subject_id}"
+                    os.makedirs(final_dir, exist_ok=True)
+
+                    files_to_process = []
+                    if os.path.isfile(target_path):
+                        files_to_process.append((target_path, os.path.dirname(target_path), os.path.basename(target_path)))
+                    else:
+                        for dirpath, _, filenames in os.walk(target_path):
+                            for fname in filenames:
+                                files_to_process.append((os.path.join(dirpath, fname), dirpath, fname))
+
+                    for src, dirpath, fname in files_to_process:
+                        if fname.startswith('.'):
+                            continue
+                        ext = os.path.splitext(fname)[1].lower()
+                        if ext not in ALLOWED_EXT:
+                            continue
+                        
+                        rel_dir = os.path.relpath(dirpath, upload_root)
+                        folder_segments = [] if rel_dir == '.' else rel_dir.split(os.sep)
+
+                        dest = os.path.join(final_dir, f"{uuid.uuid4().hex}_{fname}")
+                        shutil.move(src, dest)
+                        category = classify_category(folder_segments, fname)
+
+                        mat = UploadedMaterial(
+                            user_id=current_user.id,
+                            subject_id=subject_id,
+                            filename=fname,
+                            file_path=dest,
+                            file_type=ext.lstrip('.'),
+                            category=category,
+                            import_batch_id=batch.id,
+                            file_size_bytes=os.path.getsize(dest),
+                            embedding_status='pending'
+                        )
+                        db.session.add(mat)
+                        db.session.flush()
+
+                        mat.extracted_text = extract_text_from_file(mat.file_path, mat.file_type)
+                        db.session.commit()
+                        if mat.extracted_text:
+                            embed_and_store_material(mat.id)
+                            if mat.category == 'Module Descriptor':
+                                parse_module_descriptor(mat.user_id, mat.subject_id, mat.id, mat.extracted_text)
+            except (ValueError, TypeError) as e:
+                pass
+
+    batch.status = "committed"
+    batch.committed_at = datetime.utcnow()
+    db.session.commit()
+
+    flash("Zip study materials resolved and imported successfully!", "success")
+    return redirect(url_for("student.study_material"))
+
+
+@student_bp.route("/study-materials/import/<int:batch_id>/status", methods=["GET"])
+@login_required
+def import_batch_status(batch_id):
+    from app.models import MaterialImportBatch, UploadedMaterial
+    batch = MaterialImportBatch.query.get_or_404(batch_id)
+    if batch.user_id != current_user.id:
+        return jsonify({"status": "error", "message": "Unauthorized access."}), 403
+
+    redirect_url = None
+    if batch.status == 'reviewing':
+        redirect_url = url_for("student.review_import_batch", batch_id=batch.id)
+    elif batch.status in ('committed', 'extracted'):
+        redirect_url = url_for("student.study_material")
+
+    materials = UploadedMaterial.query.filter_by(import_batch_id=batch.id).all()
+    total_materials = len(materials)
+    ready_materials = sum(1 for m in materials if m.embedding_status == 'ready')
+
+    return jsonify({
+        "status": batch.status,
+        "batch_status": batch.status,
+        "batch_id": batch.id,
+        "total_files": batch.total_files_found,
+        "matched_files": batch.matched_files,
+        "unmatched_files": batch.unmatched_files,
+        "total_materials": total_materials,
+        "ready_materials": ready_materials,
+        "redirect_url": redirect_url,
+        "error_log": batch.error_log
+    })
+
+
+@student_bp.route("/subjects/<int:subject_id>/coverage", methods=["GET"])
+@login_required
+def subject_coverage_api(subject_id):
+    from app.services.coverage_analysis import compute_coverage
+    results = compute_coverage(current_user.id, subject_id)
+    return jsonify({"status": "success", "coverage": results})
+
+
+@student_bp.route("/subjects/<int:subject_id>/module-info", methods=["GET"])
+@login_required
+def subject_module_info_api(subject_id):
+    from app.models import ModuleDescriptor
+    md = ModuleDescriptor.query.filter_by(user_id=current_user.id, subject_id=subject_id).first()
+    if not md:
+        return jsonify({"status": "success", "module_descriptor": None})
+
+    data = {
+        "has_final_exam": md.has_final_exam,
+        "exam_weight_pct": md.exam_weight_pct,
+        "coursework_weight_pct": md.coursework_weight_pct,
+        "has_presentation": md.has_presentation,
+        "topics": json.loads(md.topics_json) if md.topics_json else [],
+        "assessment_dates": json.loads(md.assessment_dates_json) if md.assessment_dates_json else [],
+        "extracted_at": md.extracted_at.strftime('%Y-%m-%d') if md.extracted_at else None
+    }
+    return jsonify({"status": "success", "module_descriptor": data})
+
+
+@student_bp.route("/api/rag/chat", methods=["POST"])
+@login_required
+def api_rag_chat():
+    """
+    General Personal AI Tutor + RAG Hybrid Assistant Endpoint.
+    Handles general educational questions via Gemini and grounds answers in
+    the student's authorized study materials when matching RAG context is found.
+    """
+    data = request.get_json() or {}
+    user_message = (data.get("message") or "").strip()
+
+    if not user_message:
+        return jsonify({"status": "error", "message": "Query message cannot be empty."}), 400
+
+    if len(user_message) > 1000:
+        return jsonify({"status": "error", "message": "Query message is too long (max 1000 characters)."}), 400
+
+    # 1. Parse optional subject context
+    subject_id = None
+    subject_name = None
+    raw_subj_id = data.get("subject_id")
+    if raw_subj_id is not None:
+        try:
+            target_id = int(raw_subj_id)
+            subj = Subject.query.get(target_id)
+            if subj:
+                profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+                active_subs = get_profile_subjects(profile)
+                if subj.id in [s.id for s in active_subs]:
+                    subject_id = subj.id
+                    subject_name = subj.name
+        except (TypeError, ValueError):
+            subject_id = None
+
+    chapter_id = data.get("chapter_id")
+    topic_id = data.get("topic_id")
+    try:
+        chapter_id = int(chapter_id) if chapter_id is not None else None
+        topic_id = int(topic_id) if topic_id is not None else None
+    except (TypeError, ValueError):
+        chapter_id, topic_id = None, None
+
+    # 2. Retrieve authorized RAG chunks (scoped to student's user_id)
+    from app.services.rag_retrieval import retrieve_relevant_chunks_with_metadata, RAG_MIN_SIMILARITY_THRESHOLD
+    chunks = retrieve_relevant_chunks_with_metadata(
+        user_id=current_user.id,
+        subject_id=subject_id,
+        query=user_message,
+        top_k=3,
+        chapter_id=chapter_id,
+        topic_id=topic_id,
+    )
+
+    max_sim = max([c["similarity_score"] for c in chunks], default=0.0)
+    is_grounded = bool(chunks and max_sim >= RAG_MIN_SIMILARITY_THRESHOLD)
+
+    # 3. Format Prompt based on Hybrid AI vs RAG Grounded Mode
+    if is_grounded:
+        context_str = "\n\n".join([f"--- SOURCE [{c['filename']}] ---\n{c['chunk_text']}" for c in chunks])
+        subject_ctx_str = f" for the subject '{subject_name}'" if subject_name else ""
+        prompt = f"""You are a helpful AI Study Assistant and Personal Tutor{subject_ctx_str}.
+Use the following extracted study material context as reference to answer the student's question clearly.
+
+STUDY MATERIAL CONTEXT:
+{context_str}
+
+STUDENT QUESTION:
+{user_message}
+
+Answer concisely, accurately, and clearly in student-friendly terms."""
+    else:
+        subject_ctx_str = f" Currently studying: {subject_name}." if subject_name else ""
+        prompt = f"""You are a helpful, encouraging personal AI Study Assistant and Educational Tutor across all subjects.{subject_ctx_str}
+Answer the student's question clearly, accurately, and concisely in student-friendly terms.
+
+STUDENT QUESTION:
+{user_message}"""
+
+    # 4. Invoke existing AI service (Gemini) with quota management
+    try:
+        from app.services.ai_service import call_ai_model
+        ai_response = call_ai_model(prompt)
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"AI service error: {str(e)}"}), 500
+
+    # 5. Format Deduplicated Sources (only if grounded)
+    sources = []
+    if is_grounded:
+        seen_sources = set()
+        for c in chunks:
+            key = c["filename"]
+            if key not in seen_sources:
+                seen_sources.add(key)
+                sources.append({
+                    "filename": c["filename"],
+                    "chapter_title": c["chapter_title"],
+                    "topic_title": c["topic_title"],
+                    "similarity_score": c["similarity_score"],
+                })
+
+    # 6. Maintain bounded chat history in session (max 6 items)
+    session_key = f"rag_chat_history_{subject_id or 'global'}"
+    history = session.get(session_key, [])
+    history.append({"role": "user", "content": user_message})
+    history.append({"role": "assistant", "content": ai_response})
+    session[session_key] = history[-6:]
+
+    return jsonify({
+        "status": "success",
+        "grounded": is_grounded,
+        "answer": ai_response,
+        "sources": sources
+    }), 200
+

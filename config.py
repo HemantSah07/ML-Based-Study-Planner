@@ -34,30 +34,56 @@ class Config:
         SQLALCHEMY_DATABASE_URI = f"sqlite:///{db_file}"
 
     
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    _raw_key = os.getenv("GEMINI_API_KEY")
+    GEMINI_API_KEY = _raw_key.strip().strip('"\'') if _raw_key else None
+    _raw_free = os.getenv("GEMINI_API_KEY_FREE")
+    GEMINI_API_KEY_FREE = _raw_free.strip().strip('"\'') if _raw_free else None
+    _raw_paid = os.getenv("GEMINI_API_KEY_PAID")
+    GEMINI_API_KEY_PAID = _raw_paid.strip().strip('"\'') if _raw_paid else None
     ABSTRACT_API_KEY = os.getenv("ABSTRACT_API_KEY")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
+    # ── Gemini mode canonical settings ───────────────────────────────────────
+    # Primary mode setting: 'free' or 'paid'
+    # Derive from GEMINI_BILLING_ENABLED only if GEMINI_MODE is completely missing
+    _legacy_billing = os.getenv("GEMINI_BILLING_ENABLED", "False").lower() in ("true", "1", "yes")
+    GEMINI_MODE = os.getenv("GEMINI_MODE", "paid" if _legacy_billing else "free").lower()
+    if GEMINI_MODE not in ("free", "paid"):
+        GEMINI_MODE = "free"
+    
+    # Legacy flag for backwards compatibility
+    GEMINI_BILLING_ENABLED = (GEMINI_MODE == "paid")
+    GEMINI_ALLOW_CROSS_KEY_FALLBACK = os.getenv("GEMINI_ALLOW_CROSS_KEY_FALLBACK", "False").lower() in ("true", "1", "yes")
+
     # ── Gemini model selection per feature ────────────────────────────────────
-    # Separate models give separate free-tier quota pools.
-    # Change these to a paid-tier model name in .env when billing is enabled.
     GEMINI_MODEL_MCQ       = os.getenv("GEMINI_MODEL_MCQ",       "gemini-3.1-flash-lite")
     GEMINI_MODEL_ASSISTANT_PRIMARY = os.getenv("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
     GEMINI_MODEL_ASSISTANT_FALLBACK = os.getenv("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-2.5-flash-lite")
 
-    # ── Usage limits (daily and RPM) ─────────────────────────────────────────
+    # ── Usage limits (daily and RPM) for FREE tier ────────────────────────────
     GEMINI_DAILY_LIMIT_MCQ       = int(os.getenv("GEMINI_DAILY_LIMIT_MCQ",       "450"))
-    GEMINI_RPM_LIMIT_MCQ         = int(os.getenv("GEMINI_RPM_LIMIT_MCQ",         "10"))
+    GEMINI_RPM_LIMIT_MCQ         = int(os.getenv("GEMINI_RPM_LIMIT_MCQ",         "15"))
 
-    GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY  = int(os.getenv("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY",  "45"))
-    GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK = int(os.getenv("GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK", "45"))
-    GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY   = int(os.getenv("GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY",   "4"))
+    GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY  = int(os.getenv("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY",  "18"))
+    GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK = int(os.getenv("GEMINI_DAILY_LIMIT_ASSISTANT_FALLBACK", "450"))
+    GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY   = int(os.getenv("GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY",   "5"))
+    GEMINI_RPM_LIMIT_ASSISTANT_FALLBACK  = int(os.getenv("GEMINI_RPM_LIMIT_ASSISTANT_FALLBACK",  "15"))
 
-    # ── Billing switch ────────────────────────────────────────────────────────
-    # Set GEMINI_BILLING_ENABLED=True in .env once a paid API key is active.
-    # When True, the daily cap check is bypassed entirely — no other code
-    # changes are needed at that point.
-    GEMINI_BILLING_ENABLED = os.getenv("GEMINI_BILLING_ENABLED", "False").lower() in ("true", "1", "yes")
+    # ── Usage limits for PAID tier ────────────────────────────────────────────
+    GEMINI_DAILY_LIMIT_MCQ_PAID       = int(os.getenv("GEMINI_DAILY_LIMIT_MCQ_PAID",       "2000"))
+    GEMINI_RPM_LIMIT_MCQ_PAID         = int(os.getenv("GEMINI_RPM_LIMIT_MCQ_PAID",         "60"))
+    GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY_PAID = int(os.getenv("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY_PAID", "1000"))
+    GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY_PAID  = int(os.getenv("GEMINI_RPM_LIMIT_ASSISTANT_PRIMARY_PAID",  "30"))
+
+    # ── Global request and RPM limits ──────────────────────────────────────────
+    GEMINI_GLOBAL_DAILY_LIMIT_FREE    = int(os.getenv("GEMINI_GLOBAL_DAILY_LIMIT_FREE",    "450"))
+    GEMINI_GLOBAL_DAILY_LIMIT_PAID    = int(os.getenv("GEMINI_GLOBAL_DAILY_LIMIT_PAID",    "5000"))
+    GEMINI_GLOBAL_RPM_LIMIT_FREE      = int(os.getenv("GEMINI_GLOBAL_RPM_LIMIT_FREE",      "12"))
+    GEMINI_GLOBAL_RPM_LIMIT_PAID      = int(os.getenv("GEMINI_GLOBAL_RPM_LIMIT_PAID",      "60"))
+
+    # ── Paid provider quota reference limits (optional environment overrides) ──
+    GEMINI_PAID_PROVIDER_RPM          = os.getenv("GEMINI_PAID_PROVIDER_RPM",          "Unrestricted")
+    GEMINI_PAID_PROVIDER_RPD          = os.getenv("GEMINI_PAID_PROVIDER_RPD",          "Unrestricted")
 
     # ── Flask-Mail configuration ──────────────────────────────────────────────
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")

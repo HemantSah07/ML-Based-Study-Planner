@@ -77,10 +77,16 @@
                 <script>
                 var PROFILE_SUBJECTS = [
                     {% for s in subjects %}
-                    { name: "{{ s.name }}", difficulty: {{ s.difficulty_level or 3 }} },
+                    {% set p_score = get_subject_performance_score(current_user.id, s.id) %}
+                    { name: "{{ s.name }}", difficulty: {{ s.difficulty_level or 3 }}, score: {{ "%.1f"|format(p_score) if p_score is not none else 'null' }} },
                     {% endfor %}
                 ];
                 var ALL_SUBJECT_NAMES = PROFILE_SUBJECTS.map(s => s.name);
+                {% if draft_subjects %}
+                var DRAFT_SUBJECTS = {{ draft_subjects | tojson }};
+                {% else %}
+                var DRAFT_SUBJECTS = null;
+                {% endif %}
                 </script>
 
                 <!-- Inline validation error banner -->
@@ -375,35 +381,38 @@
         <button type="button" class="btn btn-sm btn-outline-danger remove-btn position-absolute" style="top:8px;right:8px;z-index:1;" title="Remove row"><i class="fas fa-times"></i></button>
         <div class="row g-2">
             <div class="col-12">
-                <label class="form-label text-muted small">Subject</label>
+                <label class="form-label text-muted small fw-semibold">Subject</label>
                 <select name="subject_name[]" class="form-select form-select-sm subject-select" required>
                     <option value="">-- Select subject --</option>
                 </select>
                 <div class="invalid-feedback">Please select a subject.</div>
+                <div class="no-assessment-warning d-none"></div>
             </div>
             <div class="col-6">
-                <label class="form-label text-muted small">Grade %</label>
-                <input type="number" name="previous_grade[]" class="form-control form-control-sm grade-input" required min="0" max="100" step="0.1" value="70" placeholder="0–100">
-                <div class="invalid-feedback">Must be 0–100.</div>
+                <label class="form-label text-muted small fw-semibold">Grade % <span class="badge bg-secondary ms-1" style="font-size:10px;">Auto</span></label>
+                <input type="number" name="previous_grade[]" class="form-control form-control-sm grade-input" required min="0" max="100" step="0.1" value="" placeholder="From assessment" readonly style="background-color: rgba(255,255,255,0.06); cursor: not-allowed;">
+                <div class="invalid-feedback">Must be 0–100. Take an assessment first.</div>
             </div>
             <div class="col-6">
-                <label class="form-label text-muted small">Attendance %</label>
+                <label class="form-label text-muted small fw-semibold">Attendance %</label>
                 <input type="number" name="attendance[]" class="form-control form-control-sm att-input" required min="0" max="100" step="0.1" value="85" placeholder="0–100">
                 <div class="invalid-feedback">Must be 0–100.</div>
             </div>
             <div class="col-6">
-                <label class="form-label text-muted small">Study hrs/wk</label>
+                <label class="form-label text-muted small fw-semibold">Current Study Hours/Week</label>
                 <input type="number" name="study_hours[]" class="form-control form-control-sm hours-input" required min="0" max="168" step="0.5" value="6" placeholder="0–168">
+                <div class="form-text text-muted" style="font-size:11px; line-height:1.2;">This is how much you currently study. The model uses it to calculate what you actually need.</div>
                 <div class="invalid-feedback">Must be 0–168.</div>
             </div>
             <div class="col-6">
-                <label class="form-label text-muted small">Days until Exam</label>
+                <label class="form-label text-muted small fw-semibold">Days until Exam</label>
                 <input type="number" name="days_until_exam[]" class="form-control form-control-sm" required min="0" max="365" value="30" placeholder="e.g. 30">
                 <div class="invalid-feedback">Must be 0–365.</div>
             </div>
             <div class="col-12">
-                <label class="form-label text-muted small">Difficulty</label>
-                <select name="difficulty[]" class="form-select form-select-sm" required>
+                <label class="form-label text-muted small fw-semibold">Difficulty <span class="badge bg-secondary ms-1" style="font-size:10px;">Auto-derived</span></label>
+                <input type="hidden" name="difficulty[]" class="difficulty-hidden" value="3">
+                <select class="form-select form-select-sm difficulty-display" disabled style="background-color: rgba(255,255,255,0.06); cursor: not-allowed;">
                     <option value="1">1 · Easy</option>
                     <option value="2">2 · Light</option>
                     <option value="3" selected>3 · Moderate</option>
@@ -589,34 +598,108 @@
 
     function wireSubjectSelect(sel) {
         sel.addEventListener('change', function() {
-            // Auto-set difficulty from data attribute
-            const opt = this.options[this.selectedIndex];
-            const diff = opt ? opt.dataset.difficulty : null;
-            if (diff) {
-                const diffSel = this.closest('.subject-row').querySelector('select[name="difficulty[]"]');
-                if (diffSel) diffSel.value = Math.min(Math.max(parseInt(diff) || 3, 1), 5);
+            const row = this.closest('.subject-row');
+            if (!row) return;
+
+            const name = this.value;
+            const gradeInput = row.querySelector('input[name="previous_grade[]"]');
+            const diffDisplay = row.querySelector('.difficulty-display');
+            const diffHidden = row.querySelector('.difficulty-hidden');
+            const warnBox = row.querySelector('.no-assessment-warning');
+
+            const subjObj = (window.PROFILE_SUBJECTS || []).find(s => s.name === name);
+
+            if (subjObj && subjObj.score !== null && subjObj.score !== undefined) {
+                const score = parseFloat(subjObj.score);
+                if (gradeInput) {
+                    gradeInput.value = score.toFixed(1);
+                    gradeInput.classList.remove('is-invalid');
+                }
+
+                // Derive difficulty from grade %: <40% -> 4 (Hard), 40-70% -> 3 (Moderate), >70% -> 2 (Easy)
+                let derivedDiff = 3;
+                if (score < 40.0) derivedDiff = 4;
+                else if (score > 70.0) derivedDiff = 2;
+                else derivedDiff = 3;
+
+                if (diffDisplay) diffDisplay.value = derivedDiff.toString();
+                if (diffHidden) diffHidden.value = derivedDiff.toString();
+
+                if (warnBox) {
+                    warnBox.className = 'no-assessment-warning d-none';
+                    warnBox.innerHTML = '';
+                }
+            } else if (name) {
+                if (gradeInput) {
+                    gradeInput.value = '';
+                    gradeInput.classList.add('is-invalid');
+                }
+                if (warnBox) {
+                    warnBox.className = 'no-assessment-warning alert alert-warning py-1 px-2 mt-1 mb-0 small';
+                    warnBox.style.background = '#fffbeb';
+                    warnBox.style.color = '#b45309';
+                    warnBox.style.border = '1px solid #fde68a';
+                    warnBox.innerHTML = '<i class="fas fa-exclamation-triangle me-1"></i> Take an assessment in this subject first';
+                }
+            } else {
+                if (gradeInput) gradeInput.value = '';
+                if (warnBox) {
+                    warnBox.className = 'no-assessment-warning d-none';
+                    warnBox.innerHTML = '';
+                }
             }
             refreshAllSelects();
         });
     }
 
-    // First row is now built by buildNewRow() on DOMContentLoaded — no static wiring needed here.
-
-    // ── Auto-fill subject rows from profile ──────────────────────────────────
+    // ── Auto-fill subject rows from profile or session draft ──────────────────
     function autoFillSubjects() {
+        if (window.DRAFT_SUBJECTS && Array.isArray(window.DRAFT_SUBJECTS) && window.DRAFT_SUBJECTS.length > 0) {
+            const container = document.getElementById("subjects-container");
+            container.innerHTML = "";
+
+            window.DRAFT_SUBJECTS.forEach(s => {
+                const row = buildNewRow();
+                const sel = row.querySelector('select.subject-select');
+                const attInput = row.querySelector('input[name="attendance[]"]');
+                const hoursInput = row.querySelector('input[name="study_hours[]"]');
+                const examDaysInput = row.querySelector('input[name="days_until_exam[]"]');
+
+                if (sel) {
+                    sel.value = s.name;
+                    sel.dispatchEvent(new Event('change'));
+                }
+                if (attInput && s.attendance !== undefined) attInput.value = s.attendance;
+                if (hoursInput && s.study_hours !== undefined) hoursInput.value = s.study_hours;
+                if (examDaysInput && s.days_until_exam !== undefined) examDaysInput.value = s.days_until_exam;
+
+                container.appendChild(row);
+            });
+            refreshAllSelects();
+            return;
+        }
+
         if (!window.PROFILE_SUBJECTS || PROFILE_SUBJECTS.length === 0) {
             alert("No profile subjects found. Set your study level in Profile first.");
             return;
         }
+
+        const assessedSubjects = PROFILE_SUBJECTS.filter(s => s.score !== null && s.score !== undefined);
+        if (assessedSubjects.length === 0) {
+            alert("No completed assessment data found for your profile subjects. Take an assessment in at least one subject first.");
+            return;
+        }
+
         const container = document.getElementById("subjects-container");
         container.innerHTML = "";
 
-        PROFILE_SUBJECTS.forEach(s => {
+        assessedSubjects.forEach(s => {
             const row = buildNewRow();
             const sel = row.querySelector('select.subject-select');
-            if (sel) sel.value = s.name;
-            const diffSel = row.querySelector("select[name='difficulty[]']");
-            if (diffSel) diffSel.value = Math.min(Math.max(parseInt(s.difficulty) || 3, 1), 5);
+            if (sel) {
+                sel.value = s.name;
+                sel.dispatchEvent(new Event('change'));
+            }
             container.appendChild(row);
         });
         refreshAllSelects();
@@ -800,17 +883,17 @@
         return `${hour}:${min} ${ampm}`;
     }
 
-    // ── Category → colour mapping ────────────────────────────────────────────
+    // ── Category → colour mapping (WCAG AA >= 4.5:1 compliant) ───────────────
     const CATEGORY_STYLES = {
-        'Sleep':            { color: '#a855f7', textColor: '#fff' },
-        'Class/Academic':   { color: '#3b82f6', textColor: '#fff' },
-        'Sports':           { color: '#f97316', textColor: '#fff' },
-        'Social/Hangout':   { color: '#ec4899', textColor: '#fff' },
-        'Entertainment':    { color: '#ef4444', textColor: '#fff' },
+        'Sleep':            { color: '#8957e5', textColor: '#ffffff' },
+        'Class/Academic':   { color: '#2563eb', textColor: '#ffffff' },
+        'Sports':           { color: '#c2410c', textColor: '#ffffff' },
+        'Social/Hangout':   { color: '#be185d', textColor: '#ffffff' },
+        'Entertainment':    { color: '#dc2626', textColor: '#ffffff' },
         'Personal/Chores':  { color: '#eab308', textColor: '#422006' },
-        'Other':            { color: '#94a3b8', textColor: '#1e293b' },
-        'Busy':             { color: '#94a3b8', textColor: '#1e293b' }, // legacy
-        'Study':            { color: '#34d399', textColor: '#064e3b' }, // legacy
+        'Other':            { color: '#64748b', textColor: '#ffffff' },
+        'Busy':             { color: '#64748b', textColor: '#ffffff' }, // legacy
+        'Study':            { color: '#059669', textColor: '#ffffff' }, // legacy
     };
     function getCategoryStyle(cat) {
         return CATEGORY_STYLES[cat] || { color: '#94a3b8', textColor: '#1e293b' };
@@ -1369,11 +1452,11 @@
                 tbody.innerHTML = "";
                 
                 data.analysis.forEach(item => {
-                    let badgeClass = "bg-success text-white";
+                    let badgeStyle = "background:#dcfce7; color:#14532d; border:1px solid #86efac; font-weight:700;";
                     if (item.risk_level === "High") {
-                        badgeClass = "bg-danger text-white";
+                        badgeStyle = "background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; font-weight:700;";
                     } else if (item.risk_level === "Medium") {
-                        badgeClass = "bg-warning text-dark";
+                        badgeStyle = "background:#fef3c7; color:#7c2d12; border:1px solid #fde68a; font-weight:700;";
                     }
                     
                     const riskLabel = item.risk_pct
@@ -1383,7 +1466,7 @@
                     const tr = document.createElement("tr");
                     tr.innerHTML = `
                         <td class="fw-semibold text-dark">${item.name}</td>
-                        <td class="text-center"><span class="badge ${badgeClass} px-3 py-2">${riskLabel}</span></td>
+                        <td class="text-center"><span class="badge px-3 py-2" style="${badgeStyle}">${riskLabel}</span></td>
                         <td class="text-center fw-bold text-dark">${item.allocated_hours} hrs/week</td>
                     `;
                     tbody.appendChild(tr);

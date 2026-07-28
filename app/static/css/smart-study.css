@@ -1363,3 +1363,40 @@ body {
         pointer-events: none !important;
     }
 }
+
+/* High Contrast Subject & Format Badge Overrides (Prevents Blue-on-Blue Invisible Text) */
+.badge.bg-primary,
+.badge.bg-primary.text-primary,
+.badge-subject {
+    background-color: rgba(56, 189, 248, 0.15) !important;
+    color: #38bdf8 !important;
+    border: 1px solid rgba(56, 189, 248, 0.35) !important;
+    font-weight: 600 !important;
+    font-size: 0.82rem !important;
+    letter-spacing: 0.01em;
+}
+
+.badge.bg-secondary,
+.badge-format {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    color: #f1f5f9 !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    font-weight: 600 !important;
+}
+
+.badge.bg-warning,
+.badge.bg-warning.text-warning {
+    background-color: rgba(245, 158, 11, 0.15) !important;
+    color: #fbbf24 !important;
+    border: 1px solid rgba(245, 158, 11, 0.35) !important;
+    font-weight: 600 !important;
+}
+
+.badge.bg-success,
+.badge.bg-success.text-success {
+    background-color: rgba(16, 185, 129, 0.15) !important;
+    color: #34d399 !important;
+    border: 1px solid rgba(16, 185, 129, 0.35) !important;
+    font-weight: 600 !important;
+}
+

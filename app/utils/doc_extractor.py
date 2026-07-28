@@ -48,41 +48,52 @@ def extract_docx(file_path: str) -> dict:
     result = _make_result(os.path.basename(file_path), "docx")
     try:
         import docx as python_docx
-        doc = python_docx.Document(file_path)
+        with open(file_path, "rb") as f:
+            doc = python_docx.Document(f)
 
-        for para in doc.paragraphs:
-            text = _clean(para.text)
-            if not text:
-                continue
-            # Detect headings by style name
-            style_name = (para.style.name or "").lower()
-            is_heading = "heading" in style_name or para.runs and any(
-                r.bold for r in para.runs if r.text.strip()
-            )
-            result["text_blocks"].append({
-                "heading": is_heading,
-                "text": text,
-                "style": para.style.name,
-            })
+            for para in doc.paragraphs:
+                text = _clean(para.text)
+                if not text:
+                    continue
+                # Detect headings by style name
+                style_name = (para.style.name or "").lower()
+                is_heading = "heading" in style_name or para.runs and any(
+                    r.bold for r in para.runs if r.text.strip()
+                )
+                result["text_blocks"].append({
+                    "heading": is_heading,
+                    "text": text,
+                    "style": para.style.name,
+                })
 
-        for table in doc.tables:
-            rows = []
-            for row in table.rows:
-                row_data = [_clean(cell.text) for cell in row.cells]
-                rows.append(row_data)
-            if rows:
-                result["tables"].append(rows)
+            for table in doc.tables:
+                rows = []
+                for row in table.rows:
+                    row_data = [_clean(cell.text) for cell in row.cells]
+                    rows.append(row_data)
+                if rows:
+                    result["tables"].append(rows)
+                    if len(rows) > 0:
+                        header = "| " + " | ".join(rows[0]) + " |"
+                        separator = "| " + " | ".join(["---"] * len(rows[0])) + " |"
+                        body = ["| " + " | ".join(r) + " |" for r in rows[1:]]
+                        table_md = "\n".join([header, separator] + body)
+                        result["text_blocks"].append({
+                            "heading": False,
+                            "text": f"\n{table_md}\n",
+                            "is_table": True
+                        })
 
-        # Core properties
-        try:
-            cp = doc.core_properties
-            result["metadata"] = {
-                "title": cp.title or "",
-                "author": cp.author or "",
-                "subject": cp.subject or "",
-            }
-        except Exception:
-            pass
+            # Core properties
+            try:
+                cp = doc.core_properties
+                result["metadata"] = {
+                    "title": cp.title or "",
+                    "author": cp.author or "",
+                    "subject": cp.subject or "",
+                }
+            except Exception:
+                pass
 
     except Exception as e:
         result["extraction_ok"] = False
@@ -94,6 +105,7 @@ def extract_docx(file_path: str) -> dict:
 
 def extract_pdf(file_path: str) -> dict:
     result = _make_result(os.path.basename(file_path), "pdf")
+    doc = None
     try:
         import fitz  # PyMuPDF
         doc = fitz.open(file_path)
@@ -133,25 +145,40 @@ def extract_pdf(file_path: str) -> dict:
             )
 
         result["metadata"]["page_count"] = len(doc)
-        doc.close()
 
     except Exception as e:
         result["extraction_ok"] = False
         result["warnings"].append(f"PDF extraction error: {e}")
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
 
     # Also attempt table extraction via pdfplumber as a supplement
     if result["extraction_ok"]:
         try:
             import pdfplumber
             with pdfplumber.open(file_path) as pdf:
-                for page in pdf.pages:
+                for page_num, page in enumerate(pdf.pages, start=1):
                     for table in (page.extract_tables() or []):
                         cleaned = [
                             [_clean(str(cell)) if cell else "" for cell in row]
                             for row in table
                         ]
-                        if cleaned:
+                        if cleaned and len(cleaned) > 0:
                             result["tables"].append(cleaned)
+                            header = "| " + " | ".join(cleaned[0]) + " |"
+                            separator = "| " + " | ".join(["---"] * len(cleaned[0])) + " |"
+                            body = ["| " + " | ".join(r) + " |" for r in cleaned[1:]]
+                            table_md = "\n".join([header, separator] + body)
+                            result["text_blocks"].append({
+                                "heading": False,
+                                "text": f"\n{table_md}\n",
+                                "page": page_num,
+                                "is_table": True
+                            })
         except Exception as e:
             result["warnings"].append(f"pdfplumber table extraction warning: {e}")
 
@@ -166,37 +193,55 @@ def extract_pptx(file_path: str) -> dict:
         from pptx import Presentation
         from pptx.util import Pt
 
-        prs = Presentation(file_path)
-        result["metadata"]["slide_count"] = len(prs.slides)
+        with open(file_path, "rb") as f:
+            prs = Presentation(f)
+            result["metadata"]["slide_count"] = len(prs.slides)
 
-        for slide_num, slide in enumerate(prs.slides, start=1):
-            for shape in slide.shapes:
-                if not shape.has_text_frame:
-                    continue
-                for para in shape.text_frame.paragraphs:
-                    text = _clean("".join(run.text for run in para.runs))
-                    if not text:
+            for slide_num, slide in enumerate(prs.slides, start=1):
+                result["text_blocks"].append({
+                    "heading": True,
+                    "text": f"--- Slide {slide_num} ---",
+                    "slide": slide_num,
+                    "is_slide_header": True
+                })
+                for shape in slide.shapes:
+                    if not shape.has_text_frame:
                         continue
-                    # Detect heading by font size or level
-                    is_heading = para.level == 0 and any(
-                        (run.font.size or 0) >= Pt(14) for run in para.runs if run.font.size
-                    )
-                    result["text_blocks"].append({
-                        "heading": is_heading,
-                        "text": text,
-                        "slide": slide_num,
-                    })
+                    for para in shape.text_frame.paragraphs:
+                        text = _clean("".join(run.text for run in para.runs))
+                        if not text:
+                            continue
+                        # Detect heading by font size or level
+                        is_heading = para.level == 0 and any(
+                            (run.font.size or 0) >= Pt(14) for run in para.runs if run.font.size
+                        )
+                        result["text_blocks"].append({
+                            "heading": is_heading,
+                            "text": text,
+                            "slide": slide_num,
+                        })
 
-                # Extract tables from shapes
-                if shape.shape_type == 19:  # TABLE
-                    try:
-                        rows = []
-                        for row in shape.table.rows:
-                            rows.append([_clean(cell.text) for cell in row.cells])
-                        if rows:
-                            result["tables"].append(rows)
-                    except Exception:
-                        pass
+                    # Extract tables from shapes
+                    if shape.shape_type == 19:  # TABLE
+                        try:
+                            rows = []
+                            for row in shape.table.rows:
+                                rows.append([_clean(cell.text) for cell in row.cells])
+                            if rows:
+                                result["tables"].append(rows)
+                                if len(rows) > 0:
+                                    header = "| " + " | ".join(rows[0]) + " |"
+                                    separator = "| " + " | ".join(["---"] * len(rows[0])) + " |"
+                                    body = ["| " + " | ".join(r) + " |" for r in rows[1:]]
+                                    table_md = "\n".join([header, separator] + body)
+                                    result["text_blocks"].append({
+                                        "heading": False,
+                                        "text": f"\n{table_md}\n",
+                                        "slide": slide_num,
+                                        "is_table": True
+                                    })
+                        except Exception:
+                            pass
 
     except Exception as e:
         result["extraction_ok"] = False
