@@ -3373,12 +3373,84 @@ def delete_permanent_student(student_id):
         return redirect(url_for("admin.student_detail", student_id=student_id))
 
     try:
+        import os
         from app.models import (
             StudentProfile, StudentSubject, Prediction, StudyLog, Assignment,
             Exam, Schedule, Recommendation, Goal, AvailabilitySlot, StudentSeenQuestion,
-            StudyPlan, AcademicDocument, ExtractedMark, StudentAssessment, AssessmentResponse
+            StudyPlan, AcademicDocument, ExtractedMark, StudentAssessment, AssessmentResponse,
+            UploadedMaterial, MaterialChunk, MaterialImportBatch, MaterialImportUnmatched,
+            ModuleDescriptor, FlashcardReview, SubjectBook, QuizScore, StudyLogAnalysis,
+            LearningProgress, StudentNote, SubjectPerformanceHistory, AIStudyMaterial,
+            ReviewedChapter, ChapterQuizScore, ChapterQuizResult, TopicSeenQuestion,
+            BookmarkedChapter, ChapterNote, Notification
         )
-        # Delete dependent student records
+
+        # 1. Clean up UploadedMaterial & MaterialChunks & physical files & ModuleDescriptors
+        materials = UploadedMaterial.query.filter_by(user_id=student_id).all()
+        for m in materials:
+            MaterialChunk.query.filter_by(material_id=m.id).delete()
+            ModuleDescriptor.query.filter_by(source_material_id=m.id).delete()
+            if m.file_path and os.path.exists(m.file_path):
+                try:
+                    os.remove(m.file_path)
+                except Exception:
+                    pass
+            db.session.delete(m)
+
+        # Clean up any remaining MaterialChunk by user_id
+        MaterialChunk.query.filter_by(user_id=student_id).delete()
+        ModuleDescriptor.query.filter_by(user_id=student_id).delete()
+
+        # 2. Clean up MaterialImportBatches & Unmatched
+        batches = MaterialImportBatch.query.filter_by(user_id=student_id).all()
+        for b in batches:
+            MaterialImportUnmatched.query.filter_by(batch_id=b.id).delete()
+            if b.stored_zip_path and os.path.exists(b.stored_zip_path):
+                try:
+                    os.remove(b.stored_zip_path)
+                except Exception:
+                    pass
+            db.session.delete(b)
+
+        # 3. Clean up AcademicDocuments & physical files
+        docs = AcademicDocument.query.filter_by(student_id=student_id).all()
+        for d in docs:
+            ExtractedMark.query.filter_by(document_id=d.id).delete()
+            if d.file_path and os.path.exists(d.file_path):
+                try:
+                    os.remove(d.file_path)
+                except Exception:
+                    pass
+            db.session.delete(d)
+
+        # 4. Clean up Assessments & Quiz Scores
+        assessments = StudentAssessment.query.filter_by(student_id=student_id).all()
+        for a in assessments:
+            AssessmentResponse.query.filter_by(assessment_id=a.id).delete()
+            db.session.delete(a)
+
+        quiz_scores = ChapterQuizScore.query.filter_by(student_id=student_id).all()
+        for qs in quiz_scores:
+            ChapterQuizResult.query.filter_by(quiz_score_id=qs.id).delete()
+            db.session.delete(qs)
+
+        ChapterQuizResult.query.filter_by(student_id=student_id).delete()
+        QuizScore.query.filter_by(user_id=student_id).delete()
+
+        # 5. Clean up Flashcard Reviews, Books, Learning Progress, Notes
+        FlashcardReview.query.filter_by(user_id=student_id).delete()
+        SubjectBook.query.filter_by(user_id=student_id).delete()
+        StudyLogAnalysis.query.filter_by(user_id=student_id).delete()
+        LearningProgress.query.filter_by(user_id=student_id).delete()
+        StudentNote.query.filter_by(user_id=student_id).delete()
+        SubjectPerformanceHistory.query.filter_by(user_id=student_id).delete()
+        AIStudyMaterial.query.filter_by(user_id=student_id).delete()
+        ReviewedChapter.query.filter_by(student_id=student_id).delete()
+        TopicSeenQuestion.query.filter_by(student_id=student_id).delete()
+        BookmarkedChapter.query.filter_by(student_id=student_id).delete()
+        ChapterNote.query.filter_by(student_id=student_id).delete()
+
+        # 6. Clean up Core Planner & Profile Records
         StudentProfile.query.filter_by(user_id=student_id).delete()
         StudentSubject.query.filter_by(user_id=student_id).delete()
         Prediction.query.filter_by(user_id=student_id).delete()
@@ -3388,19 +3460,10 @@ def delete_permanent_student(student_id):
         Schedule.query.filter_by(user_id=student_id).delete()
         Recommendation.query.filter_by(user_id=student_id).delete()
         Goal.query.filter_by(user_id=student_id).delete()
+        Notification.query.filter_by(user_id=student_id).delete()
         AvailabilitySlot.query.filter_by(user_id=student_id).delete()
         StudentSeenQuestion.query.filter_by(student_id=student_id).delete()
         StudyPlan.query.filter_by(student_id=student_id).delete()
-
-        docs = AcademicDocument.query.filter_by(student_id=student_id).all()
-        for d in docs:
-            ExtractedMark.query.filter_by(document_id=d.id).delete()
-            db.session.delete(d)
-
-        assessments = StudentAssessment.query.filter_by(student_id=student_id).all()
-        for a in assessments:
-            AssessmentResponse.query.filter_by(assessment_id=a.id).delete()
-            db.session.delete(a)
 
         email_deleted = student.email
         db.session.delete(student)
