@@ -1,37 +1,85 @@
 {% extends 'base.html' %}
-{% block title %}About{% endblock %}
+{% block title %}About Smart Study{% endblock %}
 
 {% block content %}
-<section class="landing-hero pb-3">
-    <h1 class="text-gradient">About Smart Study</h1>
-    <p class="lead text-muted mx-auto" style="max-width: 640px;">
-        An intelligent study planner for students from Class 8 to Master level — Final Year Project by Hemant Kumar Sah (NP069826).
+<section class="text-center mb-5" style="padding-top:3rem;">
+    <div class="ss-hero-tag mb-3">Our Mission</div>
+    <h1 class="text-gradient fw-bold mb-3" style="font-size:clamp(1.75rem,4vw,2.5rem);letter-spacing:-0.03em;">
+        Helping Students Study Smarter
+    </h1>
+    <p class="text-muted mx-auto" style="max-width:600px;font-size:1.05rem;line-height:1.65;">
+        Smart Study was built for one purpose: to make sure no student wastes time studying the wrong things or falls behind without knowing it.
     </p>
 </section>
 
-<div class="row g-4 mx-auto" style="max-width: 900px;">
+<div class="row g-4 mx-auto mb-5" style="max-width:900px;">
     <div class="col-md-6">
         <div class="card card-flat p-4 h-100">
-            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-bullseye me-2"></i> Mission</h5>
-            <p class="text-muted mb-0">Help students systematically manage academic workload by identifying performance trends and generating actionable, data-driven study schedules powered by machine learning.</p>
+            <div class="ss-benefit-icon mb-3" style="background:rgba(56,189,248,0.12);color:var(--blue);">
+                <i class="fas fa-bullseye"></i>
+            </div>
+            <h5 class="fw-bold mb-3">The Problem We Solve</h5>
+            <p class="text-muted mb-0">
+                Most students study by intuition — spending time on subjects they feel comfortable with rather than those that actually need work. When exam time arrives, the gaps become visible, but it's often too late to fix them.
+            </p>
         </div>
     </div>
     <div class="col-md-6">
         <div class="card card-flat p-4 h-100">
-            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-users me-2"></i> Built For</h5>
-            <p class="text-muted mb-0">APU computing students — especially those balancing multiple subjects with varying difficulty, attendance patterns, and exam performance across semesters.</p>
+            <div class="ss-benefit-icon mb-3" style="background:rgba(52,211,153,0.12);color:var(--green);">
+                <i class="fas fa-graduation-cap"></i>
+            </div>
+            <h5 class="fw-bold mb-3">Our Solution</h5>
+            <p class="text-muted mb-0">
+                Smart Study uses assessment data, performance history, and study habits to identify academic risk early — then generates a personalised study plan that allocates more time exactly where it's needed.
+            </p>
         </div>
     </div>
-    <div class="col-12">
-        <div class="card card-flat p-4">
-            <h5 class="text-gradient fw-bold mb-4"><i class="fas fa-microchip me-2"></i> Technology Stack</h5>
-            <div class="row g-3">
-                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Backend</strong><br><span class="text-muted small">Flask · SQLAlchemy · Flask-Login · Bcrypt</span></div></div>
-                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Machine Learning</strong><br><span class="text-muted small">Scikit-learn Random Forest · 90%+ accuracy · 12 features</span></div></div>
-                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">OCR Pipeline</strong><br><span class="text-muted small">OCR/Extraction: PyMuPDF (fitz) · PyTesseract · pdfplumber (fallback) · Pillow</span></div></div>
-                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Frontend</strong><br><span class="text-muted small">Bootstrap 5 · Chart.js · Custom design system</span></div></div>
-                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Database</strong><br><span class="text-muted small">Database: SQLite (default/development) · MySQL (supported via environment config)</span></div></div>
-                <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Dataset</strong><br><span class="text-muted small">10,000 synthetic APU student records for model training</span></div></div>
+    <div class="col-md-6">
+        <div class="card card-flat p-4 h-100">
+            <div class="ss-benefit-icon mb-3" style="background:rgba(168,85,247,0.12);color:var(--purple);">
+                <i class="fas fa-users"></i>
+            </div>
+            <h5 class="fw-bold mb-3">Who It's Built For</h5>
+            <p class="text-muted mb-0">
+                Smart Study is designed for students from Class 8 to Master level who want to take control of their academic performance — especially those balancing multiple subjects with varying difficulty, attendance patterns, and exam schedules.
+            </p>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card card-flat p-4 h-100">
+            <div class="ss-benefit-icon mb-3" style="background:rgba(251,191,36,0.12);color:var(--amber);">
+                <i class="fas fa-heart"></i>
+            </div>
+            <h5 class="fw-bold mb-3">Why We Built It</h5>
+            <p class="text-muted mb-0">
+                Smart Study is a Final Year Project by Hemant Kumar Sah (NP069826). It started from a simple observation: students need a coach, not just a planner. A coach that tells them what to focus on, not just when to study.
+            </p>
+        </div>
+    </div>
+</div>
+
+{# Technical stack — in a collapsible section #}
+<div class="mx-auto mb-5" style="max-width:900px;">
+    <div class="accordion" id="techAccordion">
+        <div class="accordion-item" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);">
+            <h2 class="accordion-header" id="techHeading">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#techCollapse" aria-expanded="false" aria-controls="techCollapse"
+                        style="background:transparent;color:var(--text-muted);font-weight:600;font-size:0.92rem;border-radius:var(--radius-md);">
+                    <i class="fas fa-microchip me-2 text-primary"></i> How Smart Study Works Technically
+                </button>
+            </h2>
+            <div id="techCollapse" class="accordion-collapse collapse" aria-labelledby="techHeading">
+                <div class="accordion-body" style="border-top:1px solid var(--border);">
+                    <div class="row g-3">
+                        <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Backend</strong><br><span class="text-muted small">Flask · SQLAlchemy · Flask-Login · Bcrypt</span></div></div>
+                        <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Machine Learning</strong><br><span class="text-muted small">Scikit-learn Random Forest · 90%+ accuracy · 12 features</span></div></div>
+                        <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">OCR Pipeline</strong><br><span class="text-muted small">PyMuPDF (fitz) · PyTesseract · pdfplumber (fallback) · Pillow</span></div></div>
+                        <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Frontend</strong><br><span class="text-muted small">Bootstrap 5 · Chart.js · Custom design system</span></div></div>
+                        <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Database</strong><br><span class="text-muted small">SQLite (development) · MySQL (supported via environment config)</span></div></div>
+                        <div class="col-md-6"><div class="log-item mb-0"><strong class="text-gradient">Dataset</strong><br><span class="text-muted small">10,000 synthetic student records for model training</span></div></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -77,8 +77,8 @@
                 <script>
                 var PROFILE_SUBJECTS = [
                     {% for s in subjects %}
-                    {% set p_score = get_subject_performance_score(current_user.id, s.id) %}
-                    { name: "{{ s.name }}", difficulty: {{ s.difficulty_level or 3 }}, score: {{ "%.1f"|format(p_score) if p_score is not none else 'null' }} },
+                    {% set dt = get_subject_profile_details(current_user.id, s.id, s.name) %}
+                    { name: "{{ s.name }}", difficulty: {{ s.difficulty_level or 3 }}, score: {{ "%.1f"|format(dt.score) if dt.score is not none else 'null' }}, attendance: {{ dt.attendance }}, study_hours: {{ dt.study_hours }}, days_until_exam: {{ dt.days_until_exam }} },
                     {% endfor %}
                 ];
                 var ALL_SUBJECT_NAMES = PROFILE_SUBJECTS.map(s => s.name);
@@ -627,10 +627,18 @@
         assessedSubjects.forEach(s => {
             const row = buildNewRow();
             const sel = row.querySelector('select.subject-select');
+            const attInput = row.querySelector('input[name="attendance[]"]');
+            const hoursInput = row.querySelector('input[name="study_hours[]"]');
+            const examDaysInput = row.querySelector('input[name="days_until_exam[]"]');
+
             if (sel) {
                 sel.value = s.name;
                 sel.dispatchEvent(new Event('change'));
             }
+            if (attInput && s.attendance !== undefined && s.attendance !== null) attInput.value = s.attendance;
+            if (hoursInput && s.study_hours !== undefined && s.study_hours !== null) hoursInput.value = s.study_hours;
+            if (examDaysInput && s.days_until_exam !== undefined && s.days_until_exam !== null) examDaysInput.value = s.days_until_exam;
+
             container.appendChild(row);
         });
         refreshAllSelects();
@@ -1466,7 +1474,7 @@
             const attInput = row.querySelector('input[name="attendance[]"]');
             const hoursInput = row.querySelector('input[name="study_hours[]"]');
             const examDaysInput = row.querySelector('input[name="days_until_exam[]"]');
-            const diffSelect = row.querySelector('select[name="difficulty[]"]');
+            const diffSelect = row.querySelector('[name="difficulty[]"]');
             
             if (!nameInput || !gradeInput || !attInput || !hoursInput || !diffSelect) return;
             

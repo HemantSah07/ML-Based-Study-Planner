@@ -327,6 +327,47 @@ def get_subject_performance_snapshot(user_id, subject_id):
 def get_subject_performance_score(user_id, subject_id):
     return get_subject_performance_snapshot(user_id, subject_id)["score"]
 
+def get_subject_profile_details(user_id, subject_id, subject_name):
+    score = get_subject_performance_score(user_id, subject_id)
+    today_local = local_today_for_user(user_id)
+    
+    attendance = 85.0
+    study_hours = 6.0
+    days_until_exam = 30
+    
+    try:
+        hist = SubjectPerformanceHistory.query.filter_by(
+            user_id=user_id, subject_name=subject_name
+        ).order_by(SubjectPerformanceHistory.logged_at.desc()).first()
+        if hist:
+            if hist.attendance is not None:
+                attendance = float(hist.attendance)
+            if hist.study_hours is not None:
+                study_hours = float(hist.study_hours)
+            if hist.days_until_exam is not None:
+                days_until_exam = int(hist.days_until_exam)
+    except Exception:
+        pass
+
+    try:
+        from app.models import Exam
+        upcoming_exam = Exam.query.filter(
+            Exam.user_id == user_id,
+            Exam.subject_id == subject_id,
+            Exam.date >= today_local
+        ).order_by(Exam.date.asc()).first()
+        if upcoming_exam and upcoming_exam.date:
+            days_until_exam = max(1, min(365, (upcoming_exam.date - today_local).days))
+    except Exception:
+        pass
+
+    return {
+        "score": score,
+        "attendance": attendance,
+        "study_hours": study_hours,
+        "days_until_exam": days_until_exam
+    }
+
 def grade_from_score(score):
     if score >= 90.0: return "A"
     if score >= 85.0: return "A-"
@@ -1193,6 +1234,7 @@ def schedule():
         risk_counts=risk,
         profile=ctx.profile,
         get_subject_performance_score=get_subject_performance_score,
+        get_subject_profile_details=get_subject_profile_details,
         draft_subjects=draft_subjects,
     )
 
@@ -1212,13 +1254,25 @@ def risk_analysis():
         
         raw_subjects = []
         for i in range(len(subject_names)):
+            sname = subject_names[i]
+            if not sname:
+                return jsonify({"status": "error", "message": "Validation failed: Subject selection is required for all rows."}), 400
+            if i >= len(previous_grades) or not str(previous_grades[i]).strip():
+                return jsonify({"status": "error", "message": f"Validation failed: Grade % missing for subject '{sname}'."}), 400
+            if i >= len(attendances) or not str(attendances[i]).strip():
+                return jsonify({"status": "error", "message": f"Validation failed: Attendance % missing for subject '{sname}'."}), 400
+            if i >= len(study_hours) or not str(study_hours[i]).strip():
+                return jsonify({"status": "error", "message": f"Validation failed: Study hours missing for subject '{sname}'."}), 400
+            if i >= len(exam_days_list) or not str(exam_days_list[i]).strip():
+                return jsonify({"status": "error", "message": f"Validation failed: Days until exam missing for subject '{sname}'."}), 400
+
             raw_subjects.append({
-                "name": subject_names[i],
-                "previous_grade": previous_grades[i] if i < len(previous_grades) else 70.0,
-                "attendance": attendances[i] if i < len(attendances) else 85.0,
-                "study_hours": study_hours[i] if i < len(study_hours) else 6.0,
+                "name": sname,
+                "previous_grade": previous_grades[i],
+                "attendance": attendances[i],
+                "study_hours": study_hours[i],
                 "difficulty": difficulties[i] if i < len(difficulties) else 3.0,
-                "days_until_exam": exam_days_list[i] if i < len(exam_days_list) else 30,
+                "days_until_exam": exam_days_list[i],
             })
             
     if not raw_subjects:
@@ -1262,10 +1316,14 @@ def risk_analysis():
             if snap["source"] != "missing" and snap["score"] is not None:
                 real_grade = float(snap["score"])
 
-        if real_grade is None:
-            return jsonify({"status": "error", "message": f"Subject '{name}' has no completed assessment score. Please complete an assessment in {name} first."}), 400
+        form_grade = float(s.get("previous_grade", 70.0))
+        if real_grade is not None:
+            grade = real_grade
+            is_self_reported = False
+        else:
+            grade = form_grade
+            is_self_reported = True
 
-        grade = real_grade
         diff = float(derive_subject_difficulty(grade))
         att = float(s.get("attendance", 85.0))
         hrs = float(s.get("study_hours", 6.0))
@@ -1342,72 +1400,54 @@ def risk_analysis():
     })
 
 
-def _build_planner_advice(sd: dict) -> str:
+def _build_planner_advice(sd: dict, session_idx: int = 1, total_sessions: int = 1) -> str:
     """
-    Return a context-aware advice string for a planner schedule entry.
-
-    Risk tier mapping (mirrors generate_schedule logic):
-      risk_pred == 2  →  High Risk   (risk_score >= 0.6)
-      risk_pred == 1  →  Medium Risk (risk_score 0.35-0.59)
-      risk_pred == 0  →  Low Risk    (risk_score < 0.35)
-
-    The text names the student's weakest metric so each entry reads
-    differently rather than repeating the same line everywhere.
-    Uses only data already in the sd dict — zero extra API calls.
+    Return a context-aware, dynamic advice string for a planner schedule entry.
+    Interpolates subject name, exact grade %, session sequence (Session X of Y),
+    and a rotating study focus area so card text varies naturally.
     """
-    grade = sd.get('grade', 70.0)
-    att   = sd.get('attendance', 85.0)
-    diff  = sd.get('difficulty', 3.0)
-    risk  = sd.get('risk', 1)   # 0=Low, 1=Medium, 2=High
+    name  = sd.get('name', 'Subject')
+    raw_g = sd.get('grade') if sd.get('grade') is not None else sd.get('previous_grade', 70.0)
+    grade = float(raw_g)
+    att   = float(sd.get('attendance', 85.0))
+    diff  = float(sd.get('difficulty', 3.0))
+    risk  = int(sd.get('risk', 1))   # 0=Low, 1=Medium, 2=High
 
-    # ── Identify the single weakest metric to name in the tip ────────────
-    # Score each metric (0 = fine, higher = more concern)
-    grade_concern = max(0.0, (70.0 - grade) / 70.0)   # below 70 % starts concern
-    att_concern   = max(0.0, (80.0 - att)   / 80.0)   # below 80 % starts concern
-    diff_concern  = max(0.0, (diff - 3.0)   / 2.0)    # above 3 starts concern
+    grade_concern = max(0.0, (70.0 - grade) / 70.0) * 1.5
+    att_concern   = max(0.0, (80.0 - att)   / 80.0) * 1.2
+    diff_concern  = max(0.0, (diff - 3.0)   / 2.0)
 
     worst = max(grade_concern, att_concern, diff_concern)
 
     if worst == grade_concern and grade_concern > 0:
-        weak_metric = f"grade ({grade:.0f}%)"
+        weak_metric_phrase = f"low grade ({grade:.1f}%)"
     elif worst == att_concern and att_concern > 0:
-        weak_metric = f"attendance ({att:.0f}%)"
+        weak_metric_phrase = f"low attendance ({att:.1f}%)"
     elif diff_concern > 0:
-        weak_metric = f"subject difficulty (level {diff:.0f}/5)"
+        weak_metric_phrase = f"high difficulty level ({diff:.0f}/5)"
     else:
-        weak_metric = None   # no metric in danger zone — student is doing well
+        weak_metric_phrase = None
 
-    # ── High Risk (risk_pred == 2) ────────────────────────────────────────
+    focus_areas = [
+        "core concept drill & worked examples",
+        "past paper practice & formula review",
+        "weak topic flashcards & active recall",
+        "timed problem solving & self-testing"
+    ]
+    focus = focus_areas[(session_idx - 1) % len(focus_areas)]
+
+    seq_prefix = f"Session {session_idx}/{total_sessions} for {name}"
+
     if risk == 2:
-        if weak_metric == f"grade ({grade:.0f}%)":
-            return f"Prioritise past papers & worked examples — your grade ({grade:.0f}%) needs a boost"
-        elif weak_metric == f"attendance ({att:.0f}%)":
-            return f"Attend every session & review missed content — attendance ({att:.0f}%) is dragging your score"
-        elif weak_metric and "difficulty" in weak_metric:
-            return f"Break difficult concepts into smaller chunks — difficulty level {diff:.0f}/5 demands extra revision time"
-        else:
-            return "Urgent: block daily revision sessions and tackle weak areas immediately"
-
-    # ── Medium Risk (risk_pred == 1) ─────────────────────────────────────
-    if risk == 1:
-        if weak_metric == f"grade ({grade:.0f}%)":
-            return f"Steady effort needed — aim to lift your grade above 70% through regular practice"
-        elif weak_metric == f"attendance ({att:.0f}%)":
-            return f"Improve class attendance ({att:.0f}%) to avoid knowledge gaps"
-        elif weak_metric and "difficulty" in weak_metric:
-            return f"Allocate extra time for tricky topics — difficulty {diff:.0f}/5 warrants consistent review"
-        else:
-            return "Keep up steady weekly sessions to consolidate progress"
-
-    # ── Low Risk (risk_pred == 0) ─────────────────────────────────────────
-    if weak_metric == f"grade ({grade:.0f}%)":
-        return f"Looking solid overall — keep working on grade consistency ({grade:.0f}%)"
-    elif weak_metric == f"attendance ({att:.0f}%)":
-        return f"Good standing — try to maintain attendance above 80% to stay on track"
-    elif weak_metric and "difficulty" in weak_metric:
-        return f"On track — stay ahead on harder topics (difficulty {diff:.0f}/5) with light weekly review"
+        if weak_metric_phrase:
+            return f"{seq_prefix}: High Risk due to {weak_metric_phrase}. Target {focus}."
+        return f"{seq_prefix}: High Risk — urgent review focusing on {focus}."
+    elif risk == 1:
+        if weak_metric_phrase:
+            return f"{seq_prefix}: Moderate Risk ({weak_metric_phrase}). Reinforce progress via {focus}."
+        return f"{seq_prefix}: Moderate Risk — steady effort on {focus}."
     else:
-        return "Maintain current study habits — you're on track to succeed"
+        return f"{seq_prefix}: Low Risk ({grade:.1f}% grade) — light maintenance of {focus}."
 
 
 @student_bp.route("/schedule/generate", methods=["POST"])
@@ -1572,10 +1612,17 @@ def generate_schedule():
             if snap["source"] != "missing" and snap["score"] is not None:
                 real_grade = float(snap["score"])
 
-        if real_grade is None:
-            return fail_validation(f"Subject '{name}' has no completed assessment score. Please complete an assessment in {name} first.")
+        raw_grade = previous_grades[i] if i < len(previous_grades) else 70.0
+        try:
+            form_grade = float(raw_grade)
+        except (ValueError, TypeError):
+            form_grade = 70.0
 
-        grade = real_grade
+        if real_grade is not None:
+            grade = real_grade
+        else:
+            grade = form_grade
+
         diff = float(derive_subject_difficulty(grade))
         att   = float(attendances[i])      if i < len(attendances)     else 85.0
         hrs   = float(study_hours[i])      if i < len(study_hours)     else 6.0
@@ -1716,88 +1763,128 @@ def generate_schedule():
         session_len = 60
     session_hours = session_len / 60.0
 
+    # ── 5. Session Length block-partitioning allocation & Placement Engine ─────────
+    try:
+        session_len = int(request.form.get("session_length", 60))
+    except ValueError:
+        session_len = 60
+    session_hours = session_len / 60.0
+
     import math
+    from datetime import time
 
     if has_any_slots:
+        # Caps & Limits
+        WEEKDAY_MAX_HOURS = 4.5       # Mon-Fri max total study hours across all subjects
+        WEEKEND_MAX_HOURS = 2.0       # Sat-Sun max total study hours (50%+ lighter weekend capacity)
+        SUBJECT_DAILY_MAX_HOURS = 2.0 # Max hours per subject per day (distributes subject across multiple days)
+        GAP_MINUTES = 15              # 15-minute rest break between consecutive sessions
+
+        # Compute realistic discrete block capacity considering daily caps and session block size
+        total_capacity_hours = 0.0
+        for d in range(7):
+            f_hrs = len(day_study_hours[d])
+            cap = WEEKEND_MAX_HOURS if d in (5, 6) else WEEKDAY_MAX_HOURS
+            max_daily = min(float(f_hrs), cap)
+            max_blocks_for_day = int(max_daily // session_hours)
+            total_capacity_hours += max_blocks_for_day * session_hours
+
+        total_target_hours = sum(sd['allocated_hours'] for sd in subject_data)
+
+        # Option A: Proportional Overflow Scaling if target hours exceed capacity
+        if total_target_hours > total_capacity_hours and total_target_hours > 0:
+            scale_factor = total_capacity_hours / total_target_hours
+            for sd in subject_data:
+                sd['allocated_hours'] = max(0.5, round(sd['allocated_hours'] * scale_factor, 1))
+            scaled_sum = sum(sd['allocated_hours'] for sd in subject_data)
+            flash(
+                f"ℹ️ Notice: Target study hours ({round(total_target_hours, 1)} hrs) exceeded your weekly schedule capacity ({round(total_capacity_hours, 1)} hrs). "
+                f"Schedules have been scaled proportionally to fit your available time while preserving subject priority.",
+                "info"
+            )
+
         # Sort subjects: highest risk_score first
         sorted_subjects = sorted(subject_data, key=lambda x: x['risk_score'], reverse=True)
 
         # Calculate number of session blocks needed per subject
         remaining_blocks = {sd['name']: max(1, int(round(sd['allocated_hours'] / session_hours))) for sd in sorted_subjects}
-        blocks_per_session = int(math.ceil(session_len / 60.0))
-        MAX_DAILY_CAP = 3.0  # max hours per subject per day
+        total_blocks_target = {sd['name']: remaining_blocks[sd['name']] for sd in sorted_subjects}
+        session_counter = {sd['name']: 0 for sd in sorted_subjects}
 
-        scheduled_slots = []  # list of (day_idx, start_time, end_time, subject_dict)
+        scheduled_slots = []  # list of (day_idx, start_time, end_time, subject_dict, session_idx, total_sessions)
+        day_total_scheduled = {d: 0.0 for d in range(7)}
+        day_subject_scheduled = {d: {sd['name']: 0.0 for sd in sorted_subjects} for d in range(7)}
 
-        # Cycle through days, then subjects
-        days_with_slots = [d for d in range(7) if day_study_hours[d]]
-        day_hour_pointer = {d: 0 for d in days_with_slots}  # index into sorted hour list
-        day_subject_hours_today = {d: {} for d in range(7)}  # track hours per subject per day
+        num_subjects = len(sorted_subjects)
 
-        subject_cursor = 0
-        total_target_sessions = min(
-            sum(remaining_blocks.values()),
-            sum(len(hours) for hours in day_study_hours.values()) // blocks_per_session
-        )
-        max_passes = max(1, len(days_with_slots) * max(1, len(sorted_subjects)) * 4)
-        passes = 0
-        while len(scheduled_slots) < total_target_sessions and passes < max_passes:
-            passes += 1
-            progress = False
-            for day_idx in days_with_slots:
-                if len(scheduled_slots) >= total_target_sessions:
+        # Place sessions day by day, using day-by-day subject rotation to prevent low-priority starvation
+        for day_idx in range(7):
+            free_hrs = day_study_hours[day_idx]
+            if not free_hrs:
+                continue
+
+            day_cap = WEEKEND_MAX_HOURS if day_idx in (5, 6) else WEEKDAY_MAX_HOURS
+            current_mins = None
+
+            for hour in free_hrs:
+                if day_total_scheduled[day_idx] + session_hours > day_cap:
                     break
-                ptr = day_hour_pointer[day_idx]
-                if ptr + blocks_per_session > len(day_study_hours[day_idx]):
-                    continue
-                for offset in range(len(sorted_subjects)):
-                    subj_idx = (subject_cursor + offset) % len(sorted_subjects)
-                    sd = sorted_subjects[subj_idx]
+
+                block_start_mins = hour * 60
+                if current_mins is not None and block_start_mins < current_mins:
+                    block_start_mins = current_mins
+
+                placed = False
+                # Rotate starting subject index by day_idx so every subject gets top priority on different days
+                for offset in range(num_subjects):
+                    s_rot_idx = (day_idx + offset) % num_subjects
+                    sd = sorted_subjects[s_rot_idx]
                     name = sd['name']
                     if remaining_blocks[name] <= 0:
                         continue
-                    already_today = day_subject_hours_today[day_idx].get(name, 0.0)
-                    if already_today + session_hours > MAX_DAILY_CAP:
+                    if day_subject_scheduled[day_idx][name] + session_hours > SUBJECT_DAILY_MAX_HOURS:
                         continue
-                    
-                    hour = day_study_hours[day_idx][ptr]
-                    
-                    start_t = time(hour, 0)
-                    end_hour = (hour + int(session_len // 60)) % 24
-                    end_min = int(session_len % 60)
-                    end_t = time(end_hour, end_min)
-                    
-                    scheduled_slots.append((day_idx, start_t, end_t, sd))
-                    day_hour_pointer[day_idx] += blocks_per_session
-                    day_subject_hours_today[day_idx][name] = already_today + session_hours
+
+                    session_counter[name] += 1
+                    s_idx = session_counter[name]
+                    tot_s = total_blocks_target[name]
+
+                    s_h = (block_start_mins // 60) % 24
+                    s_m = block_start_mins % 60
+                    e_mins = block_start_mins + int(session_len)
+                    e_h = (e_mins // 60) % 24
+                    e_m = e_mins % 60
+
+                    start_t = time(s_h, s_m)
+                    end_t = time(e_h, e_m)
+
+                    scheduled_slots.append((day_idx, start_t, end_t, sd, s_idx, tot_s))
+
+                    day_total_scheduled[day_idx] += session_hours
+                    day_subject_scheduled[day_idx][name] += session_hours
                     remaining_blocks[name] -= 1
-                    subject_cursor = (subj_idx + 1) % len(sorted_subjects)
-                    progress = True
+
+                    # Next session starts after GAP_MINUTES
+                    current_mins = e_mins + GAP_MINUTES
+                    placed = True
                     break
-            if not progress:
-                break  # no more slots to fill
 
-        # ── 6. Validation check ───────────────────────────────────────────────
-        total_available = sum(len(h) for h in day_study_hours.values())
-        subjects_in_plan = set(s[3]['name'] for s in scheduled_slots)
-        all_subjects_present = all(sd['name'] in subjects_in_plan for sd in subject_data)
+                if not placed and all(remaining_blocks[sd['name']] <= 0 for sd in sorted_subjects):
+                    break
+
+        # ── 6. Validation & Summary Logging ─────────────────────────────────
         total_planned = len(scheduled_slots)
-        within_tolerance = abs((total_planned * session_hours) - total_recommended_hours) <= (total_recommended_hours * 0.25 + 1)
-
         logger.info(
-            "Schedule generation allocation summary user=%s target_sessions=%s planned_sessions=%s all_subjects_present=%s within_tolerance=%s remaining_blocks=%s per_day_subject_hours=%s",
+            "Schedule generation summary user=%s planned_sessions=%s per_day_scheduled=%s per_day_subject_scheduled=%s",
             current_user.id,
-            total_target_sessions,
             total_planned,
-            all_subjects_present,
-            within_tolerance,
-            remaining_blocks,
-            day_subject_hours_today,
+            day_total_scheduled,
+            day_subject_scheduled,
         )
 
         # ── 7. Write schedule to DB ───────────────────────────────────────────
-        for (day_idx, start_t, end_t, sd) in scheduled_slots:
-            tip = _build_planner_advice(sd)
+        for (day_idx, start_t, end_t, sd, s_idx, tot_s) in scheduled_slots:
+            tip = _build_planner_advice(sd, session_idx=s_idx, total_sessions=tot_s)
             new_schedule = Schedule(
                 user_id=current_user.id,
                 day_of_week=day_idx,
@@ -1810,7 +1897,7 @@ def generate_schedule():
 
         # Update planned hours in performance history
         planned_by_subject = {}
-        for (_, __, ___, sd) in scheduled_slots:
+        for (_, __, ___, sd, ____, _____) in scheduled_slots:
             planned_by_subject[sd['name']] = planned_by_subject.get(sd['name'], 0.0) + session_hours
         for h_rec in SubjectPerformanceHistory.query.filter_by(
             user_id=current_user.id, week_start=week_start

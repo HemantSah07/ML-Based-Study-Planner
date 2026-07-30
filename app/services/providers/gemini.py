@@ -49,6 +49,13 @@ class GeminiProvider(BaseAIProvider):
             raise ValueError("GEMINI_API_KEY is not set.")
         self.api_key = api_key
 
+        # Tracks which model actually served the last request. The requested
+        # model and the served model can differ when the reactive fallback
+        # below fires. ai_service.py should read this after generate_content()
+        # returns and record usage/quota against THIS model, not the one it
+        # originally asked for.
+        self.last_model_used = None
+
         if _new_sdk:
             self.client = _genai_new.Client(api_key=self.api_key)
             self._mode = "new"
@@ -80,9 +87,15 @@ class GeminiProvider(BaseAIProvider):
         initial_delay  = kwargs.get("initial_delay", 1.0)
         model_name     = kwargs.get("model", self.DEFAULT_MODEL_NEW)
 
-        # Proactively normalize/fallback unreleased gemini-3.1, 2.5, or unavailable lite strings
-        if "gemini-3.1" in model_name or "lite" in model_name or "2.5" in model_name:
-            model_name = "gemini-3.5-flash"
+        # NOTE: A proactive rewrite used to sit here, forcing any model name
+        # containing "3.1", "lite", or "2.5" onto "gemini-3.5-flash" before
+        # the first attempt. That collapsed every configured model (MCQ,
+        # assistant primary, assistant fallback) onto one model, which is
+        # why that one model kept hitting its rate limit while the others
+        # sat idle. Removed. The reactive fallback below already handles
+        # the case where a model name is genuinely invalid or unreleased,
+        # by catching the actual 404/not-found error from Google instead
+        # of guessing in advance.
 
         system_instruction = kwargs.get("system_instruction", None)
         response_mime_type = kwargs.get("response_mime_type", None)
@@ -105,6 +118,7 @@ class GeminiProvider(BaseAIProvider):
                     config=config,
                 )
                 if response.text:
+                    self.last_model_used = model_name
                     return response.text
                 raise ValueError("Gemini new-SDK response contained no text.")
             except Exception as e:
@@ -180,6 +194,7 @@ class GeminiProvider(BaseAIProvider):
         for attempt in range(max_retries + 1):
             try:
                 response = model.generate_content(full_prompt)
+                self.last_model_used = model_name
                 return response.text
             except Exception as e:
                 err = str(e)

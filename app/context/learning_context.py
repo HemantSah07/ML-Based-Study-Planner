@@ -407,14 +407,20 @@ class StudentLearningContext:
     @property
     def total_week_hours(self) -> float:
         total = 0.0
+        dummy = date(2026, 1, 1)
         for s in self._schedule_list:
             if s.start_time and s.end_time:
-                total += s.end_time.hour - s.start_time.hour
-        return total
+                dt_start = datetime.combine(dummy, s.start_time)
+                dt_end = datetime.combine(dummy, s.end_time)
+                if dt_end < dt_start:
+                    dt_end += timedelta(days=1)
+                total += (dt_end - dt_start).total_seconds() / 3600.0
+        return round(total, 1)
 
     @property
     def subject_hours_chart(self):
         subject_hours: Dict[str, float] = {}
+        dummy = date(2026, 1, 1)
         for s in self._schedule_list:
             name = "Other"
             if s.subject_id:
@@ -422,8 +428,12 @@ class StudentLearningContext:
                 if subj:
                     name = subj.name
             if s.start_time and s.end_time:
-                duration = s.end_time.hour - s.start_time.hour
-                subject_hours[name] = subject_hours.get(name, 0) + duration
+                dt_start = datetime.combine(dummy, s.start_time)
+                dt_end = datetime.combine(dummy, s.end_time)
+                if dt_end < dt_start:
+                    dt_end += timedelta(days=1)
+                duration = (dt_end - dt_start).total_seconds() / 3600.0
+                subject_hours[name] = round(subject_hours.get(name, 0.0) + duration, 2)
         return subject_hours
 
     # ── Predictions ──────────────────────────────────────────────────────────
