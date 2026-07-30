@@ -126,13 +126,13 @@
             <p class="text-muted mb-0">Your subjects are auto-loaded from your profile. Click a subject to access chapters, topics, and AI-generated material.</p>
         </div>
         <div class="d-flex gap-2 flex-wrap">
-            <button class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#physicalBookModal">
+            <button type="button" class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#physicalBookModal">
                 <i class="fas fa-book-medical me-1"></i> Printed Book Setup
             </button>
-            <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#zipUploadModal">
+            <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#zipUploadModal">
                 <i class="fas fa-file-archive me-1"></i> Upload ZIP Batch
             </button>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
                 <i class="fas fa-cloud-upload-alt me-1"></i> Upload Document
             </button>
         </div>
@@ -260,6 +260,8 @@
             <div class="col-md-1">
                 <button type="submit" class="btn btn-secondary w-100">Filter</button>
             </div>
+        </form>
+    </div>
     <!-- 25-Minute Pomodoro Focus Timer & Auto Study Logger Widget -->
     <div class="card card-flat p-4 mb-4 border border-primary bg-dark bg-opacity-70 shadow-sm stagger-1">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
@@ -627,6 +629,8 @@
 </div>
 
 <script>
+    let currentZipPollInterval = null;
+
     // Load chapters dynamically for the upload modal
     function loadModalChapters(subjectId) {
         const chapterSelect = document.getElementById("modalChapter");
@@ -640,15 +644,22 @@
         if (!subjectId) return;
 
         fetch(`/student/study/api/chapter/${subjectId}/chapters`)
-        .then(res => res.json())
+        .then(res => {
+            if (!res.ok) throw new Error("Failed to load chapters");
+            return res.json();
+        })
         .then(data => {
-            if (data.status === "success" && data.chapters.length > 0) {
+            if (data.status === "success" && data.chapters && data.chapters.length > 0) {
                 data.chapters.forEach(ch => {
-                    chapterSelect.innerHTML += `<option value="${ch.id}">${ch.name}</option>`;
+                    const opt = document.createElement("option");
+                    opt.value = ch.id;
+                    opt.textContent = ch.name;
+                    chapterSelect.appendChild(opt);
                 });
                 chapterSelect.disabled = false;
             }
-        });
+        })
+        .catch(err => console.error("Error loading chapters:", err));
     }
 
     // Load topics dynamically for the upload modal
@@ -660,30 +671,98 @@
         if (!chapterId) return;
 
         fetch(`/student/study/api/chapter/${chapterId}/topics`)
-        .then(res => res.json())
+        .then(res => {
+            if (!res.ok) throw new Error("Failed to load topics");
+            return res.json();
+        })
         .then(data => {
-            if (data.status === "success" && data.topics.length > 0) {
+            if (data.status === "success" && data.topics && data.topics.length > 0) {
                 data.topics.forEach(t => {
-                    topicSelect.innerHTML += `<option value="${t.id}">Topic ${t.topic_number}: ${t.name}</option>`;
+                    const opt = document.createElement("option");
+                    opt.value = t.id;
+                    opt.textContent = `Topic ${t.topic_number}: ${t.name}`;
+                    topicSelect.appendChild(opt);
                 });
                 topicSelect.disabled = false;
             }
-        });
+        })
+        .catch(err => console.error("Error loading topics:", err));
     }
 
     function handleFileSelect(input) {
-        const file = input.files[0];
+        const file = input.files ? input.files[0] : null;
         if (file) {
-            document.getElementById("dropzone-text").innerText = file.name;
+            const dropzoneText = document.getElementById("dropzone-text");
+            if (dropzoneText) dropzoneText.innerText = file.name;
             const ext = file.name.split('.').pop().toLowerCase();
             const icon = document.getElementById("dropzone-icon");
-            if (ext === 'pdf') icon.className = "fas fa-file-pdf fa-3x text-danger mb-2";
-            else if (['png', 'jpg', 'jpeg'].includes(ext)) icon.className = "fas fa-file-image fa-3x text-success mb-2";
-            else icon.className = "fas fa-file-alt fa-3x text-muted mb-2";
+            if (icon) {
+                if (ext === 'pdf') icon.className = "fas fa-file-pdf fa-3x text-danger mb-2";
+                else if (['png', 'jpg', 'jpeg'].includes(ext)) icon.className = "fas fa-file-image fa-3x text-success mb-2";
+                else icon.className = "fas fa-file-alt fa-3x text-muted mb-2";
+            }
         }
     }
 
+    // ── Modal Cleanup Functions ──────────────────────────────────────────────
+    function resetUploadModal() {
+        const form = document.getElementById("uploadMaterialForm");
+        if (form) form.reset();
+        const dropzoneText = document.getElementById("dropzone-text");
+        if (dropzoneText) dropzoneText.innerText = "Drag & drop document or click to browse";
+        const dropzoneIcon = document.getElementById("dropzone-icon");
+        if (dropzoneIcon) dropzoneIcon.className = "fas fa-file-pdf fa-3x text-muted mb-2";
+        const progressContainer = document.getElementById("uploadProgressContainer");
+        if (progressContainer) progressContainer.classList.add("d-none");
+        const progressBar = document.getElementById("uploadProgressBar");
+        if (progressBar) progressBar.style.width = "0%";
+        const statusText = document.getElementById("uploadStatusText");
+        if (statusText) statusText.innerText = "Analyzing & extracting text...";
+        const percentageText = document.getElementById("progressPercentage");
+        if (percentageText) percentageText.innerText = "0%";
+        const btnSubmit = document.getElementById("btnSubmitUpload");
+        if (btnSubmit) btnSubmit.disabled = false;
+        const chapterSelect = document.getElementById("modalChapter");
+        if (chapterSelect) { chapterSelect.innerHTML = '<option value="">Select Chapter</option>'; chapterSelect.disabled = true; }
+        const topicSelect = document.getElementById("modalTopic");
+        if (topicSelect) { topicSelect.innerHTML = '<option value="">Select Topic</option>'; topicSelect.disabled = true; }
+    }
+
+    function resetZipModal() {
+        const form = document.getElementById("zipUploadForm");
+        if (form) form.reset();
+        const progressContainer = document.getElementById("zipProgressContainer");
+        if (progressContainer) progressContainer.classList.add("d-none");
+        const progressBar = document.getElementById("zipProgressBar");
+        if (progressBar) progressBar.style.width = "20%";
+        const statusText = document.getElementById("zipStatusText");
+        if (statusText) statusText.innerText = "Uploading zip file...";
+        const btnSubmit = document.getElementById("btnSubmitZip");
+        if (btnSubmit) btnSubmit.disabled = false;
+        if (currentZipPollInterval) {
+            clearInterval(currentZipPollInterval);
+            currentZipPollInterval = null;
+        }
+    }
+
+    function resetPhysicalBookModal() {
+        const form = document.querySelector("#physicalBookModal form");
+        if (form) form.reset();
+        const btnSubmit = document.querySelector("#physicalBookModal button[type='submit']");
+        if (btnSubmit) btnSubmit.disabled = false;
+    }
+
     document.addEventListener("DOMContentLoaded", function() {
+        // Attach hidden.bs.modal listeners for guaranteed modal state cleanup
+        const uploadModalEl = document.getElementById("uploadModal");
+        if (uploadModalEl) uploadModalEl.addEventListener("hidden.bs.modal", resetUploadModal);
+
+        const zipUploadModalEl = document.getElementById("zipUploadModal");
+        if (zipUploadModalEl) zipUploadModalEl.addEventListener("hidden.bs.modal", resetZipModal);
+
+        const physicalBookModalEl = document.getElementById("physicalBookModal");
+        if (physicalBookModalEl) physicalBookModalEl.addEventListener("hidden.bs.modal", resetPhysicalBookModal);
+
         // Drag & Drop Handlers
         const dropzone = document.getElementById("dropzone");
         const fileInput = document.getElementById("fileInput");
@@ -705,8 +784,8 @@
 
             dropzone.addEventListener('drop', (e) => {
                 const dt = e.dataTransfer;
-                const files = dt.files;
-                if (files.length > 0) {
+                const files = dt ? dt.files : null;
+                if (files && files.length > 0) {
                     fileInput.files = files;
                     handleFileSelect(fileInput);
                 }
@@ -716,8 +795,34 @@
         // Submit Document Upload & Process
         const uploadMaterialForm = document.getElementById("uploadMaterialForm");
         if (uploadMaterialForm) {
-            uploadMaterialForm.addEventListener("submit", function(e) {
+            uploadMaterialForm.addEventListener("submit", async function(e) {
                 e.preventDefault();
+
+                const subjectSelect = document.getElementById("modalSubject");
+                if (!subjectSelect || !subjectSelect.value) {
+                    alert("Please select a target subject.");
+                    return;
+                }
+
+                const fileInputEl = document.getElementById("fileInput");
+                const file = fileInputEl && fileInputEl.files ? fileInputEl.files[0] : null;
+                if (!file) {
+                    alert("Please select a document file to upload.");
+                    return;
+                }
+
+                const allowedExts = ['pdf', 'txt', 'png', 'jpg', 'jpeg'];
+                const ext = file.name.split('.').pop().toLowerCase();
+                if (!allowedExts.includes(ext)) {
+                    alert(`Unsupported file format (.${ext}). Allowed: PDF, TXT, PNG, JPG, JPEG.`);
+                    return;
+                }
+
+                const maxDocSize = 15 * 1024 * 1024;
+                if (file.size > maxDocSize) {
+                    alert(`File too large (${(file.size / (1024*1024)).toFixed(1)} MB). Max allowed: 15 MB.`);
+                    return;
+                }
                 
                 const btnSubmit = document.getElementById("btnSubmitUpload");
                 const progressContainer = document.getElementById("uploadProgressContainer");
@@ -739,49 +844,71 @@
                 const interval = setInterval(() => {
                     if (currentStateIdx < states.length) {
                         const s = states[currentStateIdx];
-                        progressBar.style.width = s.pct + "%";
-                        statusText.innerText = s.msg;
-                        percentageText.innerText = s.pct + "%";
+                        if (progressBar) progressBar.style.width = s.pct + "%";
+                        if (statusText) statusText.innerText = s.msg;
+                        if (percentageText) percentageText.innerText = s.pct + "%";
                         currentStateIdx++;
                     }
                 }, 1500);
 
-                const formData = new FormData(this);
-                
-                fetch("/student/study-material/upload", {
-                    method: "POST",
-                    body: formData
-                })
-                .then(res => res.json())
-                .then(data => {
+                try {
+                    const formData = new FormData(uploadMaterialForm);
+                    const res = await fetch("/student/study-material/upload", {
+                        method: "POST",
+                        body: formData
+                    });
+
+                    if (!res.ok) {
+                        const text = await res.text();
+                        let errMsg = `Upload failed (HTTP ${res.status})`;
+                        try { const p = JSON.parse(text); if (p && (p.message || p.error)) errMsg = p.message || p.error; } catch(_) {}
+                        throw new Error(errMsg);
+                    }
+
+                    const ct = res.headers.get("content-type") || "";
+                    if (!ct.includes("application/json")) throw new Error("Server returned non-JSON response.");
+
+                    const data = await res.json();
                     clearInterval(interval);
-                    if (data.status === "success") {
-                        progressBar.style.width = "100%";
-                        statusText.innerText = "Success! Redirecting...";
-                        percentageText.innerText = "100%";
-                        setTimeout(() => {
-                            window.location.href = `/student/study-material/uploaded/${data.material_id}`;
-                        }, 1000);
+
+                    if (data.status === "success" && data.material_id) {
+                        if (progressBar) progressBar.style.width = "100%";
+                        if (statusText) statusText.innerText = "Success! Redirecting...";
+                        if (percentageText) percentageText.innerText = "100%";
+                        setTimeout(() => { window.location.href = `/student/study-material/uploaded/${data.material_id}`; }, 800);
                     } else {
-                        alert(data.message || "Failed to upload document");
+                        alert(data.message || data.error || "Failed to upload document.");
                         btnSubmit.disabled = false;
                         progressContainer.classList.add("d-none");
                     }
-                })
-                .catch(err => {
+                } catch (err) {
                     clearInterval(interval);
-                    alert("Error: " + err);
+                    alert("Upload error: " + (err.message || err));
                     btnSubmit.disabled = false;
                     progressContainer.classList.add("d-none");
-                });
+                }
             });
         }
 
-        // Submit ZIP Upload & Process with Asynchronous Background Polling
+        // Submit ZIP Upload & Process with Background Polling
         const zipForm = document.getElementById("zipUploadForm");
         if (zipForm) {
-            zipForm.addEventListener("submit", function(e) {
+            zipForm.addEventListener("submit", async function(e) {
                 e.preventDefault();
+
+                const zipInput = zipForm.querySelector('input[type="file"][name="zip_file"]');
+                const zipFile = zipInput && zipInput.files ? zipInput.files[0] : null;
+                if (!zipFile) { alert("Please select a .zip file to upload."); return; }
+
+                const ext = zipFile.name.split('.').pop().toLowerCase();
+                if (ext !== 'zip') { alert("Invalid format. Please select a valid .zip archive."); return; }
+
+                const maxZipSize = 50 * 1024 * 1024;
+                if (zipFile.size > maxZipSize) {
+                    alert(`ZIP too large (${(zipFile.size / (1024*1024)).toFixed(1)} MB). Max allowed: 50 MB.`);
+                    return;
+                }
+
                 const btnSubmit = document.getElementById("btnSubmitZip");
                 const statusText = document.getElementById("zipStatusText");
                 const progressBar = document.getElementById("zipProgressBar");
@@ -789,146 +916,134 @@
 
                 btnSubmit.disabled = true;
                 progressContainer.classList.remove("d-none");
-                progressBar.style.width = "15%";
-                statusText.innerText = "Uploading ZIP archive to server...";
+                if (progressBar) progressBar.style.width = "15%";
+                if (statusText) statusText.innerText = "Uploading ZIP archive to server...";
 
-                const formData = new FormData(this);
+                try {
+                    const formData = new FormData(zipForm);
+                    const res = await fetch("/student/study-materials/upload-zip", { method: "POST", body: formData });
 
-                fetch("/student/study-materials/upload-zip", {
-                    method: "POST",
-                    body: formData
-                })
-                .then(res => res.json())
-                .then(data => {
+                    if (!res.ok) {
+                        const text = await res.text();
+                        let errMsg = `Zip upload failed (HTTP ${res.status})`;
+                        try { const p = JSON.parse(text); if (p && (p.message || p.error)) errMsg = p.message || p.error; } catch(_) {}
+                        throw new Error(errMsg);
+                    }
+
+                    const ct = res.headers.get("content-type") || "";
+                    if (!ct.includes("application/json")) throw new Error("Server returned non-JSON response.");
+
+                    const data = await res.json();
+
                     if ((data.status === "accepted" || data.status === "success") && data.batch_id) {
-                        progressBar.style.width = "25%";
-                        statusText.innerText = "Processing started in background. Analyzing files...";
+                        if (progressBar) progressBar.style.width = "25%";
+                        if (statusText) statusText.innerText = "Processing started. Analyzing files...";
                         pollZipStatus(data.batch_id);
                     } else if (data.redirect_url) {
-                        progressBar.style.width = "100%";
-                        statusText.innerText = "Complete! Redirecting...";
-                        setTimeout(() => {
-                            window.location.href = data.redirect_url;
-                        }, 800);
+                        if (progressBar) progressBar.style.width = "100%";
+                        if (statusText) statusText.innerText = "Complete! Redirecting...";
+                        setTimeout(() => { window.location.href = data.redirect_url; }, 800);
                     } else {
-                        alert(data.message || "Failed to start zip upload.");
+                        alert(data.message || data.error || "Failed to start zip upload.");
                         btnSubmit.disabled = false;
                         progressContainer.classList.add("d-none");
                     }
-                })
-                .catch(err => {
-                    alert("Zip upload error: " + err);
+                } catch (err) {
+                    alert("Zip upload error: " + (err.message || err));
                     btnSubmit.disabled = false;
                     progressContainer.classList.add("d-none");
-                });
-
-                function pollZipStatus(batchId) {
-                    const pollInterval = setInterval(() => {
-                        fetch(`/student/study-materials/import/${batchId}/status`)
-                        .then(res => res.json())
-                        .then(resData => {
-                            if (resData.status === "processing" || resData.status === "uploaded") {
-                                const processed = (resData.matched_files || 0) + (resData.unmatched_files || 0);
-                                const total = resData.total_files || 0;
-                                let pct = 25;
-                                if (total > 0) {
-                                    pct = Math.min(95, Math.max(25, Math.round((processed / total) * 100)));
-                                    statusText.innerText = `Extracting & classifying files... (${processed} / ${total} processed)`;
-                                } else {
-                                    statusText.innerText = "Unzipping archive and auditing files...";
-                                }
-                                progressBar.style.width = pct + "%";
-                            } else if (resData.status === "reviewing" || resData.status === "committed" || resData.status === "extracted") {
-                                clearInterval(pollInterval);
-                                progressBar.style.width = "100%";
-                                statusText.innerText = "Processing complete! Redirecting...";
-                                setTimeout(() => {
-                                    window.location.href = resData.redirect_url || "/student/study-material";
-                                }, 800);
-                            } else if (resData.status === "error") {
-                                clearInterval(pollInterval);
-                                alert("Zip processing error: " + (resData.error_log || "Unknown error occurred."));
-                                btnSubmit.disabled = false;
-                                progressContainer.classList.add("d-none");
-                            }
-                        })
-                        .catch(pollErr => {
-                            console.error("Status polling error:", pollErr);
-                        });
-                    }, 1500);
                 }
             });
+        }
+
+        function pollZipStatus(batchId) {
+            if (currentZipPollInterval) { clearInterval(currentZipPollInterval); }
+
+            const btnSubmit = document.getElementById("btnSubmitZip");
+            const statusText = document.getElementById("zipStatusText");
+            const progressBar = document.getElementById("zipProgressBar");
+            const progressContainer = document.getElementById("zipProgressContainer");
+
+            currentZipPollInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/student/study-materials/import/${batchId}/status`);
+                    if (!res.ok) {
+                        clearInterval(currentZipPollInterval); currentZipPollInterval = null;
+                        alert(`Status polling failed (HTTP ${res.status}).`);
+                        if (btnSubmit) btnSubmit.disabled = false;
+                        if (progressContainer) progressContainer.classList.add("d-none");
+                        return;
+                    }
+                    const ct = res.headers.get("content-type") || "";
+                    if (!ct.includes("application/json")) {
+                        clearInterval(currentZipPollInterval); currentZipPollInterval = null;
+                        if (btnSubmit) btnSubmit.disabled = false;
+                        if (progressContainer) progressContainer.classList.add("d-none");
+                        return;
+                    }
+                    const resData = await res.json();
+                    if (resData.status === "processing" || resData.status === "uploaded") {
+                        const processed = (resData.matched_files || 0) + (resData.unmatched_files || 0);
+                        const total = resData.total_files || 0;
+                        let pct = 25;
+                        if (total > 0) {
+                            pct = Math.min(95, Math.max(25, Math.round((processed / total) * 100)));
+                            if (statusText) statusText.innerText = `Classifying files... (${processed} / ${total})`;
+                        } else {
+                            if (statusText) statusText.innerText = "Unzipping archive...";
+                        }
+                        if (progressBar) progressBar.style.width = pct + "%";
+                    } else if (resData.status === "reviewing" || resData.status === "committed" || resData.status === "extracted") {
+                        clearInterval(currentZipPollInterval); currentZipPollInterval = null;
+                        if (progressBar) progressBar.style.width = "100%";
+                        if (statusText) statusText.innerText = "Complete! Redirecting...";
+                        setTimeout(() => { window.location.href = resData.redirect_url || "/student/study-material"; }, 800);
+                    } else if (resData.status === "error") {
+                        clearInterval(currentZipPollInterval); currentZipPollInterval = null;
+                        alert("Zip processing error: " + (resData.error_log || "Unknown error."));
+                        if (btnSubmit) btnSubmit.disabled = false;
+                        if (progressContainer) progressContainer.classList.add("d-none");
+                    }
+                } catch (pollErr) {
+                    console.error("Polling error:", pollErr);
+                }
+            }, 1500);
         }
     });
 
     function confirmDeleteBatch(batchId, batchName) {
-        if (confirm(`Are you sure you want to PERMANENTLY delete zip batch "${batchName}" and all its folders?`)) {
-            fetch(`/student/study-materials/delete-batch/${batchId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(res => res.json())
-            .then(data => {
-                alert(data.message || "Batch and folders deleted successfully.");
-                window.location.reload();
-            })
-            .catch(err => {
-                alert("Error deleting batch: " + err);
-            });
-        }
+        if (!confirm(`Permanently delete zip batch "${batchName}" and all its folders?`)) return;
+        fetch(`/student/study-materials/delete-batch/${batchId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(res => res.json()).then(data => { alert(data.message || "Deleted."); window.location.reload(); })
+        .catch(err => alert("Error: " + err));
     }
 
     function confirmDeleteMaterial(materialId, title) {
-        if (confirm(`Are you sure you want to PERMANENTLY delete document "${title}"?`)) {
-            fetch(`/student/study-materials/delete-material/${materialId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(res => res.json())
-            .then(data => {
-                alert(data.message || "Document deleted successfully.");
-                window.location.reload();
-            })
-            .catch(err => {
-                alert("Error deleting document: " + err);
-            });
-        }
+        if (!confirm(`Permanently delete document "${title}"?`)) return;
+        fetch(`/student/study-materials/delete-material/${materialId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(res => res.json()).then(data => { alert(data.message || "Deleted."); window.location.reload(); })
+        .catch(err => alert("Error: " + err));
     }
 
     function confirmDeleteSubject(subjectId, subjectName) {
-        if (confirm(`Are you sure you want to PERMANENTLY delete subject folder "${subjectName}" and all associated files?`)) {
-            fetch(`/student/study-materials/delete-subject/${subjectId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(res => res.json())
-            .then(data => {
-                alert(data.message || "Subject folder deleted successfully.");
-                window.location.reload();
-            })
-            .catch(err => {
-                alert("Error deleting subject folder: " + err);
-            });
-        }
+        if (!confirm(`Permanently delete subject folder "${subjectName}" and all associated files?`)) return;
+        fetch(`/student/study-materials/delete-subject/${subjectId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(res => res.json()).then(data => { alert(data.message || "Deleted."); window.location.reload(); })
+        .catch(err => alert("Error: " + err));
     }
 
-    // ── 3-Tier Switcher Handler ──
     function switchTier(tierNum) {
         document.querySelectorAll('.tier-container').forEach(el => el.classList.add('d-none'));
         const activeContainer = document.getElementById(`tier-${tierNum}-container`);
         if (activeContainer) activeContainer.classList.remove('d-none');
-
         [1, 2, 3].forEach(t => {
             const btn = document.getElementById(`tier-btn-${t}`);
-            if (btn) {
-                btn.className = `btn btn-sm ${t === tierNum ? (t === 1 ? 'btn-primary' : (t === 2 ? 'btn-warning' : 'btn-info')) : 'btn-outline-secondary'} fw-bold`;
-            }
+            if (btn) btn.className = `btn btn-sm ${t === tierNum ? (t === 1 ? 'btn-primary' : (t === 2 ? 'btn-warning' : 'btn-info')) : 'btn-outline-secondary'} fw-bold`;
         });
         const badge = document.getElementById('tier-active-badge');
         if (badge) badge.innerText = `Active Mode: Tier ${tierNum}`;
     }
 
-    // ── Pomodoro 25-Minute Focus Timer & Auto-Logging ──
     let pomoSecondsLeft = 25 * 60;
     let pomoTimerInterval = null;
 
@@ -936,48 +1051,37 @@
         const mins = Math.floor(pomoSecondsLeft / 60);
         const secs = pomoSecondsLeft % 60;
         const display = document.getElementById("pomodoro-display");
-        if (display) {
-            display.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-        }
+        if (display) display.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
 
     function startPomodoroTimer() {
         if (pomoTimerInterval) return;
-        document.getElementById("pomo-start-btn").disabled = true;
-        document.getElementById("pomo-pause-btn").disabled = false;
-
+        const startBtn = document.getElementById("pomo-start-btn");
+        const pauseBtn = document.getElementById("pomo-pause-btn");
+        if (startBtn) startBtn.disabled = true;
+        if (pauseBtn) pauseBtn.disabled = false;
         pomoTimerInterval = setInterval(() => {
             if (pomoSecondsLeft > 0) {
                 pomoSecondsLeft--;
                 updatePomodoroDisplay();
             } else {
-                clearInterval(pomoTimerInterval);
-                pomoTimerInterval = null;
-                alert("🎉 25-Minute Pomodoro Focus Session Complete! Auto-logging study time...");
-
-                const subjectId = document.getElementById("pomo-subject-select").value;
-                fetch("/student/api/study-log/auto-add", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ subject_id: subjectId, duration_minutes: 25.0 })
-                })
-                .then(res => res.json())
-                .then(data => {
-                    alert(data.message || "Study session logged!");
-                    resetPomodoroTimer();
-                })
-                .catch(err => alert("Notice: Session finished! Error logging: " + err));
+                clearInterval(pomoTimerInterval); pomoTimerInterval = null;
+                alert("🎉 25-Minute Pomodoro Complete! Logging study time...");
+                const subjectSelect = document.getElementById("pomo-subject-select");
+                const subjectId = subjectSelect ? subjectSelect.value : null;
+                fetch("/student/api/study-log/auto-add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subject_id: subjectId, duration_minutes: 25.0 }) })
+                .then(res => res.json()).then(data => { alert(data.message || "Logged!"); resetPomodoroTimer(); })
+                .catch(err => alert("Logging error: " + err));
             }
         }, 1000);
     }
 
     function pausePomodoroTimer() {
-        if (pomoTimerInterval) {
-            clearInterval(pomoTimerInterval);
-            pomoTimerInterval = null;
-        }
-        document.getElementById("pomo-start-btn").disabled = false;
-        document.getElementById("pomo-pause-btn").disabled = true;
+        if (pomoTimerInterval) { clearInterval(pomoTimerInterval); pomoTimerInterval = null; }
+        const startBtn = document.getElementById("pomo-start-btn");
+        const pauseBtn = document.getElementById("pomo-pause-btn");
+        if (startBtn) startBtn.disabled = false;
+        if (pauseBtn) pauseBtn.disabled = true;
     }
 
     function resetPomodoroTimer() {
@@ -986,6 +1090,7 @@
         updatePomodoroDisplay();
     }
 </script>
+
 
 <!-- Physical Book Setup Modal -->
 <div class="modal fade" id="physicalBookModal" tabindex="-1" aria-hidden="true">
@@ -1038,9 +1143,6 @@
             </form>
         </div>
     </div>
-</div>
-
-</div>
 </div>
 
 <!-- ── RAG AI Study Assistant Floating Button & Offcanvas Drawer ── -->
