@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, session, abort
+from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, session, abort, current_app
 from flask_login import login_required, current_user
 from app import db
 from app.models import (
@@ -1816,9 +1816,10 @@ def config():
         "masked_key_paid": f"••••••••••••{raw_api_key_paid[-4:]}" if len(raw_api_key_paid) >= 4 else ("••••••••••••" if raw_api_key_paid else "Not set"),
         "billing_enabled": settings.get("GEMINI_BILLING_ENABLED", "False") == "True",
         "gemini_mode": settings.get("GEMINI_MODE", "free").lower(),
-        "mcq_model": settings.get("GEMINI_MODEL_MCQ") or current_app.config.get("GEMINI_MODEL_MCQ", "gemini-3.1-flash-lite"),
-        "assistant_model": settings.get("GEMINI_MODEL_ASSISTANT_PRIMARY") or current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash"),
-        "fallback_model": settings.get("GEMINI_MODEL_ASSISTANT_FALLBACK") or current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.1-flash-lite"),
+        "mcq_model": settings.get("GEMINI_MODEL_MCQ") or current_app.config.get("GEMINI_MODEL_MCQ", "gemini-3.5-flash-lite"),
+        "assistant_model": settings.get("GEMINI_MODEL_ASSISTANT_PRIMARY") or current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-3.6-flash"),
+        "fallback_model": settings.get("GEMINI_MODEL_ASSISTANT_FALLBACK") or current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.5-flash-lite"),
+
         "mcq_daily_limit": settings.get("GEMINI_DAILY_LIMIT_MCQ") or current_app.config.get("GEMINI_DAILY_LIMIT_MCQ", "450"),
         "mcq_daily_limit_paid": settings.get("GEMINI_DAILY_LIMIT_MCQ_PAID") or current_app.config.get("GEMINI_DAILY_LIMIT_MCQ_PAID", "2000"),
         "assistant_daily_limit": settings.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY") or current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", "18"),

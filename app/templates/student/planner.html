@@ -1,55 +1,97 @@
 {% extends 'base.html' %}
-{% block title %}Study Planner{% endblock %}
+{% block title %}Study Planner · Focus Planning Studio{% endblock %}
 
 {% block content %}
-<div class="hero-banner mb-4 no-print">
-    <div class="hero-glow-orb" style="right: 20%; top: 10%;"></div>
-    <div class="position-relative" style="z-index: 1;">
-        <h1 class="page-title mb-2"><i class="fas fa-magic me-2 text-gradient"></i> Personalized Study Planner</h1>
-        <p class="page-subtitle mb-0">Your adaptive weekly study plan, tailored based on ML risk forecasts and parsed subject performance.</p>
+<div class="ss-page px-2 py-3">
+<!-- ── Focus Planning Studio Hero ── -->
+<section class="ss-page-hero position-relative overflow-hidden mb-4 no-print">
+    <div class="ss-page-hero-bg" style="background-image: url('{{ url_for('static', filename='img/ui/student/planner.webp') }}');"></div>
+    <div class="ss-page-hero-content py-3">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div>
+                <div class="ss-badge ss-badge-emerald mb-2">
+                    <i class="fas fa-magic me-1"></i> Focus Planning Studio
+                </div>
+                <h1 class="display-6 fw-bold text-white mb-1" style="letter-spacing: -0.02em;">
+                    Personalized Adaptive Study Plan
+                </h1>
+                <p class="text-muted mb-0" style="font-size: 1.05rem;">
+                    Adaptive weekly schedule generated from Machine Learning risk predictions and performance weighting.
+                </p>
+            </div>
+            <div class="d-flex gap-2">
+                <button onclick="window.print()" class="btn btn-primary px-4 py-2.5 shadow-sm">
+                    <i class="fas fa-download me-1.5"></i> Export PDF
+                </button>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ── Focus Planning Stepper Bar ── -->
+<div class="ss-planner-stepper no-print">
+    <div class="ss-stepper-step completed">
+        <div class="ss-stepper-num"><i class="fas fa-check"></i></div>
+        <span>01 Subjects</span>
+    </div>
+    <div class="ss-stepper-divider"></div>
+    <div class="ss-stepper-step completed">
+        <div class="ss-stepper-num"><i class="fas fa-check"></i></div>
+        <span>02 Availability</span>
+    </div>
+    <div class="ss-stepper-divider"></div>
+    <div class="ss-stepper-step completed">
+        <div class="ss-stepper-num"><i class="fas fa-check"></i></div>
+        <span>03 Priorities</span>
+    </div>
+    <div class="ss-stepper-divider"></div>
+    <div class="ss-stepper-step active">
+        <div class="ss-stepper-num">04</div>
+        <span>Generated Plan</span>
     </div>
 </div>
 
 <div class="row g-4">
+
     <!-- Planner Summary Banner -->
     <div class="col-lg-4">
-        <div class="card card-light p-4 mb-4">
-            <h5 class="mb-3 text-gradient"><i class="fas fa-info-circle me-2"></i> Performance Summary</h5>
+        <div class="ss-panel p-4 mb-4">
+            <h5 class="fw-bold text-white mb-3"><i class="fas fa-chart-line text-emerald me-2"></i> Performance Summary</h5>
             
             <div class="text-center py-3">
-                <span class="prediction-badge-text px-4 py-2 rounded-pill d-inline-block text-white mb-3
-                    {% if planner.prediction_result == 'Pass' %}bg-success{% elif planner.prediction_result == 'At Risk' %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                <span class="ss-badge {% if planner.prediction_result == 'Pass' %}ss-badge-emerald{% elif planner.prediction_result == 'At Risk' %}ss-badge-amber{% else %}ss-badge-rose{% endif %} px-4 py-2 mb-3" style="font-size:0.9rem;">
                     {{ planner.prediction_result|upper }} RISK
                 </span>
-                <p class="fw-bold mb-2" style="color: #1a1a2e;">Recommended Study Intensity</p>
-                <div class="display-6 fw-bold text-gradient mb-2">{{ planner.recommended_daily_hours }}h <small class="fs-6 text-muted">/ day</small></div>
+                <p class="fw-bold text-muted small mb-1">Recommended Daily Study Intensity</p>
+                <div class="display-5 fw-bold text-gradient mb-2">{{ planner.recommended_daily_hours }}h <small class="fs-6 text-muted">/ day</small></div>
             </div>
             
-            <hr class="my-3">
-            <p class="text-muted small text-center mb-0"><i class="fas fa-quote-left me-1 opacity-50"></i> {{ planner.planner_message }}</p>
+            <hr class="border-secondary my-3">
+            <p class="text-muted small text-center mb-0"><i class="fas fa-quote-left me-1 opacity-50 text-emerald"></i> {{ planner.planner_message }}</p>
         </div>
 
-        <div class="card card-light p-4 mb-4 no-print">
-            <h5 class="mb-3 text-gradient"><i class="fas fa-cog me-2"></i> Planner Options</h5>
+        <div class="ss-panel p-4 mb-4 no-print">
+            <h5 class="fw-bold text-white mb-3"><i class="fas fa-sliders-h text-primary me-2"></i> Studio Actions</h5>
             <div class="d-flex flex-column gap-2">
-                <button onclick="window.print()" class="btn btn-primary w-100 py-3">
-                    <i class="fas fa-download me-2"></i> Download as PDF / Print
+                <button onclick="window.print()" class="btn btn-primary w-100 py-2.5">
+                    <i class="fas fa-download me-2"></i> Download / Print Plan
                 </button>
-                <a href="{{ url_for('student.predict') }}" class="btn btn-outline-primary w-100 py-3">
-                    <i class="fas fa-sync me-2"></i> Re-run Predictor
+                <a href="{{ url_for('student.predict') }}" class="btn btn-outline-light w-100 py-2.5">
+                    <i class="fas fa-sync me-2"></i> Re-run ML Predictor
                 </a>
             </div>
         </div>
         
         <!-- Progress Bar Summary -->
-        <div class="card card-light p-4 mb-4 no-print">
-            <h5 class="mb-2 text-gradient"><i class="fas fa-tasks me-2"></i> Today's Completion</h5>
-            <div class="progress assessment-progress mb-3" style="height: 12px;">
-                <div class="progress-bar assessment-progress-bar" id="overall-progress-bar" style="width: 0%;"></div>
+        <div class="ss-panel p-4 mb-4 no-print">
+            <h5 class="fw-bold text-white mb-2"><i class="fas fa-tasks text-cyan me-2"></i> Weekly Plan Progress</h5>
+            <div class="progress mb-3" style="height: 10px; background:rgba(255,255,255,0.08);">
+                <div class="progress-bar bg-primary" id="overall-progress-bar" style="width: 0%;"></div>
             </div>
             <p class="text-muted small mb-0" id="progress-text">0 / 0 sessions completed this week</p>
         </div>
     </div>
+
 
     <!-- Subject Priorities & Weekly Schedule Accordion -->
     <div class="col-lg-8">
@@ -66,7 +108,7 @@
         {% endif %}
         
         <!-- Subject Priorities Table -->
-        <div class="card card-light p-4 mb-4">
+        <div class="card card-flat p-4 mb-4">
             <h5 class="mb-3 text-gradient"><i class="fas fa-list-ol me-2"></i> Subject Priorities</h5>
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
@@ -273,4 +315,5 @@
         .catch(err => console.error("Error logging study hour:", err));
     }
 </script>
+</div>
 {% endblock %}

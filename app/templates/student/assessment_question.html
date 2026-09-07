@@ -1,26 +1,27 @@
 {% extends 'base.html' %}
-{% block title %}Question {{ q_num }}{% endblock %}
+{% block title %}Question {{ q_num }} · Diagnostic Assessment{% endblock %}
 
 {% block content %}
+<div class="ss-page px-2 py-3">
 <div class="row justify-content-center">
     <div class="col-lg-9">
         <div class="d-flex justify-content-between align-items-center mb-2">
-            <span class="text-muted small fw-bold">{{ subject.name }}</span>
+            <span class="text-muted small fw-bold text-white"><i class="fas fa-book text-primary me-1"></i> {{ subject.name }}</span>
             <span class="text-muted small">Question {{ q_num }} of {{ total_q }}</span>
         </div>
-        <div class="assessment-progress mb-4">
-            <div class="assessment-progress-bar" style="width: {{ (q_num / total_q) * 100 }}%"></div>
+        <div class="progress mb-4" style="height:8px;background:rgba(255,255,255,0.08);">
+            <div class="progress-bar bg-primary" style="width: {{ (q_num / total_q) * 100 }}%"></div>
         </div>
 
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <span class="badge {% if question.difficulty == 'easy' %}bg-low{% elif question.difficulty == 'medium' %}bg-medium{% else %}bg-high{% endif %} px-3 py-2">
-                {{ question.difficulty|title }}
+            <span class="ss-badge {% if question.difficulty == 'easy' %}ss-badge-emerald{% elif question.difficulty == 'medium' %}ss-badge-amber{% else %}ss-badge-rose{% endif %} px-3 py-2">
+                {{ question.difficulty|title }} Difficulty
             </span>
-            <span class="badge bg-secondary timer-badge" id="timer"><i class="far fa-clock me-1"></i> 60s</span>
+            <span class="ss-badge ss-badge-purple px-3 py-2" id="timer"><i class="far fa-clock me-1"></i> 60s</span>
         </div>
 
-        <div class="card card-flat p-4 p-md-5 mb-4 text-center">
-            <h3 class="fw-bold lh-base mb-0">{{ question.question_text }}</h3>
+        <div class="ss-panel p-4 p-md-5 mb-4 text-center">
+            <h3 class="fw-bold text-white lh-base mb-0" style="letter-spacing:-0.01em;">{{ question.question_text }}</h3>
         </div>
 
         <form id="qForm" method="POST" action="{{ url_for('student.assessment_answer') }}">
@@ -32,11 +33,11 @@
             <div class="row g-3">
                 {% for opt in [('A', question.option_a), ('B', question.option_b), ('C', question.option_c), ('D', question.option_d)] %}
                 <div class="col-md-6">
-                    <div class="card h-100 option-card cursor-pointer" id="card{{ opt[0] }}" onclick="selectOption('{{ opt[0] }}')">
-                        <div class="card-body p-4 d-flex align-items-center gap-3">
+                    <div class="ss-card h-100 option-card cursor-pointer p-4" id="card{{ opt[0] }}" onclick="selectOption('{{ opt[0] }}')">
+                        <div class="d-flex align-items-center gap-3">
                             <input class="form-check-input d-none" type="radio" name="answer" value="{{ opt[0] }}" id="opt{{ opt[0] }}">
-                            <div class="option-letter" id="letter{{ opt[0] }}">{{ opt[0] }}</div>
-                            <label class="mb-0 flex-grow-1 cursor-pointer" id="label{{ opt[0] }}" for="opt{{ opt[0] }}">{{ opt[1] }}</label>
+                            <div class="option-letter fw-bold d-flex align-items-center justify-content-center text-white" id="letter{{ opt[0] }}" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.1);">{{ opt[0] }}</div>
+                            <label class="mb-0 flex-grow-1 cursor-pointer text-white" id="label{{ opt[0] }}" for="opt{{ opt[0] }}">{{ opt[1] }}</label>
                         </div>
                     </div>
                 </div>
@@ -44,19 +45,20 @@
             </div>
 
             <!-- Feedback & Explanation Box -->
-            <div id="feedbackBox" class="mt-4 p-4 rounded d-none">
+            <div id="feedbackBox" class="mt-4 p-4 rounded-3 d-none">
                 <div class="d-flex align-items-center gap-2 mb-2">
                     <h5 class="fw-bold mb-0" id="feedbackTitle"></h5>
                 </div>
                 <p class="mb-0 small text-white" id="explanationText"></p>
             </div>
 
-            <button type="submit" class="btn btn-primary w-100 py-3 mt-4" id="nextBtn" disabled>
+            <button type="submit" class="btn btn-primary w-100 py-3 mt-4 fw-bold shadow-sm" id="nextBtn" disabled>
                 Next Question <i class="fas fa-chevron-right ms-2"></i>
             </button>
         </form>
     </div>
 </div>
+
 
 <script>
     let timeLeft = 60;
@@ -163,4 +165,5 @@
         document.getElementById('nextBtn').disabled = false;
     }
 </script>
+</div>
 {% endblock %}

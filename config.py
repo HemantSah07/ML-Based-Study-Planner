@@ -56,9 +56,10 @@ class Config:
     GEMINI_ALLOW_CROSS_KEY_FALLBACK = os.getenv("GEMINI_ALLOW_CROSS_KEY_FALLBACK", "False").lower() in ("true", "1", "yes")
 
     # ── Gemini model selection per feature ────────────────────────────────────
-    GEMINI_MODEL_MCQ       = os.getenv("GEMINI_MODEL_MCQ",       "gemini-3.1-flash-lite")
-    GEMINI_MODEL_ASSISTANT_PRIMARY = os.getenv("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
-    GEMINI_MODEL_ASSISTANT_FALLBACK = os.getenv("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-2.5-flash-lite")
+    GEMINI_MODEL_MCQ       = os.getenv("GEMINI_MODEL_MCQ",       "gemini-3.5-flash-lite")
+    GEMINI_MODEL_ASSISTANT_PRIMARY = os.getenv("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-3.6-flash")
+    GEMINI_MODEL_ASSISTANT_FALLBACK = os.getenv("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.5-flash-lite")
+
 
     # ── Usage limits (daily and RPM) for FREE tier ────────────────────────────
     GEMINI_DAILY_LIMIT_MCQ       = int(os.getenv("GEMINI_DAILY_LIMIT_MCQ",       "450"))

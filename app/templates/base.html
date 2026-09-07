@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Smart Study{% endblock %} · Your Personal Academic Coach</title>
+    <title>{% block title %}Smart Study{% endblock %} · Smart Study AI</title>
     <meta name="description" content="Know what to study, when to study, and how to improve. Smart Study is your AI-powered personal academic coach.">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/smart-study.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/smart-study.css') }}?v=2.0.1">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% if request.endpoint == 'student.dashboard' %}page-dashboard{% elif request.endpoint == 'student.assistant' %}page-assistant{% elif request.endpoint in ['student.study_material', 'student.study_subject'] %}page-materials{% elif request.endpoint == 'student.predict' %}page-predict{% elif request.endpoint in ['student.planner', 'student.schedule'] %}page-planner{% elif request.endpoint == 'student.study_log' %}page-log{% elif request.endpoint == 'student.future_learning' %}page-future{% elif request.endpoint == 'student.profile' %}page-profile{% elif request.endpoint and 'assessment' in request.endpoint %}page-assessment{% elif not current_user.is_authenticated or (request.endpoint and ('main.' in request.endpoint or 'auth.' in request.endpoint)) %}page-public{% endif %}">
 
 {# ═══════════════════════════════════════════════════════════ #}
 {# PUBLIC NAVBAR (unauthenticated)                            #}
@@ -20,24 +20,23 @@
 {% if not current_user.is_authenticated %}
     <nav class="navbar navbar-expand-lg public-navbar">
         <div class="container">
-            <a class="navbar-brand" href="{{ url_for('main.home') }}">
-                <i class="fas fa-graduation-cap"></i>
-                <span>Smart Study</span>
+            <a class="navbar-brand py-1" href="{{ url_for('main.home') }}">
+                <img src="{{ url_for('static', filename='img/brand/smart-study-logo-light.svg') }}" alt="Smart Study Logo" style="height: 38px;">
             </a>
             <button class="navbar-toggler border-0 text-white" type="button" data-bs-toggle="collapse" data-bs-target="#publicNav" aria-label="Toggle navigation">
                 <i class="fas fa-bars"></i>
             </button>
             <div class="collapse navbar-collapse justify-content-center" id="publicNav">
-                <ul class="navbar-nav">
-                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.home' %}active{% endif %}" href="{{ url_for('main.home') }}">Home</a></li>
-                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.app_tour' %}active{% endif %}" href="{{ url_for('main.app_tour') }}">App Tour</a></li>
-                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.about' %}active{% endif %}" href="{{ url_for('main.about') }}">About</a></li>
-                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.study_tips' %}active{% endif %}" href="{{ url_for('main.study_tips') }}">Study Tips</a></li>
+                <ul class="navbar-nav gap-1">
+                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.home' %}active{% endif %}" href="{{ url_for('main.home') }}"><i class="fas fa-home me-1 text-primary"></i> Home</a></li>
+                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.app_tour' %}active{% endif %}" href="{{ url_for('main.app_tour') }}"><i class="fas fa-compass me-1 text-info"></i> App Tour</a></li>
+                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.about' %}active{% endif %}" href="{{ url_for('main.about') }}"><i class="fas fa-info-circle me-1 text-purple"></i> About</a></li>
+                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.study_tips' %}active{% endif %}" href="{{ url_for('main.study_tips') }}"><i class="fas fa-lightbulb me-1 text-warning"></i> Study Tips</a></li>
                 </ul>
             </div>
             <div class="d-flex gap-2 d-none d-lg-flex">
-                <a href="{{ url_for('auth.register') }}" class="btn btn-public-signup">Sign Up</a>
-                <a href="{{ url_for('auth.login') }}" class="btn btn-public-login">Log In</a>
+                <a href="{{ url_for('auth.register') }}" class="btn btn-public-signup shadow-sm"><i class="fas fa-user-plus me-1"></i> Sign Up</a>
+                <a href="{{ url_for('auth.login') }}" class="btn btn-public-login"><i class="fas fa-sign-in-alt me-1"></i> Log In</a>
             </div>
             <div class="d-lg-none w-100 mt-3">
                 <a href="{{ url_for('auth.register') }}" class="btn btn-public-signup w-100 mb-2">Sign Up</a>
@@ -56,85 +55,86 @@
         {# ── Sidebar ─────────────────────────────────────────── #}
         <aside class="app-sidebar" id="appSidebar" aria-label="Main navigation">
             {# Brand #}
-            <div class="app-sidebar-brand">
-                <a href="{{ url_for('student.dashboard') }}" aria-label="Smart Study home">
-                    <i class="fas fa-graduation-cap text-gradient"></i>
-                    <span class="text-gradient">Smart Study</span>
+            <div class="app-sidebar-brand py-3 px-3">
+                <a href="{{ url_for('student.dashboard') }}" aria-label="Smart Study home" class="d-flex align-items-center">
+                    <img src="{{ url_for('static', filename='img/brand/smart-study-logo-light.svg') }}" alt="Smart Study Logo" class="brand-full" style="height: 36px;">
+                    <img src="{{ url_for('static', filename='img/brand/smart-study-mark.svg') }}" alt="Smart Study Mark" class="brand-mark d-none" style="height: 34px;">
                 </a>
                 <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" aria-label="Collapse sidebar" title="Collapse sidebar">
                     <i class="fas fa-chevron-left" id="collapseIcon"></i>
                 </button>
             </div>
 
-            {# Navigation #}
+            {# Navigation — 5-Part Architecture #}
             <nav class="app-sidebar-nav" aria-label="Student navigation">
 
-                <div class="sidebar-cat-label">🏠 Home</div>
+                <!-- 1. WORKSPACE -->
+                <div class="sidebar-cat-label"><i class="fas fa-grip-vertical me-1"></i> Workspace</div>
                 <a class="sidebar-link {% if request.endpoint == 'student.dashboard' %}active{% endif %}"
                    href="{{ url_for('student.dashboard') }}" aria-current="{% if request.endpoint == 'student.dashboard' %}page{% endif %}">
-                    <i class="fas fa-chart-line"></i>
-                    <span>Dashboard</span>
-                    <span class="sidebar-tooltip">Dashboard</span>
+                    <i class="fas fa-th-large text-primary"></i>
+                    <span>Overview</span>
+                    <span class="sidebar-tooltip">Overview Dashboard</span>
+                </a>
+                <a class="sidebar-link {% if request.endpoint in ['student.study_material', 'student.document_detail', 'student.uploaded_material_detail'] %}active{% endif %}"
+                   href="{{ url_for('student.study_material') }}">
+                    <i class="fas fa-book-open text-info"></i>
+                    <span>Study Materials</span>
+                    <span class="sidebar-tooltip">Knowledge Library</span>
                 </a>
 
-                <div class="sidebar-cat-label mt-2">📚 Learn</div>
-                <a class="sidebar-link {% if request.endpoint == 'student.study_material' %}active{% endif %}"
-                   href="{{ url_for('student.study_material') }}">
-                    <i class="fas fa-book-open"></i>
-                    <span>Study Materials</span>
-                    <span class="sidebar-tooltip">Study Materials</span>
-                </a>
+                <!-- 2. INTELLIGENCE -->
+                <div class="sidebar-cat-label mt-2"><i class="fas fa-brain me-1"></i> Intelligence</div>
                 <a class="sidebar-link {% if request.endpoint == 'student.assistant' %}active{% endif %}"
                    href="{{ url_for('student.assistant') }}">
-                    <i class="fas fa-robot" style="color: #a855f7;"></i>
+                    <i class="fas fa-robot text-purple"></i>
                     <span>AI Study Coach</span>
-                    <span class="sidebar-tooltip">AI Study Coach</span>
-                </a>
-
-                <div class="sidebar-cat-label mt-2">🧠 Understand</div>
-                <a class="sidebar-link {% if request.endpoint and 'assessment' in request.endpoint %}active{% endif %}"
-                   href="{{ url_for('student.assessment_start') }}">
-                    <i class="fas fa-brain"></i>
-                    <span>Assessment</span>
-                    <span class="sidebar-tooltip">Assessment</span>
+                    <span class="sidebar-tooltip">Neural AI Assistant</span>
                 </a>
                 <a class="sidebar-link {% if request.endpoint == 'student.predict' %}active{% endif %}"
                    href="{{ url_for('student.predict') }}">
-                    <i class="fas fa-chart-pie"></i>
+                    <i class="fas fa-radar text-cyan"></i>
                     <span>Risk Insights</span>
-                    <span class="sidebar-tooltip">Risk Insights</span>
+                    <span class="sidebar-tooltip">Academic Risk Radar</span>
+                </a>
+                <a class="sidebar-link {% if request.endpoint and 'assessment' in request.endpoint %}active{% endif %}"
+                   href="{{ url_for('student.assessment_start') }}">
+                    <i class="fas fa-vial text-rose"></i>
+                    <span>Assessments</span>
+                    <span class="sidebar-tooltip">Diagnostic Exam</span>
                 </a>
 
-                <div class="sidebar-cat-label mt-2">📅 Plan</div>
+                <!-- 3. PLANNING -->
+                <div class="sidebar-cat-label mt-2"><i class="fas fa-calendar-check me-1"></i> Planning</div>
                 <a class="sidebar-link planner-link {% if request.endpoint == 'student.schedule' %}active{% endif %}"
                    href="{{ url_for('student.schedule') }}">
-                    <i class="fas fa-calendar-alt"></i>
+                    <i class="fas fa-calendar-alt text-emerald"></i>
                     <span>Study Planner</span>
-                    <span class="sidebar-tooltip">Study Planner</span>
+                    <span class="sidebar-tooltip">Focus Planning Studio</span>
                 </a>
 
-                <div class="sidebar-cat-label mt-2">📈 Track</div>
+                <!-- 4. PROGRESS -->
+                <div class="sidebar-cat-label mt-2"><i class="fas fa-chart-line me-1"></i> Progress</div>
                 <a class="sidebar-link {% if request.endpoint == 'student.study_log' %}active{% endif %}"
                    href="{{ url_for('student.study_log') }}">
-                    <i class="fas fa-clock"></i>
+                    <i class="fas fa-stream text-amber"></i>
                     <span>Study Log</span>
-                    <span class="sidebar-tooltip">Study Log</span>
+                    <span class="sidebar-tooltip">Learning Journey</span>
                 </a>
-
-                <div class="sidebar-cat-label mt-2">🚀 Grow</div>
                 <a class="sidebar-link {% if request.endpoint == 'student.future_learning' %}active{% endif %}"
                    href="{{ url_for('student.future_learning') }}">
-                    <i class="fas fa-rocket"></i>
+                    <i class="fas fa-rocket text-pink"></i>
                     <span>Future Learning</span>
-                    <span class="sidebar-tooltip">Future Learning</span>
+                    <span class="sidebar-tooltip">Career Galaxy</span>
                 </a>
 
-                <div class="sidebar-cat-label mt-2">👤 Account</div>
+                <!-- 5. ACCOUNT -->
+                <div class="sidebar-cat-label mt-2"><i class="fas fa-user-circle me-1"></i> Account</div>
                 <a class="sidebar-link {% if request.endpoint == 'student.profile' %}active{% endif %}"
                    href="{{ url_for('student.profile') }}">
-                    <i class="fas fa-user-circle"></i>
+                    <i class="fas fa-id-card text-blue"></i>
                     <span>My Profile</span>
-                    <span class="sidebar-tooltip">My Profile</span>
+                    <span class="sidebar-tooltip">Academic Identity</span>
                 </a>
 
             </nav>
@@ -170,7 +170,7 @@
             <header class="ss-topbar" role="banner">
                 <div class="ss-topbar-left">
                     {# Mobile hamburger #}
-                    <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Open menu" style="display:none;">
+                    <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Open menu">
                         <i class="fas fa-bars"></i>
                     </button>
 
@@ -339,13 +339,38 @@
     {# Floating AI Study Coach Button #}
     <a href="{{ url_for('student.assistant') }}" class="ss-ai-fab" aria-label="Ask AI Study Coach">
         <span class="ai-fab-icon"><i class="fas fa-robot"></i></span>
-        <span class="ai-fab-label">Ask Study Coach</span>
+        <span class="ai-fab-label">AI Study Coach</span>
     </a>
+
+    {# Mobile Quick Access Bottom Navigation Bar #}
+    <nav class="ss-mobile-bottom-nav" aria-label="Quick mobile navigation">
+        <a href="{{ url_for('student.dashboard') }}" class="ss-mobile-bottom-item {% if request.endpoint == 'student.dashboard' %}active{% endif %}">
+            <i class="fas fa-th-large"></i>
+            <span>Overview</span>
+        </a>
+        <a href="{{ url_for('student.assistant') }}" class="ss-mobile-bottom-item {% if request.endpoint == 'student.assistant' %}active{% endif %}">
+            <i class="fas fa-robot"></i>
+            <span>AI Coach</span>
+        </a>
+        <a href="{{ url_for('student.schedule') }}" class="ss-mobile-bottom-item {% if request.endpoint in ['student.schedule', 'student.planner'] %}active{% endif %}">
+            <i class="fas fa-calendar-alt"></i>
+            <span>Planner</span>
+        </a>
+        <a href="{{ url_for('student.study_material') }}" class="ss-mobile-bottom-item {% if request.endpoint == 'student.study_material' %}active{% endif %}">
+            <i class="fas fa-book-open"></i>
+            <span>Library</span>
+        </a>
+        <a href="{{ url_for('student.profile') }}" class="ss-mobile-bottom-item {% if request.endpoint == 'student.profile' %}active{% endif %}">
+            <i class="fas fa-id-card"></i>
+            <span>Profile</span>
+        </a>
+    </nav>
 {% endif %}
+
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="{{ url_for('static', filename='js/state-manager.js') }}"></script>
-<script src="{{ url_for('static', filename='js/smart-study.js') }}"></script>
+<script src="{{ url_for('static', filename='js/smart-study.js') }}?v=2.0.1"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

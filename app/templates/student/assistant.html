@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
-{% block title %}AI Study Assistant – SmartStudy{% endblock %}
+{% block title %}AI Study Coach · Neural Workspace{% endblock %}
 
 {% block breadcrumbs %}
 <span class="sep"><i class="fas fa-chevron-right"></i></span>
-<span>Learn</span>
+<span>Intelligence</span>
 <span class="sep"><i class="fas fa-chevron-right"></i></span>
 <span class="current">AI Study Coach</span>
 {% endblock %}
@@ -157,31 +157,44 @@
         50%       { opacity: 0.3; }
     }
 </style>
-
-<!-- Page Header -->
-<div class="row stagger-1 mb-3">
-    <div class="col-md-8">
-        <h1 class="page-title mb-1">
-            <i class="fas fa-robot text-gradient me-2"></i> AI Study Assistant
-        </h1>
-        <p class="page-subtitle mb-0">Your personal tutor for Nepal's Class 8–Master curriculum.</p>
+<div class="ss-page px-2 py-3">
+<!-- ── Neural Workspace Hero ── -->
+<section class="ss-page-hero position-relative overflow-hidden mb-4">
+    <div class="ss-page-hero-bg" style="background-image: url('{{ url_for('static', filename='img/ui/student/ai-coach.webp') }}');"></div>
+    <div class="ss-page-hero-content py-3">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div>
+                <div class="ss-badge ss-badge-purple mb-2">
+                    <i class="fas fa-microchip me-1"></i> Neural Academic Coach
+                </div>
+                <h1 class="display-6 fw-bold text-white mb-1" style="letter-spacing: -0.02em;">
+                    AI Study Coach Workspace
+                </h1>
+                <p class="text-muted mb-0" style="font-size: 1.05rem;">
+                    Context-aware AI tutor tuned to your subjects, assessment history, and study goals.
+                </p>
+            </div>
+            <div>
+                <span class="ss-badge ss-badge-cyan py-2 px-3">
+                    <span class="dot me-1" style="width:8px;height:8px;border-radius:50%;background:#22d3ee;display:inline-block;"></span> SmartStudy AI Engine Active
+                </span>
+            </div>
+        </div>
     </div>
-    <div class="col-md-4 d-flex align-items-center justify-content-md-end mt-2 mt-md-0">
-        <span class="model-badge">
-            <span class="dot"></span> SmartStudy AI · Claude / Gemini
-        </span>
-    </div>
-</div>
+</section>
 
-<div class="row g-4 stagger-2">
+<div class="row g-4">
     <!-- ── Settings Sidebar ── -->
     <div class="col-lg-3 settings-sidebar">
-        <div class="card card-light p-4 mb-3">
-            <h6 class="text-gradient fw-bold mb-3"><i class="fas fa-sliders-h me-2"></i> Tutor Settings</h6>
+        <div class="ss-panel p-4 mb-3">
+            <div class="text-center mb-3">
+                <img src="{{ url_for('static', filename='img/illustrations/neural_ai_coach.svg') }}" alt="AI Coach" style="max-height:100px;width:auto;filter:drop-shadow(0 6px 16px rgba(168,85,247,0.3));">
+            </div>
+            <h6 class="fw-bold text-white mb-3"><i class="fas fa-sliders-h text-purple me-2"></i> Tutor Context Controls</h6>
 
             <div class="mb-3">
-                <label class="form-label text-muted small">Subject Context</label>
-                <select id="tutor-subject" class="form-select">
+                <label class="form-label text-muted small fw-semibold">Subject Context</label>
+                <select id="tutor-subject" class="form-select bg-dark border-secondary text-white">
                     <option value="">General Queries</option>
                     {% for s in subjects %}
                     <option value="{{ s.id }}">{{ s.name }}</option>
@@ -190,8 +203,8 @@
             </div>
 
             <div class="mb-3">
-                <label class="form-label text-muted small">Explanation Level</label>
-                <select id="tutor-level" class="form-select" onchange="saveTutorSettings()">
+                <label class="form-label text-muted small fw-semibold">Explanation Level</label>
+                <select id="tutor-level" class="form-select bg-dark border-secondary text-white" onchange="saveTutorSettings()">
                     <option value="Beginner"      {% if profile and profile.explanation_level=='Beginner'      %}selected{% endif %}>Beginner</option>
                     <option value="Intermediate"  {% if not profile or profile.explanation_level=='Intermediate' %}selected{% endif %}>Intermediate</option>
                     <option value="Advanced"      {% if profile and profile.explanation_level=='Advanced'      %}selected{% endif %}>Advanced</option>
@@ -199,16 +212,16 @@
                 </select>
             </div>
             <div class="mb-3">
-                <label class="form-label text-muted small">Language</label>
-                <select id="tutor-language" class="form-select" onchange="saveTutorSettings()">
+                <label class="form-label text-muted small fw-semibold">Language</label>
+                <select id="tutor-language" class="form-select bg-dark border-secondary text-white" onchange="saveTutorSettings()">
                     <option value="English"   {% if not profile or profile.preferred_language=='English'   %}selected{% endif %}>English</option>
                     <option value="Nepali"    {% if profile and profile.preferred_language=='Nepali'    %}selected{% endif %}>Nepali</option>
                     <option value="Bilingual" {% if profile and profile.preferred_language=='Bilingual' %}selected{% endif %}>Bilingual</option>
                 </select>
             </div>
             <div class="mb-3">
-                <label class="form-label text-muted small">Study Goal</label>
-                <select id="tutor-goal" class="form-select" onchange="saveTutorSettings()">
+                <label class="form-label text-muted small fw-semibold">Study Goal</label>
+                <select id="tutor-goal" class="form-select bg-dark border-secondary text-white" onchange="saveTutorSettings()">
                     <option value="Pass Exams"         {% if profile and profile.study_goal=='Pass Exams'         %}selected{% endif %}>Pass Exams</option>
                     <option value="Improve Grades"     {% if not profile or profile.study_goal=='Improve Grades'  %}selected{% endif %}>Improve Grades</option>
                     <option value="Master Subject"     {% if profile and profile.study_goal=='Master Subject'     %}selected{% endif %}>Master Subject</option>
@@ -221,43 +234,43 @@
         </div>
 
         <!-- Clear Chat -->
-        <button class="btn btn-outline-secondary w-100 btn-sm py-2" onclick="clearChat()">
-            <i class="fas fa-trash-alt me-2"></i> Clear Conversation
+        <button class="btn btn-outline-secondary w-100 btn-sm py-2.5 rounded-3" onclick="clearChat()">
+            <i class="fas fa-trash-alt me-2 text-danger"></i> Clear Conversation
         </button>
     </div>
 
     <!-- ── Chat Panel ── -->
     <div class="col-lg-9">
         <!-- Quick Suggestion Chips -->
-        <div class="d-flex flex-wrap gap-2 mb-3" id="suggestion-chips">
-            <span class="suggestion-chip" onclick="setPrompt('Explain this topic step by step')">📖 Explain a concept</span>
-            <span class="suggestion-chip" onclick="setPrompt('Generate 5 MCQ practice questions for me')">❓ Practice MCQs</span>
-            <span class="suggestion-chip" onclick="setPrompt('Give me a quick revision summary of the key points')">📝 Revision summary</span>
-            <span class="suggestion-chip" onclick="setPrompt('What are the most important formulas I should memorize?')">🔢 Key formulas</span>
-            <span class="suggestion-chip" onclick="setPrompt('Create flashcards for this topic')">🃏 Flashcards</span>
-            <span class="suggestion-chip" onclick="setPrompt('I am struggling with this. Give me a simpler explanation')">💡 Simpler explanation</span>
+        <div class="ss-toolbar mb-3" id="suggestion-chips">
+            <span class="ss-chip" onclick="setPrompt('Explain this topic step by step')"><i class="fas fa-lightbulb text-warning me-1"></i> Explain a concept</span>
+            <span class="ss-chip" onclick="setPrompt('Generate 5 MCQ practice questions for me')"><i class="fas fa-tasks text-purple me-1"></i> Practice MCQs</span>
+            <span class="ss-chip" onclick="setPrompt('Give me a quick revision summary of the key points')"><i class="fas fa-file-alt text-cyan me-1"></i> Revision summary</span>
+            <span class="ss-chip" onclick="setPrompt('What are the most important formulas I should memorize?')"><i class="fas fa-square-root-alt text-emerald me-1"></i> Key formulas</span>
+            <span class="ss-chip" onclick="setPrompt('Create flashcards for this topic')"><i class="fas fa-clone text-blue me-1"></i> Flashcards</span>
+            <span class="ss-chip" onclick="setPrompt('I am struggling with this. Give me a simpler explanation')"><i class="fas fa-hands-helping text-rose me-1"></i> Simpler explanation</span>
         </div>
 
         <!-- Chat Window -->
-        <div class="chat-wrapper">
-            <div class="chat-messages" id="chat-box">
+        <div class="chat-wrapper ss-panel p-0 overflow-hidden">
+            <div class="chat-messages" id="chat-box" style="height:480px;overflow-y:auto;padding:1.5rem;background:rgba(5,8,18,0.7);">
                 <!-- Welcome message -->
                 <div class="bubble-row">
-                    <div class="bubble-avatar ai"><i class="fas fa-robot"></i></div>
-                    <div class="bubble ai">
-                        <p>👋 Hello{% if profile %}, <strong>{{ profile.full_name or current_user.username }}</strong>{% endif %}! I am your SmartStudy AI Tutor.</p>
-                        <p>I am tuned to Nepal's CDC/NEB curriculum for Class 8 to Master level. Ask me <em>anything</em> — concept explanations, practice questions, revision notes, or study strategies.</p>
-                        <p>Select a <strong>Subject Context</strong> on the left for more focused answers. 🎓</p>
+                    <div class="bubble-avatar ai" style="background:var(--grad-ai);width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;"><i class="fas fa-robot"></i></div>
+                    <div class="bubble ai ms-2 p-3 rounded-4" style="background:rgba(30,41,59,0.7);border:1px solid rgba(255,255,255,0.08);max-width:80%;">
+                        <p class="mb-1">👋 Hello{% if profile %}, <strong>{{ profile.full_name or current_user.username }}</strong>{% endif %}! I am your SmartStudy AI Tutor.</p>
+                        <p class="mb-1">I am tuned to your curriculum context. Ask me <em>anything</em> — concept explanations, practice questions, revision notes, or study strategies.</p>
+                        <p class="mb-0 text-muted small">Select a <strong>Subject Context</strong> on the left for focused explanations. 🎓</p>
                     </div>
                 </div>
 
                 <!-- Replay session history from server -->
                 {% for msg in history %}
-                <div class="bubble-row {{ 'user' if msg.role == 'user' else '' }}">
-                    <div class="bubble-avatar {{ 'user' if msg.role == 'user' else 'ai' }}">
+                <div class="bubble-row {{ 'user' if msg.role == 'user' else '' }} mb-3">
+                    <div class="bubble-avatar {{ 'user' if msg.role == 'user' else 'ai' }}" style="background:{% if msg.role == 'user' %}var(--grad-primary){% else %}var(--grad-ai){% endif %};width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;">
                         {% if msg.role == 'user' %}<i class="fas fa-user"></i>{% else %}<i class="fas fa-robot"></i>{% endif %}
                     </div>
-                    <div class="bubble {{ 'user' if msg.role == 'user' else 'ai' }}" id="msg-{{ loop.index }}">
+                    <div class="bubble {{ 'user' if msg.role == 'user' else 'ai' }} p-3 rounded-4" id="msg-{{ loop.index }}" style="background:{% if msg.role == 'user' %}linear-gradient(135deg,#38bdf8,#6366f1){% else %}rgba(30,41,59,0.7){% endif %};max-width:80%;">
                         {{ msg.content | safe }}
                     </div>
                 </div>
@@ -265,24 +278,25 @@
             </div>
 
             <!-- Input bar -->
-            <div class="chat-input-bar">
-                <div class="d-flex gap-2 align-items-end">
-                    <textarea id="chat-input" class="form-control flex-grow-1"
+            <div class="chat-input-bar p-3 border-top border-secondary" style="background:rgba(10,15,30,0.9);">
+                <div class="d-flex gap-2 align-items-center">
+                    <textarea id="chat-input" class="form-control flex-grow-1 bg-dark border-secondary text-white py-2 px-3 rounded-3"
                               placeholder="Ask your AI tutor anything…"
                               rows="1" autocomplete="off"
                               onkeydown="handleEnterKey(event)"></textarea>
-                    <button class="btn btn-primary" id="send-btn" onclick="submitQuery()">
-                        <span id="btn-icon"><i class="fas fa-paper-plane"></i></span>
+                    <button class="btn btn-primary px-4 py-2.5 rounded-3 fw-bold" id="send-btn" onclick="submitQuery()">
+                        <span id="btn-icon"><i class="fas fa-paper-plane me-1"></i> Send</span>
                         <span id="btn-spinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                     </button>
                 </div>
                 <div class="text-muted small mt-2" style="font-size: 11px;">
-                    <i class="fas fa-info-circle me-1"></i> Press <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line
+                    <i class="fas fa-info-circle me-1 text-primary"></i> Press <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line
                 </div>
             </div>
         </div>
     </div>
 </div>
+
 
 <!-- Marked.js for markdown rendering -->
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -379,11 +393,12 @@
         .then(r => r.json())
         .then(data => {
             typingRow.remove();
-            if (data.status === "success") {
+            if (data.status === "success" || data.status === "degraded") {
                 appendBubble("ai", data.response, chatBox);
             } else {
                 appendBubble("ai", "⚠️ " + (data.message || "The AI tutor encountered an error."), chatBox);
             }
+
         })
         .catch(err => {
             typingRow.remove();
@@ -457,4 +472,5 @@
         }).catch(() => {});
     }
 </script>
+</div>
 {% endblock %}

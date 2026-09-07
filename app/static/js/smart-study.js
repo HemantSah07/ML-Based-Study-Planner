@@ -150,10 +150,45 @@
             var btn = form.querySelector('[type="submit"]');
             if (btn) {
                 btn.disabled = true;
-                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Generating…';
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Generating Adaptive Plan…';
             }
         });
     }
+
+    // ── Planner Stepper Progression ──────────────────────────────────────────
+    function initPlannerStepper() {
+        const steps = document.querySelectorAll('.ss-planner-stepper .ss-stepper-step');
+        if (!steps.length) return;
+
+        // Check form elements to update active step
+        const presetSelect = document.getElementById('availability-preset-select');
+        const generateBtn  = document.getElementById('generate-button-container');
+
+        if (presetSelect) {
+            presetSelect.addEventListener('change', function () {
+                if (steps[1]) {
+                    steps[0].classList.add('completed');
+                    steps[1].classList.add('active');
+                }
+            });
+        }
+
+        if (generateBtn) {
+            const observer = new MutationObserver(function () {
+                if (!generateBtn.classList.contains('d-none')) {
+                    if (steps[2]) {
+                        steps[1].classList.add('completed');
+                        steps[2].classList.add('active');
+                    }
+                    if (steps[3]) {
+                        steps[3].classList.add('active');
+                    }
+                }
+            });
+            observer.observe(generateBtn, { attributes: true, attributeFilter: ['class'] });
+        }
+    }
+
 
     // ── Auto-dismiss Alerts ──────────────────────────────────────────────────
     function initAutoDismissAlerts() {
@@ -241,17 +276,79 @@
         }
     }
 
+    // ── Scroll-triggered Entrance Animations ────────────────────────────────
+    function initScrollAnimations() {
+        if (!('IntersectionObserver' in window)) return;
+        var observer = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+
+        document.querySelectorAll('.card, .stat-card, .hero-banner, .ss-next-action, .feature-card, .ss-benefit-card, .ss-log-entry').forEach(function (el) {
+            if (!el.style.animation && !el.classList.contains('no-animate')) {
+                el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+                observer.observe(el);
+            }
+        });
+    }
+
+    // ── Animated Counters ────────────────────────────────────────────────────
+    function initCounters() {
+        document.querySelectorAll('.stat-value[data-count]').forEach(function (el) {
+            var target = parseFloat(el.getAttribute('data-count'));
+            var suffix = el.getAttribute('data-suffix') || '';
+            var duration = 1200;
+            var start = performance.now();
+            function update(now) {
+                var progress = Math.min((now - start) / duration, 1);
+                var eased = 1 - Math.pow(1 - progress, 3);
+                el.textContent = (target * eased).toFixed(el.getAttribute('data-decimals') || 0) + suffix;
+                if (progress < 1) requestAnimationFrame(update);
+            }
+            requestAnimationFrame(update);
+        });
+    }
+
+    // ── Page Content Padding ─────────────────────────────────────────────────
+    function initPageContent() {
+        // Wrap app-main content in page-content div if not already wrapped
+        var appMain = document.getElementById('appMain');
+        if (!appMain) return;
+        // Ensure topbar stays sticky at top
+        var topbar = appMain.querySelector('.ss-topbar');
+        if (topbar && !appMain.querySelector('.page-content')) {
+            // Apply consistent padding to block-level siblings of topbar
+            var children = Array.from(appMain.children);
+            children.forEach(function (child) {
+                if (child !== topbar && !child.classList.contains('ss-topbar') && !child.style.padding) {
+                    if (!child.style.paddingLeft) child.style.paddingLeft = '';
+                }
+            });
+        }
+    }
+
     // ── Init All ─────────────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', function () {
         initSidebar();
         initSidebarCollapse();
         initHoursSlider();
         initPlannerForm();
+        initPlannerStepper();
         initAutoDismissAlerts();
         initUploadDropzone();
         initSubjectSelectAll();
         initGreeting();
         initProfileToggle();
+        initScrollAnimations();
+        initCounters();
+        initPageContent();
     });
 
+
 })();
+

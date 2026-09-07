@@ -28,6 +28,8 @@ from app.services.ai_service import (
     QuotaExceededError,
     RateLimitError,
     ConfigurationError,
+    FEATURE_ASSISTANT,
+    FEATURE_MCQ,
 )
 import logging
 
@@ -1067,8 +1069,10 @@ def evaluation():
     )
 
 @student_bp.route("/study_log", methods=["GET", "POST"])
+@student_bp.route("/study-log", methods=["GET", "POST"])
 @login_required
 def study_log():
+
     # ── Context: shared learning state for this request
     ctx = get_learning_context(current_user.id)
 
@@ -4718,7 +4722,11 @@ def api_chat():
     # ── Context mutation: write history back through context (keeps session in sync)
     ctx.update_ai_history(history)
 
-    return jsonify({"status": "success", "response": reply})
+    is_fallback = any(t in reply for t in ["Local Sync Mode Active", "Temporarily at Capacity"])
+    status_str = "degraded" if is_fallback else "success"
+
+    return jsonify({"status": status_str, "response": reply})
+
 
 
 @student_bp.route("/api/chat/clear", methods=["POST"])
@@ -4733,8 +4741,10 @@ def clear_chat_history():
 # ─── FUTURE LEARNING ─────────────────────────────────────────────────────────
 
 @student_bp.route("/future-learning", methods=["GET"])
+@student_bp.route("/future_learning", methods=["GET"])
 @login_required
 def future_learning():
+
     """Future Learning page: progression planner, recommended books, career pathways."""
     from app.models import StudentProfile
     from app.utils.subject_map import SUBJECT_MAP
@@ -4876,8 +4886,10 @@ def extract_text_from_file(file_path, file_type):
 
 
 @student_bp.route("/study-material", methods=["GET"])
+@student_bp.route("/study_material", methods=["GET"])
 @login_required
 def study_material():
+
     from app.models import UploadedMaterial, Subject, LearningMaterial, Topic, Chapter
     profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
     if not profile or not profile.study_level:

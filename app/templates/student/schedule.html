@@ -2,6 +2,7 @@
 {% block title %}Study Planner{% endblock %}
 
 {% block content %}
+<div class="px-4 py-4">
 <div id="plannerLoading" class="planner-loading">
     <div class="planner-loading-spinner"></div>
     <p class="text-muted">Running Random Forest predictions & building your week...</p>
@@ -34,9 +35,34 @@
 </div>
 {% endif %}
 
+<!-- ── Focus Planning Stepper Bar ── -->
+
+<div class="ss-planner-stepper mb-4 stagger-2">
+    <div class="ss-stepper-step active">
+        <div class="ss-stepper-num">01</div>
+        <span>01 Subjects</span>
+    </div>
+    <div class="ss-stepper-divider"></div>
+    <div class="ss-stepper-step">
+        <div class="ss-stepper-num">02</div>
+        <span>02 Availability</span>
+    </div>
+    <div class="ss-stepper-divider"></div>
+    <div class="ss-stepper-step">
+        <div class="ss-stepper-num">03</div>
+        <span>03 Priorities</span>
+    </div>
+    <div class="ss-stepper-divider"></div>
+    <div class="ss-stepper-step">
+        <div class="ss-stepper-num">04</div>
+        <span>04 Generate</span>
+    </div>
+</div>
+
 <div class="row g-4 mb-4 stagger-2">
+
     <div class="col-12">
-        <div class="card card-light p-4">
+        <div class="card card-flat p-4">
             <h5 class="text-gradient fw-bold mb-1"><i class="fas fa-sliders-h me-2"></i> Configure Your Plan</h5>
             <p class="text-muted small mb-4">Add subjects and let the model predict risk levels for smart hour allocation.</p>
 
@@ -318,10 +344,11 @@
                 </div>
                 
                 <div id="generate-button-container" class="d-none mt-3">
-                    <button type="submit" class="btn btn-success btn-glow w-100 py-3">
-                        <i class="fas fa-magic me-2"></i> Compile and Generate Adaptive Plan
+                    <button type="submit" class="btn btn-generate-plan w-100">
+                        <i class="fas fa-sparkles me-1"></i> GENERATE MY ADAPTIVE STUDY PLAN
                     </button>
                 </div>
+
             </form>
         </div>
     </div>
@@ -1577,5 +1604,6 @@
     }
 
 </script>
+</div>
 {% endblock %}
 

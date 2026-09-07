@@ -69,15 +69,13 @@ FEATURE_ASSISTANT = "assistant"  # AI tutoring chat
 # ── Metadata reference for free-tier provider limits ──────────────────────────
 PROVIDER_QUOTA_METADATA = {
     "free": {
-        "gemini-3.1-flash-lite": {"rpm": 15, "rpd": 500},
-        "gemini-2.5-flash": {"rpm": 5, "rpd": 20},
-        "gemini-2.5-flash-lite": {"rpm": 10, "rpd": 20},
-        "gemini-3-flash": {"rpm": 5, "rpd": 20},
-        "gemini-3.5-flash": {"rpm": 5, "rpd": 20},
+        "gemini-3.6-flash": {"rpm": 15, "rpd": 500},
+        "gemini-3.5-flash": {"rpm": 15, "rpd": 500},
         "gemini-3.5-flash-lite": {"rpm": 15, "rpd": 500},
-        "gemini-3.6-flash": {"rpm": 5, "rpd": 20},
+        "gemini-3.1-flash-lite": {"rpm": 15, "rpd": 500},
     }
 }
+
 
 
 class CentralQuotaManager:
@@ -185,8 +183,9 @@ class CentralQuotaManager:
             if feature == FEATURE_MCQ:
                 return current_app.config.get("GEMINI_DAILY_LIMIT_MCQ", 450)
             if feature == FEATURE_ASSISTANT:
-                primary_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
-                fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.1-flash-lite")
+                primary_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-3.6-flash")
+                fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.5-flash-lite")
+
                 if model_name == primary_model:
                     return current_app.config.get("GEMINI_DAILY_LIMIT_ASSISTANT_PRIMARY", 18)
                 elif model_name == fallback_model:
@@ -438,9 +437,10 @@ class AIService:
             key = current_app.config.get("GEMINI_API_KEY_FREE") or current_app.config.get("GEMINI_API_KEY")
         has_key = bool((key or "").strip())
         
-        mcq_model = current_app.config.get("GEMINI_MODEL_MCQ", "gemini-3.1-flash-lite")
-        assistant_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
-        fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.1-flash-lite")
+        mcq_model = current_app.config.get("GEMINI_MODEL_MCQ", "gemini-3.5-flash-lite")
+        assistant_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-3.6-flash")
+        fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.5-flash-lite")
+
         
         mcq_provider_quota = self.get_provider_quota_reference(mode, mcq_model)
         assistant_provider_quota = self.get_provider_quota_reference(mode, assistant_model)
@@ -543,8 +543,9 @@ class AIService:
                 raise classified
 
         else:  # FEATURE_ASSISTANT
-            primary_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
-            fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.1-flash-lite")
+            primary_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-3.6-flash")
+            fallback_model = current_app.config.get("GEMINI_MODEL_ASSISTANT_FALLBACK", "gemini-3.5-flash-lite")
+
 
             use_primary = True
             if not billing_on:
@@ -760,13 +761,14 @@ class AIService:
         """Return current usage and limit for *feature* (useful in admin views)."""
         billing_on = current_app.config.get("GEMINI_BILLING_ENABLED", False)
         if feature == FEATURE_MCQ:
-            model = current_app.config.get("GEMINI_MODEL_MCQ", "gemini-3.1-flash-lite")
+            model = current_app.config.get("GEMINI_MODEL_MCQ", "gemini-3.5-flash-lite")
             usage = self._today_usage(feature, model)
             limit = self._quota_limit(feature, model)
         else:  # FEATURE_ASSISTANT
-            model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-2.5-flash")
+            model = current_app.config.get("GEMINI_MODEL_ASSISTANT_PRIMARY", "gemini-3.6-flash")
             usage = self._today_usage(feature, model)
             limit = self._quota_limit(feature, model)
+
 
         return {
             "feature":     feature,

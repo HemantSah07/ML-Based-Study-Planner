@@ -1,92 +1,101 @@
 {% extends 'base.html' %}
-{% block title %}Risk Insights{% endblock %}
+{% block title %}Risk Insights · Academic Intelligence Radar{% endblock %}
 
 {% block breadcrumbs %}
 <span class="sep"><i class="fas fa-chevron-right"></i></span>
-<span>Understand</span>
+<span>Intelligence</span>
 <span class="sep"><i class="fas fa-chevron-right"></i></span>
 <span class="current">Risk Insights</span>
 {% endblock %}
 
 {% block content %}
-<div class="hero-banner mb-4">
-    <div class="position-relative" style="z-index: 1;">
-        <h1 class="page-title mb-2"><i class="fas fa-chart-pie me-2 text-gradient"></i> Risk Insights</h1>
-        <p class="page-subtitle mb-0">Understand which subjects need your attention and why — powered by your assessment and performance data.</p>
+<div class="ss-page px-2 py-3">
+<!-- ── Risk Radar Hero ── -->
+<section class="ss-page-hero position-relative overflow-hidden mb-4">
+    <div class="ss-page-hero-bg" style="background-image: url('{{ url_for('static', filename='img/ui/student/risk-radar.webp') }}');"></div>
+    <div class="ss-page-hero-content py-3">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div>
+                <div class="ss-badge ss-badge-rose mb-2">
+                    <i class="fas fa-radar me-1"></i> Academic Intelligence Radar
+                </div>
+                <h1 class="display-6 fw-bold text-white mb-1" style="letter-spacing: -0.02em;">
+                    Academic Risk Intelligence &amp; Analysis
+                </h1>
+                <p class="text-muted mb-0" style="font-size: 1.05rem;">
+                    Analyze subject risk levels using Random Forest ML predictions and assessment performance metrics.
+                </p>
+            </div>
+            <div class="d-flex gap-2">
+                <span class="ss-badge ss-badge-rose py-2 px-3"><i class="fas fa-exclamation-circle me-1"></i> High Risk</span>
+                <span class="ss-badge ss-badge-amber py-2 px-3"><i class="fas fa-exclamation-triangle me-1"></i> Medium Risk</span>
+                <span class="ss-badge ss-badge-emerald py-2 px-3"><i class="fas fa-check-circle me-1"></i> Low Risk</span>
+            </div>
+        </div>
     </div>
-</div>
-
-{# Risk level guide #}
-<div class="d-flex flex-wrap gap-3 mb-4 align-items-center">
-    <span class="text-muted small fw-semibold">Risk levels:</span>
-    <span class="ss-risk-badge high"><i class="fas fa-circle"></i> High Risk — Needs immediate attention</span>
-    <span class="ss-risk-badge medium"><i class="fas fa-circle"></i> Medium Risk — Keep practicing</span>
-    <span class="ss-risk-badge low"><i class="fas fa-circle"></i> Low Risk — You're on track</span>
-</div>
+</section>
 
 {% if not profile or not profile.study_level %}
-<div class="alert alert-warning text-center mb-4">
-    <i class="fas fa-exclamation-triangle me-2"></i>
-    Set your class level in <a href="{{ url_for('student.profile') }}" class="alert-link">Profile</a> before predicting risk.
+<div class="alert alert-warning text-center mb-4 border-warning" style="background:rgba(251,191,36,0.15);backdrop-filter:blur(8px);">
+    <i class="fas fa-exclamation-triangle me-2 text-warning"></i>
+    Please set your study level in <a href="{{ url_for('student.profile') }}" class="alert-link text-warning fw-bold">Profile Settings</a> before running risk analysis.
 </div>
 {% endif %}
 
-<div class="eval-tabs-custom mb-4">
-    <button class="eval-tab-btn {% if not is_ocr %}active{% endif %}" id="predict-tab-btn" type="button" onclick="switchPredictTab('predict')">
-        <i class="fas fa-brain me-2"></i> Predict Risk
+<div class="ss-toolbar mb-4 p-2">
+    <button class="ss-chip {% if not is_ocr %}active{% endif %} border-0" id="predict-tab-btn" type="button" onclick="switchPredictTab('predict')">
+        <i class="fas fa-brain me-1.5"></i> Run ML Risk Analysis
     </button>
-    <button class="eval-tab-btn {% if is_ocr %}active{% endif %}" id="upload-tab-btn" type="button" onclick="switchPredictTab('upload')">
-        <i class="fas fa-file-upload me-2"></i> Upload Marksheet
+    <button class="ss-chip {% if is_ocr %}active{% endif %} border-0" id="upload-tab-btn" type="button" onclick="switchPredictTab('upload')">
+        <i class="fas fa-file-upload me-1.5"></i> Upload Marksheet (OCR)
     </button>
 </div>
 
 {% if batch_results or skipped_subjects %}
-<div class="card card-light p-4 mb-4">
+<div class="ss-panel mb-4">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
-            <h5 class="text-gradient fw-bold mb-1"><i class="fas fa-table me-2"></i> Batch Prediction Results</h5>
-            <p class="text-muted small mb-0">Each successful subject was saved as its own database prediction row.</p>
+            <h5 class="fw-bold text-white mb-1"><i class="fas fa-table text-primary me-2"></i> Batch Prediction Telemetry</h5>
+            <p class="text-muted small mb-0">Saved risk telemetry per subject in relational persistence.</p>
         </div>
-        <span class="planner-stat-pill"><i class="fas fa-tree text-gradient"></i> {{ model_used or 'Random Forest Classifier' }}</span>
+        <span class="ss-badge ss-badge-purple"><i class="fas fa-tree me-1"></i> {{ model_used or 'Random Forest Classifier' }}</span>
     </div>
 
     {% if batch_results %}
     <div class="d-flex flex-column gap-3">
         {% for result in batch_results %}
         {% set rl = result.risk_level | lower %}
-        <div class="card card-flat p-4">
+        <div class="ss-card p-4">
             <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-                <div class="d-flex align-items-center gap-3">
-                    <div>
-                        <div class="fw-bold fs-6 text-white mb-1">{{ result.subject }}</div>
-                        <div class="text-muted small">Performance score: {{ "%.1f"|format(result.performance_score) }}% ({{ result.performance_source }})</div>
-                    </div>
+                <div>
+                    <div class="fw-bold fs-5 text-white mb-1">{{ result.subject }}</div>
+                    <div class="text-muted small">Performance score: <strong>{{ "%.1f"|format(result.performance_score) }}%</strong> ({{ result.performance_source }})</div>
                 </div>
                 <div class="d-flex align-items-center gap-2">
                     {% if rl == 'high' %}
-                    <span class="ss-risk-badge high"><i class="fas fa-exclamation-circle"></i> High Risk</span>
+                    <span class="ss-badge ss-badge-rose"><i class="fas fa-exclamation-circle"></i> High Risk</span>
                     {% elif rl == 'medium' %}
-                    <span class="ss-risk-badge medium"><i class="fas fa-exclamation-triangle"></i> Medium Risk</span>
+                    <span class="ss-badge ss-badge-amber"><i class="fas fa-exclamation-triangle"></i> Medium Risk</span>
                     {% else %}
-                    <span class="ss-risk-badge low"><i class="fas fa-check-circle"></i> Low Risk</span>
+                    <span class="ss-badge ss-badge-emerald"><i class="fas fa-check-circle"></i> Low Risk</span>
                     {% endif %}
-                    <a href="{{ url_for('student.schedule') }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-calendar-alt me-1"></i>Add to Plan</a>
+                    <a href="{{ url_for('student.schedule') }}" class="btn btn-sm btn-outline-light"><i class="fas fa-calendar-alt me-1"></i>Add to Schedule</a>
                 </div>
             </div>
             {# Why this risk? expandable section #}
             <div class="mt-3">
                 <button class="btn btn-link p-0 text-muted small text-decoration-none" type="button"
                         data-bs-toggle="collapse" data-bs-target="#why-{{ loop.index }}" aria-expanded="false">
-                    <i class="fas fa-info-circle me-1"></i> Why is this subject {{ result.risk_level }} risk?
+                    <i class="fas fa-info-circle me-1 text-primary"></i> Why is this subject {{ result.risk_level }} risk?
                 </button>
                 <div class="collapse mt-2" id="why-{{ loop.index }}">
-                    <div class="ss-risk-why">
+                    <div class="ss-panel p-3 text-muted small">
                         {% if rl == 'high' %}
-                        Your risk level for <strong>{{ result.subject }}</strong> is influenced by your recent assessment performance score of <strong>{{ "%.1f"|format(result.performance_score) }}%</strong>. Subjects where your assessment score is below 60% tend to receive a higher risk classification. To reduce this risk, complete additional practice sessions and retake the assessment after studying.
+                        Your risk level for <strong>{{ result.subject }}</strong> is influenced by your recent assessment performance score of <strong>{{ "%.1f"|format(result.performance_score) }}%</strong>. Scores below 60% trigger high-risk alerts. Allocate additional study blocks and retake the assessment.
                         {% elif rl == 'medium' %}
-                        Your risk for <strong>{{ result.subject }}</strong> is at a moderate level based on your assessment performance of <strong>{{ "%.1f"|format(result.performance_score) }}%</strong>. Consistent practice and reviewing weaker topics can help bring this down to Low Risk.
+                        Your risk for <strong>{{ result.subject }}</strong> is moderate based on performance score of <strong>{{ "%.1f"|format(result.performance_score) }}%</strong>. Consistent practice will reduce risk to Low.
                         {% else %}
-                        Your performance in <strong>{{ result.subject }}</strong> looks good with a score of <strong>{{ "%.1f"|format(result.performance_score) }}%</strong>. Keep up your current study routine to maintain this level.
+                        Your performance in <strong>{{ result.subject }}</strong> looks good with a score of <strong>{{ "%.1f"|format(result.performance_score) }}%</strong>. Maintain your current study routine.
                         {% endif %}
                     </div>
                 </div>
@@ -97,7 +106,7 @@
     {% endif %}
 
     {% if skipped_subjects %}
-    <div class="alert alert-warning mt-3 mb-0">
+    <div class="alert alert-warning mt-3 mb-0 border-warning" style="background:rgba(251,191,36,0.12);">
         {% for skipped in skipped_subjects %}
         <div><i class="fas fa-info-circle me-1"></i>{{ skipped.reason }}</div>
         {% endfor %}
@@ -106,8 +115,9 @@
 </div>
 {% endif %}
 
+
 <div id="predict-tab-content" class="{% if is_ocr %}d-none{% endif %}">
-    <div class="card card-light p-4 mb-4">
+    <div class="card card-flat p-4 mb-4">
         <h5 class="mb-1 text-gradient"><i class="fas fa-chart-pie me-2"></i> Analyse Your Risk</h5>
         <p class="text-muted small mb-4">Select one or more active profile subjects. Subjects without Assessment or marksheet scores are skipped automatically.</p>
 
@@ -481,4 +491,5 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+</div>
 {% endblock %}

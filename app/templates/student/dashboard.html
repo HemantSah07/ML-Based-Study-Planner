@@ -1,27 +1,45 @@
 {% extends 'base.html' %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}Dashboard · Academic Command Center{% endblock %}
 
-{% block breadcrumbs %}{% endblock %}{# Home only — no extra crumbs needed #}
+{% block breadcrumbs %}{% endblock %}
 
 {% block content %}
-{# ── Greeting & Top Banner ──────────────────────────────────────────────── #}
-<div class="hero-banner mb-4 stagger-1">
-    <div class="hero-glow-orb" style="right:10%;top:20%;"></div>
-    <div class="position-relative" style="z-index:1;">
-        <div class="ss-greeting" id="ssGreetingMsg">
-            <span id="ssGreetingTime">Good Morning</span>, <span class="text-gradient">{{ user.full_name or user.username }}</span> 👋
+<div class="ss-page px-2 py-3">
+{# ── Academic Command Center Hero ────────────────────────────────────────── #}
+<section class="ss-page-hero position-relative overflow-hidden mb-4">
+    <div class="ss-page-hero-bg" style="background-image: url('{{ url_for('static', filename='img/ui/student/dashboard-hero.webp') }}');"></div>
+    <div class="ss-page-hero-content py-3">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div>
+                <div class="ss-badge ss-badge-cyan mb-2">
+                    <i class="fas fa-satellite-dish me-1"></i> Academic Command Center
+                </div>
+                <h1 class="display-6 fw-bold text-white mb-1" id="ssGreetingMsg" style="letter-spacing: -0.02em;">
+                    <span id="ssGreetingTime">Good Morning</span>, <span class="text-gradient">{{ user.full_name or user.username }}</span> 👋
+                </h1>
+                <p class="text-muted mb-0" style="font-size: 1.05rem;">
+                    Here is your real-time academic intelligence overview and focus plan for today.
+                </p>
+            </div>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('student.schedule') }}" class="btn btn-primary px-4 py-2.5 shadow-sm">
+                    <i class="fas fa-calendar-alt me-1.5"></i> Focus Planner
+                </a>
+                <a href="{{ url_for('student.assistant') }}" class="btn btn-outline-light px-4 py-2.5" style="background:rgba(255,255,255,0.06);">
+                    <i class="fas fa-robot me-1.5 text-purple"></i> Ask AI Coach
+                </a>
+            </div>
         </div>
-        <div class="ss-greeting-sub">Here's your academic snapshot for today.</div>
 
         {# Adaptive planner alert #}
         {% if log_analysis and log_analysis.diverges_significantly %}
-        <div class="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-3 mt-4 mb-0">
+        <div class="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-3 mt-4 mb-0 border-warning" style="background:rgba(251,191,36,0.15);backdrop-filter:blur(8px);">
             <div>
                 <i class="fas fa-exclamation-triangle me-2 text-warning"></i>
-                <strong>Adaptive Planner:</strong> Your logged hours ({{ "%.1f"|format(log_analysis.total_logged_hours) }}h) diverge from your planned target ({{ "%.1f"|format(log_analysis.total_planned_hours) }}h) with {{ log_analysis.missed_sessions }} missed blocks.
+                <strong>Adaptive Planner Alert:</strong> Your logged hours ({{ "%.1f"|format(log_analysis.total_logged_hours) }}h) diverge from target ({{ "%.1f"|format(log_analysis.total_planned_hours) }}h) with {{ log_analysis.missed_sessions }} missed blocks.
             </div>
             <form action="{{ url_for('student.planner_adapt_regenerate') }}" method="POST" class="mb-0">
-                <button type="submit" class="btn btn-warning btn-sm"><i class="fas fa-sync-alt me-1"></i> Adapt &amp; Regenerate</button>
+                <button type="submit" class="btn btn-warning btn-sm fw-bold"><i class="fas fa-sync-alt me-1"></i> Adapt &amp; Regenerate Schedule</button>
             </form>
         </div>
         {% endif %}
@@ -30,14 +48,14 @@
         {% if unread_notifications %}
         <div class="mt-4" id="notifications">
             <div class="d-flex align-items-center justify-content-between mb-2">
-                <h6 class="text-white fw-bold mb-0"><i class="fas fa-bell text-warning me-2"></i> Alerts ({{ unread_notifications|length }})</h6>
+                <h6 class="text-white fw-bold mb-0"><i class="fas fa-bell text-warning me-2"></i> System Notifications ({{ unread_notifications|length }})</h6>
                 <button onclick="markAllNotificationsRead()" class="btn btn-link text-muted p-0 text-decoration-none small">
                     <i class="fas fa-check-double me-1"></i> Mark all read
                 </button>
             </div>
             <div class="d-flex flex-column gap-2">
                 {% for n in unread_notifications %}
-                <div class="alert alert-dark border-secondary d-flex align-items-center justify-content-between p-3 mb-0 rounded-3 shadow-sm text-white" id="notif-{{ n.id }}" style="background:rgba(15,23,42,0.7);backdrop-filter:blur(8px);">
+                <div class="alert alert-dark border-secondary d-flex align-items-center justify-content-between p-3 mb-0 rounded-3 shadow-sm text-white" id="notif-{{ n.id }}" style="background:rgba(15,23,42,0.8);backdrop-filter:blur(10px);">
                     <div class="d-flex align-items-center gap-2">
                         <i class="fas fa-info-circle text-primary"></i>
                         <span>{{ n.message }}</span>
@@ -51,196 +69,143 @@
         </div>
         {% endif %}
     </div>
+</section>
+
+{# ── Academic Snapshot Metrics Grid ──────────────────────────────────────── #}
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="ss-stat">
+            <div class="ss-stat-icon"><i class="fas fa-award"></i></div>
+            <div class="ss-stat-value">{{ "%.1f"|format(profile.prior_academic_score) if profile else 0.0 }}%</div>
+            <div class="ss-stat-label">Prior Academic Score</div>
+            <div class="ss-badge ss-badge-cyan mt-2" style="font-size:0.7rem;">{{ profile.level_of_study if profile else 'Not set' }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="ss-stat">
+            <div class="ss-stat-icon" style="background:rgba(251,191,36,0.15);border-color:rgba(251,191,36,0.3);color:var(--amber);"><i class="fas fa-fire"></i></div>
+            <div class="ss-stat-value">{{ streak }} <span style="font-size:1rem;font-weight:600;">Days</span></div>
+            <div class="ss-stat-label">Study Streak</div>
+            <div class="ss-badge ss-badge-amber mt-2" style="font-size:0.7rem;">{{ "%.1f"|format(logged_hours) }}h Logged</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="ss-stat">
+            <div class="ss-stat-icon" style="background:rgba(52,211,153,0.15);border-color:rgba(52,211,153,0.3);color:var(--green);"><i class="fas fa-calendar-check"></i></div>
+            <div class="ss-stat-value">{{ total_scheduled }} <span style="font-size:1rem;font-weight:600;">Hours</span></div>
+            <div class="ss-stat-label">Planned This Week</div>
+            <div class="ss-badge ss-badge-emerald mt-2" style="font-size:0.7rem;">Scheduled</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="ss-stat">
+            {% set max_risk = risk_data[0] %}
+            {% set risk_label = "High" %}
+            {% set risk_badge = "ss-badge-rose" %}
+            {% if risk_data[1] >= max_risk %}{% set max_risk = risk_data[1] %}{% set risk_label = "Medium" %}{% set risk_badge = "ss-badge-amber" %}{% endif %}
+            {% if risk_data[2] > max_risk %}{% set risk_label = "Low" %}{% set risk_badge = "ss-badge-emerald" %}{% endif %}
+            <div class="ss-stat-icon" style="background:rgba(168,85,247,0.15);border-color:rgba(168,85,247,0.3);color:var(--purple);"><i class="fas fa-chart-pie"></i></div>
+            <div class="ss-stat-value">{{ risk_label if risk_data[0]+risk_data[1]+risk_data[2] > 0 else "N/A" }}</div>
+            <div class="ss-stat-label">Academic Risk Status</div>
+            <div class="ss-badge {{ risk_badge }} mt-2" style="font-size:0.7rem;">Risk Level</div>
+        </div>
+    </div>
 </div>
 
-{# ── Stats Row ──────────────────────────────────────────────────────────── #}
-<div class="row g-3 mb-4 stagger-2">
-    <div class="col-6 col-lg-3">
-        <div class="card stat-card card-flat p-4">
-            <div class="stat-icon mb-3"><i class="fas fa-award text-gradient"></i></div>
-            <div class="text-muted small fw-bold mb-1">Academic Score</div>
-            <div class="stat-value text-gradient">{{ "%.1f"|format(profile.prior_academic_score) if profile else 0.0 }}%</div>
-            <span class="badge bg-low mt-2">{{ profile.level_of_study if profile else 'Not set' }}</span>
-        </div>
-    </div>
-    <div class="col-6 col-lg-3">
-        <div class="card stat-card card-flat p-4">
-            <div class="stat-icon mb-3" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.2);"><i class="fas fa-fire" style="color:var(--amber);"></i></div>
-            <div class="text-muted small fw-bold mb-1">Study Streak</div>
-            <div class="stat-value text-gradient">{{ streak }} days</div>
-            <span class="badge bg-medium mt-2">{{ "%.1f"|format(logged_hours) }}h logged</span>
-        </div>
-    </div>
-    <div class="col-6 col-lg-3">
-        <div class="card stat-card card-flat p-4">
-            <div class="stat-icon mb-3" style="background:rgba(52,211,153,0.1);border-color:rgba(52,211,153,0.2);"><i class="fas fa-calendar-check" style="color:var(--green);"></i></div>
-            <div class="text-muted small fw-bold mb-1">Planned This Week</div>
-            <div class="stat-value text-gradient">{{ total_scheduled }}h</div>
-            <span class="badge bg-low mt-2">Scheduled</span>
-        </div>
-    </div>
-    <div class="col-6 col-lg-3">
-        <div class="card stat-card card-flat p-4">
-            <div class="stat-icon mb-3" style="background:rgba(56,189,248,0.1);border-color:rgba(56,189,248,0.2);">
-                {% set max_risk = risk_data[0] %}
-                {% set risk_label = "High" %}
-                {% set risk_badge = "bg-high" %}
-                {% if risk_data[1] >= max_risk %}{% set max_risk = risk_data[1] %}{% set risk_label = "Medium" %}{% set risk_badge = "bg-medium" %}{% endif %}
-                {% if risk_data[2] > max_risk %}{% set risk_label = "Low" %}{% set risk_badge = "bg-low" %}{% endif %}
-                <i class="fas fa-chart-pie text-gradient"></i>
-            </div>
-            <div class="text-muted small fw-bold mb-1">Overall Risk</div>
-            <div class="stat-value text-gradient">{{ risk_label if risk_data[0]+risk_data[1]+risk_data[2] > 0 else "N/A" }}</div>
-            <span class="badge {{ risk_badge }} mt-2">Risk Level</span>
-        </div>
-    </div>
-</div>
-
-{# ── Next Best Action ───────────────────────────────────────────────────── #}
-<div class="mb-4 stagger-2">
+{# ── Next Best Action Banner ──────────────────────────────────────────────── #}
+<div class="mb-4">
     {% if not profile or not profile.has_completed_assessment %}
-    {# Assessment not done #}
-    <div class="ss-next-action urgent">
-        <div class="ss-next-action-label">Your Next Best Action</div>
-        <div class="ss-next-action-title">🧠 Complete Your Assessment</div>
-        <div class="ss-next-action-body">
-            Take your assessment to understand your current strengths and areas for improvement. This helps Smart Study personalize your entire experience.
-        </div>
-        <a href="{{ url_for('student.assessment_start') }}" class="btn btn-primary px-4">
-            Take Assessment <i class="fas fa-arrow-right ms-2"></i>
+    <div class="ss-action">
+        <div class="ss-badge ss-badge-amber mb-2"><i class="fas fa-star me-1"></i> Priority Action</div>
+        <h4 class="fw-bold text-white mb-2">🧠 Complete Diagnostic Knowledge Assessment</h4>
+        <p class="text-muted mb-3" style="max-width:680px;">
+            Take your diagnostic assessment to understand your strengths and weak subject topics. Smart Study uses your results to build a personalized study schedule.
+        </p>
+        <a href="{{ url_for('student.assessment_start') }}" class="btn btn-primary px-4 py-2.5 shadow-sm">
+            Take Assessment Now <i class="fas fa-arrow-right ms-2"></i>
         </a>
     </div>
     {% elif risk_data and risk_data[0] > 0 %}
-    {# High risk subjects exist #}
-    <div class="ss-next-action urgent">
-        <div class="ss-next-action-label">Your Next Best Action</div>
-        <div class="ss-next-action-title">🔴 Some subjects need your attention</div>
-        <div class="ss-next-action-body">
-            Based on your recent assessment and performance data, you have subjects that are currently at higher academic risk. Review your Risk Insights and plan focused study sessions.
-        </div>
+    <div class="ss-action" style="border-color:rgba(248,113,113,0.3);background:linear-gradient(135deg,rgba(248,113,113,0.15),rgba(15,23,42,0.8));">
+        <div class="ss-badge ss-badge-rose mb-2"><i class="fas fa-exclamation-triangle me-1"></i> High Priority Risk</div>
+        <h4 class="fw-bold text-white mb-2">🔴 High Risk Subjects Detected</h4>
+        <p class="text-muted mb-3" style="max-width:680px;">
+            Based on your recent assessment and performance metrics, high-risk subjects require immediate study allocation. Review your Intelligence Radar and adjust your schedule.
+        </p>
         <div class="d-flex flex-wrap gap-2">
-            <a href="{{ url_for('student.predict') }}" class="btn btn-danger px-4">
-                <i class="fas fa-chart-pie me-2"></i> View Risk Insights
+            <a href="{{ url_for('student.predict') }}" class="btn btn-danger px-4 py-2.5 shadow-sm">
+                <i class="fas fa-radar me-2"></i> View Risk Radar
             </a>
-            <a href="{{ url_for('student.schedule') }}" class="btn btn-outline-primary px-4">
-                <i class="fas fa-calendar-alt me-2"></i> Plan Study Sessions
+            <a href="{{ url_for('student.schedule') }}" class="btn btn-outline-light px-4 py-2.5">
+                <i class="fas fa-calendar-alt me-2"></i> Allocate Extra Hours
             </a>
         </div>
     </div>
     {% elif not today_slots %}
-    {# No sessions today #}
-    <div class="ss-next-action">
-        <div class="ss-next-action-label">Your Next Best Action</div>
-        <div class="ss-next-action-title">📅 Set up today's study plan</div>
-        <div class="ss-next-action-body">
-            You don't have any study sessions planned for today. Generate your study plan and build a consistent routine.
-        </div>
-        <a href="{{ url_for('student.schedule') }}" class="btn btn-primary px-4">
-            Generate Study Plan <i class="fas fa-magic ms-2"></i>
+    <div class="ss-action">
+        <div class="ss-badge ss-badge-cyan mb-2"><i class="fas fa-calendar-plus me-1"></i> Daily Routine</div>
+        <h4 class="fw-bold text-white mb-2">📅 Generate Today's Study Plan</h4>
+        <p class="text-muted mb-3" style="max-width:680px;">
+            You don't have any study sessions scheduled for today. Generate your adaptive study plan to maintain your streak.
+        </p>
+        <a href="{{ url_for('student.schedule') }}" class="btn btn-primary px-4 py-2.5 shadow-sm">
+            Generate Schedule <i class="fas fa-magic ms-2"></i>
         </a>
     </div>
     {% else %}
-    {# All good #}
-    <div class="ss-next-action clear">
-        <div class="ss-next-action-label">Your Next Best Action</div>
-        <div class="ss-next-action-title">🎉 You're on track — keep it up!</div>
-        <div class="ss-next-action-body">
-            Your study plan is active and your risk levels look manageable. Small steps every day create big results. One focused session at a time.
-        </div>
-        <a href="{{ url_for('student.schedule') }}" class="btn btn-outline-primary px-4">
+    <div class="ss-action" style="border-color:rgba(52,211,153,0.3);background:linear-gradient(135deg,rgba(52,211,153,0.12),rgba(15,23,42,0.8));">
+        <div class="ss-badge ss-badge-emerald mb-2"><i class="fas fa-check-circle me-1"></i> Routine Active</div>
+        <h4 class="fw-bold text-white mb-2">🎉 You're On Track — Keep Up The Momentum</h4>
+        <p class="text-muted mb-3" style="max-width:680px;">
+            Your study schedule is active and risk levels are under control. Focus on completing today's planned study blocks.
+        </p>
+        <a href="{{ url_for('student.schedule') }}" class="btn btn-outline-light px-4 py-2.5">
             View Today's Schedule <i class="fas fa-arrow-right ms-2"></i>
         </a>
     </div>
     {% endif %}
 </div>
 
-{# ── Smart Study Journey ─────────────────────────────────────────────────── #}
-{% set has_profile  = profile and profile.study_level %}
-{% set has_assessed = profile and profile.has_completed_assessment %}
-{% set has_plan     = total_scheduled and total_scheduled > 0 %}
-{% set is_onboarded = has_profile and has_assessed and has_plan %}
-{% if not is_onboarded %}
-<div class="card card-flat p-4 mb-4 stagger-3">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h5 class="text-gradient fw-bold mb-0"><i class="fas fa-map-marked-alt me-2"></i> Your Smart Study Journey</h5>
-        <span class="badge bg-medium">Getting Started</span>
-    </div>
-    <p class="text-muted small mb-4">Complete these steps to unlock the full power of your personal academic coach.</p>
-    <div class="ss-journey">
-        {# Step 1: Profile #}
-        <div class="ss-journey-step {{ 'done' if has_profile else 'active' }}">
-            <a href="{{ url_for('student.profile') }}" class="ss-journey-dot text-decoration-none" title="Complete Profile">
-                {% if has_profile %}<i class="fas fa-check"></i>{% else %}1{% endif %}
-            </a>
-            <div class="ss-journey-label">Complete Profile</div>
-        </div>
-        {# Step 2: Assessment #}
-        <div class="ss-journey-step {{ 'done' if has_assessed else ('active' if has_profile else 'locked') }}">
-            <a href="{{ url_for('student.assessment_start') }}" class="ss-journey-dot text-decoration-none" title="Take Assessment">
-                {% if has_assessed %}<i class="fas fa-check"></i>{% else %}2{% endif %}
-            </a>
-            <div class="ss-journey-label">Take Assessment</div>
-        </div>
-        {# Step 3: Risk Insights #}
-        <div class="ss-journey-step {{ 'done' if has_assessed else 'locked' }}">
-            <a href="{{ url_for('student.predict') }}" class="ss-journey-dot text-decoration-none" title="View Risk Insights">
-                {% if has_assessed %}<i class="fas fa-check"></i>{% else %}3{% endif %}
-            </a>
-            <div class="ss-journey-label">Review Risk</div>
-        </div>
-        {# Step 4: Study Plan #}
-        <div class="ss-journey-step {{ 'done' if has_plan else ('active' if has_assessed else 'locked') }}">
-            <a href="{{ url_for('student.schedule') }}" class="ss-journey-dot text-decoration-none" title="Generate Study Plan">
-                {% if has_plan %}<i class="fas fa-check"></i>{% else %}4{% endif %}
-            </a>
-            <div class="ss-journey-label">Generate Plan</div>
-        </div>
-        {# Step 5: Study #}
-        <div class="ss-journey-step {{ 'active' if has_plan else 'locked' }}">
-            <a href="{{ url_for('student.study_material') }}" class="ss-journey-dot text-decoration-none" title="Start Studying">5</a>
-            <div class="ss-journey-label">Start Studying</div>
-        </div>
-        {# Step 6: Track #}
-        <div class="ss-journey-step locked">
-            <a href="{{ url_for('student.study_log') }}" class="ss-journey-dot text-decoration-none" title="Track Progress">6</a>
-            <div class="ss-journey-label">Track Progress</div>
-        </div>
-    </div>
-</div>
-{% endif %}
-
 {# ── Today's Plan + Quick Actions ──────────────────────────────────────── #}
-<div class="row g-4 mb-4 stagger-3">
+<div class="row g-4 mb-4">
     <div class="col-lg-4">
-        <div class="card card-flat p-4 h-100">
-            <h5 class="text-gradient fw-bold mb-3"><i class="fas fa-bolt me-2"></i> Quick Actions</h5>
+        <div class="ss-panel h-100">
+            <h5 class="fw-bold text-white mb-3"><i class="fas fa-bolt text-warning me-2"></i> Quick Actions</h5>
             <div class="d-flex flex-column gap-2">
-                <a href="{{ url_for('student.schedule') }}" class="quick-action">
-                    <div class="quick-action-icon" style="background:rgba(56,189,248,0.12);color:var(--blue);"><i class="fas fa-magic"></i></div>
-                    <div>
-                        <div class="fw-bold">Generate Study Plan</div>
-                        <div class="small text-muted">Personalized weekly schedule</div>
+                <a href="{{ url_for('student.schedule') }}" class="ss-card text-decoration-none p-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="ss-stat-icon p-0 m-0" style="width:36px;height:36px;font-size:0.95rem;background:rgba(56,189,248,0.15);color:var(--blue);"><i class="fas fa-magic"></i></div>
+                        <div>
+                            <div class="fw-bold text-white small">Generate Study Plan</div>
+                            <div class="text-muted" style="font-size:0.75rem;">Personalized focus schedule</div>
+                        </div>
                     </div>
                 </a>
-                <a href="{{ url_for('student.predict') }}" class="quick-action">
-                    <div class="quick-action-icon" style="background:rgba(248,113,113,0.12);color:var(--red);"><i class="fas fa-chart-pie"></i></div>
-                    <div>
-                        <div class="fw-bold">View Risk Insights</div>
-                        <div class="small text-muted">See which subjects need focus</div>
+                <a href="{{ url_for('student.predict') }}" class="ss-card text-decoration-none p-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="ss-stat-icon p-0 m-0" style="width:36px;height:36px;font-size:0.95rem;background:rgba(248,113,113,0.15);color:var(--red);"><i class="fas fa-radar"></i></div>
+                        <div>
+                            <div class="fw-bold text-white small">Risk Insights Radar</div>
+                            <div class="text-muted" style="font-size:0.75rem;">See high-risk subjects</div>
+                        </div>
                     </div>
                 </a>
-                <a href="{{ url_for('student.study_log') }}" class="quick-action">
-                    <div class="quick-action-icon" style="background:rgba(52,211,153,0.12);color:var(--green);"><i class="fas fa-plus"></i></div>
-                    <div>
-                        <div class="fw-bold">Log Study Session</div>
-                        <div class="small text-muted">Track today's study hours</div>
+                <a href="{{ url_for('student.study_log') }}" class="ss-card text-decoration-none p-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="ss-stat-icon p-0 m-0" style="width:36px;height:36px;font-size:0.95rem;background:rgba(52,211,153,0.15);color:var(--green);"><i class="fas fa-plus"></i></div>
+                        <div>
+                            <div class="fw-bold text-white small">Log Study Session</div>
+                            <div class="text-muted" style="font-size:0.75rem;">Track today's study hours</div>
+                        </div>
                     </div>
                 </a>
-                <a href="{{ url_for('student.assessment_start') }}" class="quick-action">
-                    <div class="quick-action-icon" style="background:rgba(168,85,247,0.12);color:var(--purple);"><i class="fas fa-brain"></i></div>
-                    <div>
-                        <div class="fw-bold">Take Assessment</div>
-                        <div class="small text-muted">Test your knowledge</div>
+                <a href="{{ url_for('student.assistant') }}" class="ss-card text-decoration-none p-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="ss-stat-icon p-0 m-0" style="width:36px;height:36px;font-size:0.95rem;background:rgba(168,85,247,0.15);color:var(--purple);"><i class="fas fa-robot"></i></div>
+                        <div>
+                            <div class="fw-bold text-white small">Ask AI Coach</div>
+                            <div class="text-muted" style="font-size:0.75rem;">Get instant topic help</div>
+                        </div>
                     </div>
                 </a>
             </div>
@@ -248,83 +213,86 @@
     </div>
 
     <div class="col-lg-8">
-        <div class="card card-flat p-4 h-100">
+        <div class="ss-panel h-100">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="text-gradient fw-bold mb-0"><i class="fas fa-sun me-2"></i> Today's Plan</h5>
-                <a href="{{ url_for('student.schedule') }}" class="btn btn-outline-primary btn-sm">Full Week</a>
+                <h5 class="fw-bold text-white mb-0"><i class="fas fa-sun text-warning me-2"></i> Today's Schedule</h5>
+                <a href="{{ url_for('student.schedule') }}" class="btn btn-outline-light btn-sm">Full Week <i class="fas fa-chevron-right ms-1"></i></a>
             </div>
             {% if today_slots %}
-            <div class="row g-2">
+            <div class="row g-3">
                 {% for slot in today_slots %}
-                {% set risk_class = 'risk-medium' %}
-                {% if 'High Risk' in slot.description %}{% set risk_class = 'risk-high' %}
-                {% elif 'Low Risk' in slot.description %}{% set risk_class = 'risk-low' %}
+                {% set risk_badge = 'ss-badge-amber' %}
+                {% if 'High Risk' in slot.description %}{% set risk_badge = 'ss-badge-rose' %}
+                {% elif 'Low Risk' in slot.description %}{% set risk_badge = 'ss-badge-emerald' %}
                 {% endif %}
                 <div class="col-md-6">
-                    <div class="schedule-card {{ risk_class }}">
-                        <div class="schedule-time">{{ slot.start_time.strftime('%I:%M %p') }} – {{ slot.end_time.strftime('%I:%M %p') }}</div>
-                        <div class="schedule-subject">{{ slot.subject_name }}</div>
+                    <div class="ss-card p-3">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted small"><i class="fas fa-clock me-1 text-primary"></i> {{ slot.start_time.strftime('%I:%M %p') }} – {{ slot.end_time.strftime('%I:%M %p') }}</span>
+                            <span class="ss-badge {{ risk_badge }}" style="font-size:0.68rem;">{{ slot.description or 'Planned Session' }}</span>
+                        </div>
+                        <div class="fw-bold text-white fs-6">{{ slot.subject_name }}</div>
                     </div>
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <div class="ss-empty">
+            <div class="ss-empty py-4">
                 <div class="ss-empty-icon"><i class="fas fa-calendar-plus"></i></div>
-                <h5>No sessions planned today</h5>
-                <p>Generate your study plan to see personalized sessions here each day.</p>
-                <a href="{{ url_for('student.schedule') }}" class="btn btn-primary btn-sm">Build Your Plan</a>
+                <h5 class="text-white">No Study Sessions Planned Today</h5>
+                <p class="text-muted small">Generate your weekly study plan to automatically see today's focus blocks.</p>
+                <a href="{{ url_for('student.schedule') }}" class="btn btn-primary btn-sm px-4">Generate Study Plan</a>
             </div>
             {% endif %}
         </div>
     </div>
 </div>
 
-{# ── Charts Row ─────────────────────────────────────────────────────────── #}
-<div class="row g-4 mb-4 stagger-4">
+{# ── Charts Section ───────────────────────────────────────────────────────── #}
+<div class="row g-4 mb-4">
     <div class="col-lg-8">
-        <div class="card card-flat p-4">
-            <h5 class="text-gradient fw-bold mb-4"><i class="fas fa-chart-bar me-2"></i> Study Hour Allocation</h5>
+        <div class="ss-panel">
+            <h5 class="fw-bold text-white mb-3"><i class="fas fa-chart-bar text-primary me-2"></i> Weekly Allocation (Hours)</h5>
             <div style="height:260px;"><canvas id="allocationChart"></canvas></div>
         </div>
     </div>
     <div class="col-lg-4">
-        <div class="card card-flat p-4">
-            <h5 class="text-gradient fw-bold mb-4"><i class="fas fa-chart-pie me-2"></i> Risk Breakdown</h5>
+        <div class="ss-panel">
+            <h5 class="fw-bold text-white mb-3"><i class="fas fa-chart-pie text-purple me-2"></i> Risk Level Distribution</h5>
             <div style="height:260px;"><canvas id="riskChart"></canvas></div>
         </div>
     </div>
 </div>
 
 {# ── Assessment Summary ─────────────────────────────────────────────────── #}
-<div class="card card-flat p-4 mb-4 stagger-4">
+<div class="ss-panel mb-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h5 class="fw-bold text-white mb-0"><i class="fas fa-history text-primary me-2"></i> Assessment Summary</h5>
-        <a href="{{ url_for('student.assessment_start') }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-list-ol me-1"></i> Take Assessment</a>
+        <h5 class="fw-bold text-white mb-0"><i class="fas fa-history text-primary me-2"></i> Assessment Performance Summary</h5>
+        <a href="{{ url_for('student.assessment_start') }}" class="btn btn-sm btn-outline-light"><i class="fas fa-list-ol me-1"></i> New Assessment</a>
     </div>
     <div class="row g-3 text-center mb-3">
         <div class="col-6 col-md-3">
-            <div class="ss-stat-mini">
-                <div class="ss-mini-val text-white">{{ overall_stats.total_attempted }}</div>
-                <div class="ss-mini-label">Attempted</div>
+            <div class="ss-card p-3 text-center">
+                <div class="fw-bold fs-4 text-white">{{ overall_stats.total_attempted }}</div>
+                <div class="text-muted small">Attempted</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="ss-stat-mini">
-                <div class="ss-mini-val" style="color:var(--green);">{{ overall_stats.correct }}</div>
-                <div class="ss-mini-label">Correct</div>
+            <div class="ss-card p-3 text-center">
+                <div class="fw-bold fs-4 text-emerald" style="color:var(--green);">{{ overall_stats.correct }}</div>
+                <div class="text-muted small">Correct</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="ss-stat-mini">
-                <div class="ss-mini-val" style="color:var(--red);">{{ overall_stats.incorrect }}</div>
-                <div class="ss-mini-label">Incorrect</div>
+            <div class="ss-card p-3 text-center">
+                <div class="fw-bold fs-4 text-rose" style="color:var(--red);">{{ overall_stats.incorrect }}</div>
+                <div class="text-muted small">Incorrect</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="ss-stat-mini">
-                <div class="ss-mini-val text-gradient">{{ overall_stats.accuracy }}%</div>
-                <div class="ss-mini-label">Accuracy</div>
+            <div class="ss-card p-3 text-center">
+                <div class="fw-bold fs-4 text-gradient">{{ overall_stats.accuracy }}%</div>
+                <div class="text-muted small">Overall Accuracy</div>
             </div>
         </div>
     </div>
@@ -334,18 +302,18 @@
             <thead>
                 <tr class="text-muted">
                     <th>Subject</th>
-                    <th>Date</th>
-                    <th class="text-end">Score</th>
+                    <th>Date Completed</th>
+                    <th class="text-end">Score &amp; Accuracy</th>
                 </tr>
             </thead>
             <tbody>
                 {% for r in recent_assessments %}
                 <tr>
-                    <td class="fw-bold text-white">{{ r.subject }}</td>
+                    <td class="fw-bold text-white"><i class="fas fa-book me-2 text-primary"></i>{{ r.subject }}</td>
                     <td>{{ r.date.strftime('%d %b %Y') }}</td>
                     <td class="text-end">
-                        <span class="badge bg-purple">{{ r.correct }}/{{ r.total }}</span>
-                        <span class="ms-1 text-muted">({{ "%.1f"|format(r.score_pct) }}%)</span>
+                        <span class="ss-badge ss-badge-purple me-2">{{ r.correct }}/{{ r.total }}</span>
+                        <span class="text-muted">({{ "%.1f"|format(r.score_pct) }}%)</span>
                     </td>
                 </tr>
                 {% endfor %}
@@ -353,16 +321,15 @@
         </table>
     </div>
     {% else %}
-    <div class="ss-empty" style="padding:2rem;">
-        <div class="ss-empty-icon"><i class="fas fa-brain"></i></div>
-        <h5>No assessments yet</h5>
-        <p>Complete your first assessment to unlock personalized insights and risk analysis.</p>
-        <a href="{{ url_for('student.assessment_start') }}" class="btn btn-primary btn-sm">Take Assessment</a>
+    <div class="ss-empty py-3">
+        <div class="ss-empty-icon"><i class="fas fa-vial"></i></div>
+        <h5 class="text-white">No Assessment History Found</h5>
+        <p class="text-muted small">Complete a diagnostic examination to generate performance metrics.</p>
+        <a href="{{ url_for('student.assessment_start') }}" class="btn btn-primary btn-sm px-4">Start Assessment</a>
     </div>
     {% endif %}
 </div>
 
-{# ── Recommended Review + Recent Study ─────────────────────────────────── #}
 <div class="row g-4 mb-4 stagger-5">
     {% if recommended_review_bookmarks %}
     <div class="col-md-6">
@@ -416,6 +383,7 @@
             {% endif %}
         </div>
     </div>
+</div>
 </div>
 {% endblock %}
 

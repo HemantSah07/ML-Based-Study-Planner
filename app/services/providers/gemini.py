@@ -41,8 +41,9 @@ class GeminiProvider(BaseAIProvider):
       2. google-generativeai  (old, deprecated but still functional)
     """
 
-    DEFAULT_MODEL_NEW = "gemini-3.5-flash"
+    DEFAULT_MODEL_NEW = "gemini-3.6-flash"
     DEFAULT_MODEL_OLD = "gemini-1.5-flash"
+
 
     def __init__(self, api_key: str):
         if not api_key:
@@ -125,13 +126,14 @@ class GeminiProvider(BaseAIProvider):
                 err = str(e)
                 # Check for model not found / unrecognized model errors to perform dynamic fallback
                 is_model_error = any(t in err.lower() for t in ["model not found", "not found", "unrecognized", "invalid model", "unsupported model"])
-                if is_model_error and model_name != "gemini-3.5-flash":
+                if is_model_error and model_name != "gemini-3.6-flash":
                     logger.warning(
-                        "Model '%s' failed due to unrecognized model error: %s. Falling back to 'gemini-3.5-flash' and retrying...",
+                        "Model '%s' failed due to unrecognized model error: %s. Falling back to 'gemini-3.6-flash' and retrying...",
                         model_name, err
                     )
-                    model_name = "gemini-3.5-flash"
+                    model_name = "gemini-3.6-flash"
                     continue
+
 
                 retryable = any(
                     t in err for t in [

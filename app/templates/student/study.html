@@ -1,137 +1,62 @@
 {% extends 'base.html' %}
-{% block title %}Study Room: {{ subject.name }}{% endblock %}
+{% block title %}Study Room: {{ subject.name }} · Immersive Learning{% endblock %}
+
+{% block breadcrumbs %}
+<span class="sep"><i class="fas fa-chevron-right"></i></span>
+<span>Workspace</span>
+<span class="sep"><i class="fas fa-chevron-right"></i></span>
+<span class="current">Study Room</span>
+{% endblock %}
 
 {% block content %}
-<style>
-    .study-sidebar {
-        border-right: 1px solid rgba(255, 255, 255, 0.05);
-        max-height: calc(100vh - 120px);
-        overflow-y: auto;
-    }
-    .topic-link {
-        display: block;
-        padding: 10px 15px;
-        border-radius: 8px;
-        color: #94a3b8;
-        text-decoration: none;
-        transition: all 0.2s ease;
-        font-size: 14px;
-        margin-bottom: 4px;
-    }
-    .topic-link:hover {
-        background: rgba(255, 255, 255, 0.05);
-        color: white;
-    }
-    .topic-link.active {
-        background: var(--neon-blue) !important;
-        color: white !important;
-        font-weight: 600;
-    }
-    .study-content-panel {
-        max-height: calc(100vh - 120px);
-        overflow-y: auto;
-        padding-left: 20px;
-    }
-    .flashcard-box {
-        perspective: 1000px;
-        width: 100%;
-        max-width: 500px;
-        height: 250px;
-        cursor: pointer;
-        margin: 0 auto;
-    }
-    .flashcard-inner {
-        position: relative;
-        width: 100%;
-        height: 100%;
-        text-align: center;
-        transition: transform 0.6s;
-        transform-style: preserve-3d;
-    }
-    .flashcard-box.flipped .flashcard-inner {
-        transform: rotateY(180deg);
-    }
-    .flashcard-front, .flashcard-back {
-        position: absolute;
-        width: 100%;
-        height: 100%;
-        -webkit-backface-visibility: hidden;
-        backface-visibility: hidden;
-        border-radius: 12px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        padding: 30px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    }
-    .flashcard-front {
-        background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
-        color: white;
-    }
-    .flashcard-back {
-        background: linear-gradient(135deg, rgba(76, 29, 149, 0.9), rgba(15, 23, 42, 0.9));
-        color: white;
-        transform: rotateY(180deg);
-    }
-    .study-tab-btn {
-        padding: 8px 20px;
-        font-weight: 600;
-        font-size: 14px;
-        border-radius: 6px;
-        border: 1px solid rgba(255,255,255,0.05);
-        background: rgba(255,255,255,0.02);
-        color: #94a3b8;
-        transition: all 0.2s ease;
-    }
-    .study-tab-btn:hover {
-        background: rgba(255,255,255,0.05);
-        color: white;
-    }
-    .study-tab-btn.active {
-        background: var(--neon-purple);
-        color: white;
-        border-color: transparent;
-        box-shadow: 0 4px 10px rgba(168, 85, 247, 0.2);
-    }
-</style>
-
-<div class="row stagger-1">
-    <div class="col-12 mb-3">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+<div class="ss-page px-2 py-3">
+<!-- ── Study Room Hero ── -->
+<section class="ss-page-hero position-relative overflow-hidden mb-4">
+    <div class="ss-page-hero-bg" style="background-image: url('{{ url_for('static', filename='img/ui/student/study-room.webp') }}');"></div>
+    <div class="ss-page-hero-content py-3">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
             <div>
-                <a href="{{ url_for('student.schedule') }}" class="text-decoration-none text-muted small"><i class="fas fa-chevron-left me-1"></i> Back to Planner</a>
-                <h2 class="fw-bold text-gradient mt-1 mb-0">{{ subject.name }} <span class="fs-6 text-muted fw-normal">({{ subject.code }})</span></h2>
+                <a href="{{ url_for('student.study_material') }}" class="text-decoration-none text-muted small mb-1 d-inline-block">
+                    <i class="fas fa-arrow-left me-1"></i> Knowledge Library
+                </a>
+                <h1 class="display-6 fw-bold text-white mb-1" style="letter-spacing: -0.02em;">
+                    {{ subject.name }} <span class="fs-6 text-muted font-monospace">({{ subject.code }})</span>
+                </h1>
+                <p class="text-muted mb-0" style="font-size: 1.05rem;">
+                    Immersive LMS Study Room — Chapter topics, textbook notes, practice quizzes, and active recall flashcards.
+                </p>
             </div>
-            <div class="d-flex align-items-center gap-3">
-                <span class="badge bg-purple">{{ subject.level_of_study }}</span>
+            <div class="d-flex gap-2">
+                <span class="ss-badge ss-badge-purple py-2 px-3">{{ subject.level_of_study }}</span>
                 {% if subject.program %}
-                <span class="badge bg-secondary text-dark">{{ subject.program }}</span>
+                <span class="ss-badge ss-badge-cyan py-2 px-3">{{ subject.program }}</span>
                 {% endif %}
             </div>
         </div>
     </div>
-</div>
+</section>
 
-<div class="row stagger-2">
+<div class="row g-4">
     <!-- Sidebar navigation for Chapters & Topics -->
-    <div class="col-md-4 col-lg-3 study-sidebar py-3">
-        <h6 class="text-white fw-bold mb-3"><i class="fas fa-book-open me-2 text-primary"></i> Curriculum Index</h6>
-        {% for ch in chapters %}
-        <div class="mb-3 border rounded-3 p-2" style="background: rgba(255,255,255,0.01); border-color: rgba(255,255,255,0.05) !important;">
-            <div class="fw-bold text-white small d-flex justify-content-between align-items-center cursor-pointer" style="letter-spacing: 0.5px; cursor: pointer;" onclick="toggleChapter({{ ch.id }})">
-                <span><i class="fas fa-folder me-2 text-warning" id="chapter-icon-{{ ch.id }}"></i> Ch {{ ch.chapter_number }}: {{ ch.name }}</span>
-                <i class="fas fa-chevron-down text-muted small ms-2" id="chapter-chevron-{{ ch.id }}"></i>
+    <div class="col-md-4 col-lg-3 study-sidebar">
+        <div class="ss-panel p-3 mb-3">
+            <h6 class="fw-bold text-white mb-3"><i class="fas fa-book-open me-2 text-primary"></i> Curriculum Index</h6>
+            {% for ch in chapters %}
+            <div class="ss-card mb-2 p-2">
+                <div class="fw-bold text-white small d-flex justify-content-between align-items-center cursor-pointer" style="letter-spacing: 0.5px; cursor: pointer;" onclick="toggleChapter({{ ch.id }})">
+                    <span><i class="fas fa-folder me-2 text-warning" id="chapter-icon-{{ ch.id }}"></i> Ch {{ ch.chapter_number }}: {{ ch.name }}</span>
+                    <i class="fas fa-chevron-down text-muted small ms-2" id="chapter-chevron-{{ ch.id }}"></i>
+                </div>
+                <div class="d-none mt-2 d-flex flex-column gap-1" id="chapter-topics-{{ ch.id }}" data-loaded="false">
+                    <!-- Topics loaded dynamically via AJAX -->
+                </div>
             </div>
-            <div class="d-none mt-2 d-flex flex-column gap-1" id="chapter-topics-{{ ch.id }}" data-loaded="false">
-                <!-- Topics will be loaded dynamically via AJAX -->
-            </div>
+            {% else %}
+            <p class="text-muted small mb-0">No chapters outline added yet for this subject.</p>
+            {% endfor %}
         </div>
-        {% else %}
-        <p class="text-muted small">No chapters outline added yet for this subject.</p>
-        {% endfor %}
     </div>
+
 
     <!-- Main Study content area -->
     <div class="col-md-8 col-lg-9 study-content-panel py-3">
@@ -1555,4 +1480,5 @@ async function handleRagChatSubmit(e) {
     }
 }
 </script>
+</div>
 {% endblock %}
